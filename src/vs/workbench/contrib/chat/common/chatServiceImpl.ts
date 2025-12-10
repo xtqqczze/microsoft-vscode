@@ -36,7 +36,7 @@ import { ChatModel, ChatRequestModel, ChatRequestRemovalReason, IChatModel, ICha
 import { ChatModelStore, IStartSessionProps } from './chatModelStore.js';
 import { chatAgentLeader, ChatRequestAgentPart, ChatRequestAgentSubcommandPart, ChatRequestSlashCommandPart, ChatRequestTextPart, chatSubcommandLeader, getPromptText, IParsedChatRequest } from './chatParserTypes.js';
 import { ChatRequestParser } from './chatRequestParser.js';
-import { ChatMcpServersStarting, IChatCompleteResponse, IChatDetail, IChatFollowup, IChatModelReference, IChatProgress, IChatSendRequestData, IChatSendRequestOptions, IChatSendRequestResponseState, IChatService, IChatSessionContext, IChatSessionStartOptions, IChatTransferredSessionData, IChatUserActionEvent } from './chatService.js';
+import { ChatMcpServersStarting, IChatCompleteResponse, IChatDetail, IChatFollowup, IChatModelReference, IChatProgress, IChatSendRequestData, IChatSendRequestOptions, IChatSendRequestResponseState, IChatService, IChatSessionContext, IChatSessionStartOptions, IChatTransferredSessionData, IChatUserActionEvent, ResponseModelState } from './chatService.js';
 import { ChatRequestTelemetry, ChatServiceTelemetry } from './chatServiceTelemetry.js';
 import { IChatSessionsService } from './chatSessionsService.js';
 import { ChatSessionStore, IChatSessionEntryMetadata, IChatTransfer2 } from './chatSessionStore.js';
@@ -399,8 +399,10 @@ export class ChatService extends Disposable implements IChatService {
 					sessionResource: session.sessionResource,
 					title,
 					lastMessageDate: session.lastMessageDate,
+					timing: session.timing,
 					isActive: true,
 					stats: await awaitStatsForSession(session),
+					lastResponseState: session.lastRequest?.response?.state ?? ResponseModelState.Pending,
 				};
 			}));
 	}
@@ -418,7 +420,11 @@ export class ChatService extends Disposable implements IChatService {
 				return ({
 					...entry,
 					sessionResource,
+					// TODO@roblourens- missing for old data- normalize inside the store
+					timing: entry.timing ?? { startTime: entry.lastMessageDate },
 					isActive: this._sessionModels.has(sessionResource),
+					// TODO@roblourens- missing for old data- normalize inside the store
+					lastResponseState: entry.lastResponseState ?? ResponseModelState.Complete,
 				});
 			});
 	}
@@ -430,7 +436,11 @@ export class ChatService extends Disposable implements IChatService {
 			return {
 				...metadata,
 				sessionResource,
+				// TODO@roblourens- missing for old data- normalize inside the store
+				timing: metadata.timing ?? { startTime: metadata.lastMessageDate },
 				isActive: this._sessionModels.has(sessionResource),
+				// TODO@roblourens- missing for old data- normalize inside the store
+				lastResponseState: metadata.lastResponseState ?? ResponseModelState.Complete,
 			};
 		}
 
