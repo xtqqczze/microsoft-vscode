@@ -639,6 +639,7 @@ export class ClaudeCodeSession extends Disposable {
 	private async _processMessages(): Promise<void> {
 		const otelToolSpans = new Map<string, ISpanHandle>();
 		const otelHookSpans = new Map<string, ISpanHandle>();
+		const subagentTraceContexts = new Map<string, TraceContext>();
 		try {
 			const unprocessedToolCalls = new Map<string, Anthropic.Beta.Messages.BetaToolUseBlock>();
 			for await (const message of this._queryGenerator!) {
@@ -691,6 +692,20 @@ export class ClaudeCodeSession extends Disposable {
 				}
 
 				this.logService.trace(`claude-agent-sdk Message: ${JSON.stringify(message, null, 2)}`);
+
+				// Update the session trace context based on whether this message is from a subagent.
+				// This ensures that chat spans (created by chatMLFetcher via runWithTraceContext)
+				// are parented under the correct Agent tool span during subagent execution.
+				if ('parent_tool_use_id' in message && message.parent_tool_use_id) {
+					const subagentCtx = subagentTraceContexts.get(message.parent_tool_use_id);
+					if (subagentCtx) {
+						this.sessionStateService.setTraceContextForSession(this.sessionId, subagentCtx);
+					}
+				} else if ('parent_tool_use_id' in message) {
+					// Message is from the main agent (parent_tool_use_id is null) — restore root context
+					this.sessionStateService.setTraceContextForSession(this.sessionId, this._currentInvokeAgentTraceContext);
+				}
+
 				const result = this.instantiationService.invokeFunction(dispatchMessage, message, this.sessionId, {
 					stream: this._currentRequest.stream,
 					toolInvocationToken: this._currentRequest.toolInvocationToken,
@@ -701,6 +716,7 @@ export class ClaudeCodeSession extends Disposable {
 					otelToolSpans,
 					otelHookSpans,
 					parentTraceContext: this._currentInvokeAgentTraceContext,
+					subagentTraceContexts,
 				});
 
 				if (result?.requestComplete) {

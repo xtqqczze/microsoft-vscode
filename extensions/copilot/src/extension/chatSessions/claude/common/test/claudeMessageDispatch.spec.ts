@@ -98,6 +98,7 @@ function createState(): MessageHandlerState {
 		unprocessedToolCalls: new Map(),
 		otelToolSpans: new Map(),
 		otelHookSpans: new Map(),
+		subagentTraceContexts: new Map(),
 	};
 }
 
