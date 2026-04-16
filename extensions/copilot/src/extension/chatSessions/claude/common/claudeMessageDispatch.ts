@@ -10,7 +10,7 @@ import * as l10n from '@vscode/l10n';
 import type * as vscode from 'vscode';
 import { vBoolean, vLiteral, vObj, vString, type ValidatorType } from '../../../../platform/configuration/common/validator';
 import { ILogService } from '../../../../platform/log/common/logService';
-import { CopilotChatAttr, GenAiAttr, GenAiOperationName, IOTelService, SpanKind, SpanStatusCode, truncateForOTel, type ISpanHandle } from '../../../../platform/otel/common/index';
+import { CopilotChatAttr, GenAiAttr, GenAiOperationName, IOTelService, SpanKind, SpanStatusCode, truncateForOTel, type ISpanHandle, type TraceContext } from '../../../../platform/otel/common/index';
 import { CapturingToken } from '../../../../platform/requestLogger/common/capturingToken';
 import { IRequestLogger } from '../../../../platform/requestLogger/common/requestLogger';
 import { ServicesAccessor } from '../../../../util/vs/platform/instantiation/common/instantiation';
@@ -37,6 +37,7 @@ export interface MessageHandlerState {
 	readonly unprocessedToolCalls: Map<string, Anthropic.Beta.Messages.BetaToolUseBlock>;
 	readonly otelToolSpans: Map<string, ISpanHandle>;
 	readonly otelHookSpans: Map<string, ISpanHandle>;
+	readonly parentTraceContext?: TraceContext;
 }
 
 export interface MessageHandlerResult {
@@ -164,6 +165,7 @@ export function handleAssistantMessage(
 					[GenAiAttr.TOOL_CALL_ID]: item.id,
 					[CopilotChatAttr.CHAT_SESSION_ID]: sessionId,
 				},
+				parentTraceContext: state.parentTraceContext,
 			});
 			if (item.input !== undefined) {
 				try {
@@ -368,6 +370,7 @@ export function handleHookStarted(
 			'copilot_chat.hook_id': message.hook_id,
 			[CopilotChatAttr.CHAT_SESSION_ID]: sessionId,
 		},
+		parentTraceContext: state.parentTraceContext,
 	});
 	state.otelHookSpans.set(message.hook_id, span);
 }

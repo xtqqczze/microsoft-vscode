@@ -11,7 +11,8 @@ import { IChatDebugFileLoggerService } from '../../../../platform/chat/common/ch
 import { INativeEnvService } from '../../../../platform/env/common/envService';
 import { ILogService } from '../../../../platform/log/common/logService';
 import { IMcpService } from '../../../../platform/mcp/common/mcpService';
-import { CopilotChatAttr, GenAiAttr, IOTelService, type ISpanHandle, SpanKind, SpanStatusCode, truncateForOTel } from '../../../../platform/otel/common/index';
+import { CopilotChatAttr, emitSessionStartEvent, GenAiAttr, GenAiMetrics, GenAiOperationName, GenAiProviderName, IOTelService, type ISpanHandle, SpanKind, SpanStatusCode, type TraceContext, truncateForOTel } from '../../../../platform/otel/common/index';
+import { deriveClaudeOTelEnv } from '../../../../platform/otel/common/agentOTelEnv';
 import { CapturingToken } from '../../../../platform/requestLogger/common/capturingToken';
 import { IWorkspaceService } from '../../../../platform/workspace/common/workspaceService';
 import { DeferredPromise } from '../../../../util/vs/base/common/async';
@@ -169,6 +170,11 @@ export class ClaudeCodeSession extends Disposable {
 	private _currentToolNames: ReadonlySet<string> | undefined;
 	private _gateway: vscode.McpGateway | undefined;
 	private _gatewayIdleTimeout: ReturnType<typeof setTimeout> | undefined;
+	private _currentInvokeAgentSpan: ISpanHandle | undefined;
+	private _currentInvokeAgentTraceContext: TraceContext | undefined;
+	private _currentInvokeAgentStartTime: number | undefined;
+	private _isFirstRequest = true;
+	private _turnCount = 0;
 
 	/**
 	 * Sets the model on the active SDK session, or stores it for the next session start.
@@ -476,7 +482,9 @@ export class ClaudeCodeSession extends Disposable {
 					ANTHROPIC_AUTH_TOKEN: `${this.serverConfig.nonce}.${this.sessionId}`,
 					CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
 					USE_BUILTIN_RIPGREP: '0',
-					PATH: `${this.envService.appRoot}/node_modules/@vscode/ripgrep/bin${pathSep}${process.env.PATH}`
+					PATH: `${this.envService.appRoot}/node_modules/@vscode/ripgrep/bin${pathSep}${process.env.PATH}`,
+					// Forward OTel configuration to the Claude SDK subprocess
+					...deriveClaudeOTelEnv(this._otelService.config),
 				},
 				attribution: {
 					commit: '',
@@ -546,15 +554,46 @@ export class ClaudeCodeSession extends Disposable {
 				new CapturingToken(promptLabel, 'claude', undefined, undefined, this.sessionId)
 			);
 
-			// Emit a user_message span event for the debug panel
-			// Use a non-standard operation name so completedSpanToDebugEvent ignores this span
-			// (avoids a "Model Turn · 0 tokens" entry); only the user_message event is rendered.
+			// End any previous invoke_agent span (e.g., from a prior turn in this session)
+			this._endInvokeAgentSpan();
+
+			// Start the invoke_agent span for this request
+			const modelId = this._currentModelId.toEndpointModelId();
+			this._currentInvokeAgentSpan = this._otelService.startSpan('invoke_agent claude', {
+				kind: SpanKind.INTERNAL,
+				attributes: {
+					[GenAiAttr.OPERATION_NAME]: GenAiOperationName.INVOKE_AGENT,
+					[GenAiAttr.AGENT_NAME]: 'claude',
+					[GenAiAttr.PROVIDER_NAME]: GenAiProviderName.GITHUB,
+					[GenAiAttr.CONVERSATION_ID]: this.sessionId,
+					[CopilotChatAttr.SESSION_ID]: this.sessionId,
+					[CopilotChatAttr.CHAT_SESSION_ID]: this.sessionId,
+					[GenAiAttr.REQUEST_MODEL]: modelId,
+				},
+			});
+			this._currentInvokeAgentTraceContext = this._currentInvokeAgentSpan.getSpanContext();
+			this._currentInvokeAgentStartTime = Date.now();
+			this._turnCount = 0;
+
+			// Store trace context in session state so the language model server
+			// can parent chat spans to this invoke_agent span
+			this.sessionStateService.setTraceContextForSession(this.sessionId, this._currentInvokeAgentTraceContext);
+
+			// Emit session start event and metric for the first request in this session
+			if (this._isFirstRequest) {
+				this._isFirstRequest = false;
+				GenAiMetrics.incrementSessionCount(this._otelService);
+				emitSessionStartEvent(this._otelService, this.sessionId, modelId, 'claude');
+			}
+
+			// Emit user_message span event for the debug panel under the invoke_agent context
 			const userMsgSpan = this._otelService.startSpan('user_message', {
 				kind: SpanKind.INTERNAL,
 				attributes: {
 					[GenAiAttr.OPERATION_NAME]: 'user_message',
 					[CopilotChatAttr.CHAT_SESSION_ID]: this.sessionId,
 				},
+				parentTraceContext: this._currentInvokeAgentTraceContext,
 			});
 			const userContent = truncateForOTel(promptLabel);
 			userMsgSpan.setAttribute(CopilotChatAttr.USER_REQUEST, userContent);
@@ -625,6 +664,32 @@ export class ClaudeCodeSession extends Disposable {
 					continue;
 				}
 
+				// Track turn count for assistant messages (each assistant message = one LLM round-trip)
+				if (message.type === 'assistant') {
+					this._turnCount++;
+				}
+
+				// Capture aggregated token usage from result messages for the invoke_agent span
+				if (message.type === 'result' && this._currentInvokeAgentSpan) {
+					const usage = message.usage;
+					if (usage) {
+						this._currentInvokeAgentSpan.setAttributes({
+							[GenAiAttr.USAGE_INPUT_TOKENS]: usage.input_tokens ?? 0,
+							[GenAiAttr.USAGE_OUTPUT_TOKENS]: usage.output_tokens ?? 0,
+						});
+					}
+					if (message.num_turns !== undefined) {
+						this._currentInvokeAgentSpan.setAttribute(CopilotChatAttr.TURN_COUNT, message.num_turns);
+					}
+					if (message.total_cost_usd !== undefined) {
+						this._currentInvokeAgentSpan.setAttribute('copilot_chat.total_cost_usd', message.total_cost_usd);
+					}
+					const responseModel = message.modelUsage ? Object.keys(message.modelUsage)[0] : undefined;
+					if (responseModel) {
+						this._currentInvokeAgentSpan.setAttribute(GenAiAttr.RESPONSE_MODEL, responseModel);
+					}
+				}
+
 				this.logService.trace(`claude-agent-sdk Message: ${JSON.stringify(message, null, 2)}`);
 				const result = this.instantiationService.invokeFunction(dispatchMessage, message, this.sessionId, {
 					stream: this._currentRequest.stream,
@@ -635,9 +700,12 @@ export class ClaudeCodeSession extends Disposable {
 					unprocessedToolCalls,
 					otelToolSpans,
 					otelHookSpans,
+					parentTraceContext: this._currentInvokeAgentTraceContext,
 				});
 
 				if (result?.requestComplete) {
+					// End the invoke_agent span for this request
+					this._endInvokeAgentSpan();
 					// Clear the capturing token so subsequent requests get their own
 					this.sessionStateService.setCapturingTokenForSession(this.sessionId, undefined);
 					// Resolve and remove the completed request
@@ -665,12 +733,45 @@ export class ClaudeCodeSession extends Disposable {
 				span.end();
 			}
 			otelHookSpans.clear();
+			// End any lingering invoke_agent span
+			this._endInvokeAgentSpan(SpanStatusCode.ERROR, 'session ended');
 		}
+	}
+
+	/**
+	 * Ends the current invoke_agent span and records metrics.
+	 */
+	private _endInvokeAgentSpan(statusCode?: SpanStatusCode, statusMessage?: string): void {
+		if (!this._currentInvokeAgentSpan) {
+			return;
+		}
+		const span = this._currentInvokeAgentSpan;
+		span.setAttribute(CopilotChatAttr.TURN_COUNT, this._turnCount);
+		if (statusCode !== undefined) {
+			span.setStatus(statusCode, statusMessage);
+		} else {
+			span.setStatus(SpanStatusCode.OK);
+		}
+		span.end();
+
+		// Record agent-level metrics
+		if (this._currentInvokeAgentStartTime) {
+			const durationSec = (Date.now() - this._currentInvokeAgentStartTime) / 1000;
+			GenAiMetrics.recordAgentDuration(this._otelService, 'claude', durationSec);
+		}
+		GenAiMetrics.recordAgentTurnCount(this._otelService, 'claude', this._turnCount);
+
+		this._currentInvokeAgentSpan = undefined;
+		this._currentInvokeAgentTraceContext = undefined;
+		this._currentInvokeAgentStartTime = undefined;
+		this.sessionStateService.setTraceContextForSession(this.sessionId, undefined);
 	}
 
 	private _cleanup(error: Error): void {
 		// Clear the capturing token so it doesn't leak across sessions or error boundaries
 		this.sessionStateService.setCapturingTokenForSession(this.sessionId, undefined);
+		// End invoke_agent span with error if still open
+		this._endInvokeAgentSpan(SpanStatusCode.ERROR, error.message);
 		this._resetSessionState();
 
 		const wasYielding = this._yieldInProgress;
