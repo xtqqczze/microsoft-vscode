@@ -175,6 +175,12 @@ export class ClaudeCodeSession extends Disposable {
 	private _currentInvokeAgentStartTime: number | undefined;
 	private _isFirstRequest = true;
 	private _turnCount = 0;
+	// Parent-only token accumulators (excludes subagent turns) for gen_ai.usage.* consistency
+	// with the foreground agent which also reports parent-only tokens on the root span.
+	private _parentInputTokens = 0;
+	private _parentOutputTokens = 0;
+	private _parentCacheReadTokens = 0;
+	private _parentCacheCreationTokens = 0;
 
 	/**
 	 * Sets the model on the active SDK session, or stores it for the next session start.
@@ -574,6 +580,10 @@ export class ClaudeCodeSession extends Disposable {
 			this._currentInvokeAgentTraceContext = this._currentInvokeAgentSpan.getSpanContext();
 			this._currentInvokeAgentStartTime = Date.now();
 			this._turnCount = 0;
+			this._parentInputTokens = 0;
+			this._parentOutputTokens = 0;
+			this._parentCacheReadTokens = 0;
+			this._parentCacheCreationTokens = 0;
 
 			// Store trace context in session state so the language model server
 			// can parent chat spans to this invoke_agent span
@@ -668,17 +678,24 @@ export class ClaudeCodeSession extends Disposable {
 				// Track turn count for assistant messages (each assistant message = one LLM round-trip)
 				if (message.type === 'assistant') {
 					this._turnCount++;
+					// Accumulate parent-only token usage (exclude subagent turns).
+					// This keeps gen_ai.usage.* on the root span comparable with the
+					// foreground agent which also reports parent-only tokens.
+					if (!message.parent_tool_use_id) {
+						const msgUsage = message.message?.usage;
+						if (msgUsage) {
+							this._parentInputTokens += (msgUsage.input_tokens ?? 0)
+								+ (msgUsage.cache_creation_input_tokens ?? 0)
+								+ (msgUsage.cache_read_input_tokens ?? 0);
+							this._parentOutputTokens += (msgUsage.output_tokens ?? 0);
+							this._parentCacheReadTokens += (msgUsage.cache_read_input_tokens ?? 0);
+							this._parentCacheCreationTokens += (msgUsage.cache_creation_input_tokens ?? 0);
+						}
+					}
 				}
 
-				// Capture aggregated token usage from result messages for the invoke_agent span
+				// Set token usage and cost on the invoke_agent span from result messages.
 				if (message.type === 'result' && this._currentInvokeAgentSpan) {
-					const usage = message.usage;
-					if (usage) {
-						this._currentInvokeAgentSpan.setAttributes({
-							[GenAiAttr.USAGE_INPUT_TOKENS]: usage.input_tokens ?? 0,
-							[GenAiAttr.USAGE_OUTPUT_TOKENS]: usage.output_tokens ?? 0,
-						});
-					}
 					if (message.num_turns !== undefined) {
 						this._currentInvokeAgentSpan.setAttribute(CopilotChatAttr.TURN_COUNT, message.num_turns);
 					}
@@ -763,6 +780,19 @@ export class ClaudeCodeSession extends Disposable {
 		}
 		const span = this._currentInvokeAgentSpan;
 		span.setAttribute(CopilotChatAttr.TURN_COUNT, this._turnCount);
+
+		// Set parent-only token usage (comparable with foreground agent).
+		// Note: output_tokens from message.usage at message_start may undercount
+		// since streaming hasn't finished. The per-chat spans (from chatMLFetcher)
+		// have accurate output tokens. This is a known limitation — the root span
+		// output count may be slightly lower than the sum of chat span outputs.
+		span.setAttributes({
+			[GenAiAttr.USAGE_INPUT_TOKENS]: this._parentInputTokens,
+			[GenAiAttr.USAGE_OUTPUT_TOKENS]: this._parentOutputTokens,
+			...(this._parentCacheReadTokens ? { [GenAiAttr.USAGE_CACHE_READ_INPUT_TOKENS]: this._parentCacheReadTokens } : {}),
+			...(this._parentCacheCreationTokens ? { [GenAiAttr.USAGE_CACHE_CREATION_INPUT_TOKENS]: this._parentCacheCreationTokens } : {}),
+		});
+
 		if (statusCode !== undefined) {
 			span.setStatus(statusCode, statusMessage);
 		} else {
