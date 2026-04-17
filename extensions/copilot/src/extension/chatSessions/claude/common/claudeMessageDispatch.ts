@@ -380,7 +380,7 @@ export function handleHookStarted(
 	state: MessageHandlerState,
 ): void {
 	const otelService = accessor.get(IOTelService);
-	const span = otelService.startSpan(`${GenAiOperationName.EXECUTE_HOOK} ${message.hook_event}:${message.hook_name}`, {
+	const span = otelService.startSpan(`${GenAiOperationName.EXECUTE_HOOK} ${message.hook_name}`, {
 		kind: SpanKind.INTERNAL,
 		attributes: {
 			[GenAiAttr.OPERATION_NAME]: GenAiOperationName.EXECUTE_HOOK,
