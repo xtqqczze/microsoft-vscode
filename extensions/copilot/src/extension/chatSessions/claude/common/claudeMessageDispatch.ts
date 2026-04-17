@@ -380,12 +380,12 @@ export function handleHookStarted(
 	state: MessageHandlerState,
 ): void {
 	const otelService = accessor.get(IOTelService);
-	const span = otelService.startSpan(`user_hook ${message.hook_event}:${message.hook_name}`, {
+	const span = otelService.startSpan(`${GenAiOperationName.EXECUTE_HOOK} ${message.hook_event}:${message.hook_name}`, {
 		kind: SpanKind.INTERNAL,
 		attributes: {
 			[GenAiAttr.OPERATION_NAME]: GenAiOperationName.EXECUTE_HOOK,
 			'copilot_chat.hook_type': message.hook_event,
-			'copilot_chat.hook_command': message.hook_name,
+			'copilot_chat.hook_name': message.hook_name,
 			'copilot_chat.hook_id': message.hook_id,
 			[CopilotChatAttr.CHAT_SESSION_ID]: sessionId,
 		},
