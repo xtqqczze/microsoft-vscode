@@ -129,6 +129,8 @@ invoke_agent copilot                           [~15s]
 | `gen_ai.response.model` | Recommended | `gpt-4o-2024-08-06` |
 | `gen_ai.usage.input_tokens` | Recommended | `12500` |
 | `gen_ai.usage.output_tokens` | Recommended | `3200` |
+| `gen_ai.usage.cache_read.input_tokens` | When available | `12000` |
+| `gen_ai.usage.cache_creation.input_tokens` | When available | `12385` |
 | `copilot_chat.turn_count` | Always | `4` |
 | `error.type` | On error | `Error` |
 | `gen_ai.input.messages` | Opt-in (captureContent) | `[{"role":"user",...}]` |
@@ -152,6 +154,8 @@ invoke_agent copilot                           [~15s]
 | `gen_ai.response.finish_reasons` | On response | `["stop"]` |
 | `gen_ai.usage.input_tokens` | On response | `1500` |
 | `gen_ai.usage.output_tokens` | On response | `250` |
+| `gen_ai.usage.cache_read.input_tokens` | When available | `12000` |
+| `gen_ai.usage.cache_creation.input_tokens` | When available | `12385` |
 | `copilot_chat.time_to_first_token` | On response | `450` |
 | `server.address` | When available | `api.github.com` |
 | `copilot_chat.debug_name` | When available | `agentMode` |
