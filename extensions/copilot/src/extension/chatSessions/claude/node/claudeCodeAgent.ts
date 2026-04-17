@@ -748,6 +748,7 @@ export class ClaudeCodeSession extends Disposable {
 					}
 					this._currentRequest = undefined;
 					this._startGatewayIdleTimer();
+					subagentTraceContexts.clear();
 				}
 			}
 			// Generator ended normally - clean up so next invoke starts fresh
