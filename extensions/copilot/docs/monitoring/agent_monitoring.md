@@ -558,19 +558,24 @@ In your trace viewer, filter by `service.name` to see traces from specific agent
 
 | `service.name` | Source |
 |---|---|
-| `copilot-chat` | Foreground agent + CLI wrapper spans + Claude agent spans |
+| `copilot-chat` | Foreground agent, CLI wrapper, and Claude agent spans |
 | `github-copilot` | CLI SDK native spans + CLI terminal |
-| `claude-code` | Claude SDK native traces (supplementary) |
+
+Within the `copilot-chat` service, distinguish agent types by `gen_ai.agent.name`:
+
+| `gen_ai.agent.name` | Agent Type |
+|---|---|
+| `GitHub Copilot Chat` | Foreground agent (agent mode) |
+| `copilotcli` | CLI wrapper span |
+| `claude` | Claude agent |
 
 ---
 
 ## Claude Agent
 
-When OTel is enabled, Claude agent sessions produce two complementary trace trees: extension-level spans (service `copilot-chat`) following GenAI semantic conventions, and optional SDK-native spans (service `claude-code`) with Claude-specific detail.
+When OTel is enabled, Claude agent sessions produce extension-level spans (service `copilot-chat`) following GenAI semantic conventions.
 
-### Extension Traces (Primary)
-
-The extension creates synthetic spans by intercepting Claude SDK messages and proxying LLM calls through a local HTTP server to CAPI:
+The extension creates spans by intercepting Claude SDK messages and proxying LLM calls through a local HTTP server to CAPI:
 
 ```
 copilot-chat invoke_agent claude               [~33s]
@@ -607,30 +612,6 @@ copilot-chat invoke_agent claude               [~33s]
 **`execute_tool`** — one span per tool invocation. When the tool is `Agent` (subagent), child `chat` and `execute_tool` spans are nested underneath, giving full subagent visibility.
 
 **`user_hook`** — one span per Claude hook execution (e.g., `Stop` hooks).
-
-### Claude SDK Native Traces (Supplementary)
-
-When OTel is enabled, the extension also forwards telemetry configuration to the Claude SDK subprocess via environment variables (`CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`, `OTEL_TRACES_EXPORTER`). This produces a separate trace tree with Claude-specific span names:
-
-```
-claude-code claude_code.interaction            [~33s]
-  ├── claude_code.llm_request                  [~5s]
-  ├── claude_code.tool                         [~11s]
-  │   ├── claude_code.tool.blocked_on_user     [~1ms]  (permission wait)
-  │   └── claude_code.tool.execution           [~11s]  (actual execution)
-  ├── claude_code.llm_request                  [~3s]
-  └── ...
-```
-
-Native traces provide data not available in extension traces:
-- `tool.blocked_on_user` sub-spans showing permission prompt wait time
-- `tool.execution` sub-spans isolating actual tool runtime
-- `user_prompt` content and `user.id` on the root span
-- `terminal.type` and `interaction.sequence` metadata
-
-Both trace trees share the same `session.id` for correlation in your tracing backend. They are **independent root traces** (different trace IDs) because the Claude SDK does not accept incoming `TRACEPARENT` for parent linking.
-
-> **Content capture**: Set `github.copilot.chat.otel.captureContent` to `true` to include prompt/response content in extension spans and tool input/output in native Claude traces (`OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT` are forwarded automatically).
 
 ---
 

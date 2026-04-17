@@ -85,10 +85,8 @@ describe('deriveClaudeOTelEnv', () => {
 		const result = deriveClaudeOTelEnv(makeConfig(), emptyEnv);
 		expect(result).toEqual({
 			CLAUDE_CODE_ENABLE_TELEMETRY: '1',
-			CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: '1',
 			OTEL_METRICS_EXPORTER: 'otlp',
 			OTEL_LOGS_EXPORTER: 'otlp',
-			OTEL_TRACES_EXPORTER: 'otlp',
 			OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
 			OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
 		});
@@ -103,14 +101,12 @@ describe('deriveClaudeOTelEnv', () => {
 		const result = deriveClaudeOTelEnv(makeConfig({ captureContent: true }), emptyEnv);
 		expect(result['OTEL_LOG_USER_PROMPTS']).toBe('1');
 		expect(result['OTEL_LOG_TOOL_DETAILS']).toBe('1');
-		expect(result['OTEL_LOG_TOOL_CONTENT']).toBe('1');
 	});
 
 	it('does not include content capture vars when captureContent is false', () => {
 		const result = deriveClaudeOTelEnv(makeConfig({ captureContent: false }), emptyEnv);
 		expect(result['OTEL_LOG_USER_PROMPTS']).toBeUndefined();
 		expect(result['OTEL_LOG_TOOL_DETAILS']).toBeUndefined();
-		expect(result['OTEL_LOG_TOOL_CONTENT']).toBeUndefined();
 	});
 
 	it('does not overwrite existing env vars', () => {

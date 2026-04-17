@@ -60,20 +60,11 @@ export function deriveClaudeOTelEnv(config: OTelConfig, env: Record<string, stri
 	if (!env['CLAUDE_CODE_ENABLE_TELEMETRY']) {
 		result['CLAUDE_CODE_ENABLE_TELEMETRY'] = '1';
 	}
-	// Enable SDK-native distributed tracing (beta).
-	// This produces invoke_agent → chat → execute_tool span trees from the SDK
-	// alongside our extension-level synthetic spans.
-	if (!env['CLAUDE_CODE_ENHANCED_TELEMETRY_BETA']) {
-		result['CLAUDE_CODE_ENHANCED_TELEMETRY_BETA'] = '1';
-	}
 	if (!env['OTEL_METRICS_EXPORTER']) {
 		result['OTEL_METRICS_EXPORTER'] = 'otlp';
 	}
 	if (!env['OTEL_LOGS_EXPORTER']) {
 		result['OTEL_LOGS_EXPORTER'] = 'otlp';
-	}
-	if (!env['OTEL_TRACES_EXPORTER']) {
-		result['OTEL_TRACES_EXPORTER'] = 'otlp';
 	}
 	if (!env['OTEL_EXPORTER_OTLP_ENDPOINT'] && config.otlpEndpoint) {
 		result['OTEL_EXPORTER_OTLP_ENDPOINT'] = config.otlpEndpoint;
@@ -87,9 +78,6 @@ export function deriveClaudeOTelEnv(config: OTelConfig, env: Record<string, stri
 		}
 		if (!env['OTEL_LOG_TOOL_DETAILS']) {
 			result['OTEL_LOG_TOOL_DETAILS'] = '1';
-		}
-		if (!env['OTEL_LOG_TOOL_CONTENT']) {
-			result['OTEL_LOG_TOOL_CONTENT'] = '1';
 		}
 	}
 	// Claude SDK has no file exporter — skip fileExporterPath.
