@@ -130,6 +130,8 @@ export class ExtHostLanguageModelTools implements ExtHostLanguageModelToolsShape
 				subAgentInvocationId: isProposedApiEnabled(extension, 'chatParticipantPrivate') ? options.subAgentInvocationId : undefined,
 				chatStreamToolCallId: isProposedApiEnabled(extension, 'chatParticipantAdditions') ? options.chatStreamToolCallId : undefined,
 				preToolUseResult: isProposedApiEnabled(extension, 'chatParticipantPrivate') ? options.preToolUseResult : undefined,
+				traceparent: isProposedApiEnabled(extension, 'chatParticipantPrivate') ? options.traceparent : undefined,
+				tracestate: isProposedApiEnabled(extension, 'chatParticipantPrivate') ? options.tracestate : undefined,
 			}, token);
 
 			const dto: Dto<IToolResult> = result instanceof SerializableObjectWithBuffers ? result.value : result;

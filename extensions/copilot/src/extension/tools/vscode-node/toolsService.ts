@@ -175,6 +175,17 @@ export class ToolsService extends BaseToolsService {
 
 		const startTime = Date.now();
 
+		// Propagate W3C trace context to MCP tools so server-side spans can be correlated
+		// with this `execute_tool` span (MCP SEP-414, see #302301). Only set if not already
+		// supplied by the caller and OTel produced a real span context.
+		const optionsWithTrace = options as vscode.LanguageModelToolInvocationOptions<Object> & { traceparent?: string };
+		if (!optionsWithTrace.traceparent) {
+			const ctx = span.getSpanContext();
+			if (ctx) {
+				optionsWithTrace.traceparent = `00-${ctx.traceId}-${ctx.spanId}-01`;
+			}
+		}
+
 		return vscode.lm.invokeTool(getContributedToolName(name), options, token).then(
 			result => {
 				span.setStatus(SpanStatusCode.OK);
