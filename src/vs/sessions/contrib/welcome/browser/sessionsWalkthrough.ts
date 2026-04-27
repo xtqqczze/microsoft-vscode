@@ -245,7 +245,7 @@ export class SessionsWalkthroughOverlay extends Disposable {
 		this.currentFocusableElements = [...providerButtons, ...this.disclaimerLinks];
 
 		if (isWeb) {
-			// Web: GitHub button uses IAuthenticationService directly
+			// Web: GitHub button uses IAuthenticationService with product scopes
 			stepDisposables.add(addDisposableListener(githubBtn, EventType.CLICK, () => this._runSignInWeb(
 				providerButtons,
 				errorContainer,
@@ -350,10 +350,10 @@ export class SessionsWalkthroughOverlay extends Disposable {
 	}
 
 	/**
-	 * Web sign-in: uses IAuthenticationService to create a GitHub session.
-	 * On production vscode.dev this triggers an OAuth popup. On localhost
-	 * the embedder's env-contributed auth provider handles the flow
-	 * (e.g. device code).
+	 * Web sign-in: uses IAuthenticationService to create a GitHub session
+	 * with the scopes defined in product.json. On production vscode.dev
+	 * this triggers an OAuth popup. On localhost the embedder's
+	 * env-contributed auth provider handles the flow (e.g. device code).
 	 */
 	private async _runSignInWeb(providerButtons: HTMLButtonElement[], error: HTMLElement, titleEl: HTMLElement, subtitleEl: HTMLElement, signInActions: HTMLElement): Promise<void> {
 		await this._fadeToProgress(providerButtons, error, titleEl, subtitleEl, signInActions);
@@ -362,7 +362,9 @@ export class SessionsWalkthroughOverlay extends Disposable {
 		}
 
 		try {
-			await this.authenticationService.createSession('github', ['repo', 'user:email', 'read:user'], { activateImmediate: true });
+			const scopes = this.productService.defaultChatAgent?.providerScopes?.[0]
+				?? ['read:user', 'user:email', 'repo', 'workflow'];
+			await this.authenticationService.createSession('github', scopes, { activateImmediate: true });
 			this.complete();
 		} catch (err) {
 			this.logService.error('[sessions walkthrough] Web sign-in failed:', err);
