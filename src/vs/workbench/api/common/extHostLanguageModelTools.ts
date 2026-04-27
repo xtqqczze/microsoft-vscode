@@ -193,6 +193,8 @@ export class ExtHostLanguageModelTools implements ExtHostLanguageModelToolsShape
 			options.chatInteractionId = dto.chatInteractionId;
 			options.chatSessionResource = URI.revive(dto.context?.sessionResource);
 			options.subAgentInvocationId = dto.subAgentInvocationId;
+			options.traceparent = dto.traceparent;
+			options.tracestate = dto.tracestate;
 		}
 
 		if (isProposedApiEnabled(item.extension, 'chatParticipantAdditions') && dto.modelId) {

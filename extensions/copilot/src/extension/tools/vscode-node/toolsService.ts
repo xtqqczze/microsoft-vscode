@@ -175,14 +175,22 @@ export class ToolsService extends BaseToolsService {
 
 		const startTime = Date.now();
 
-		// Propagate W3C trace context to MCP tools so server-side spans can be correlated
-		// with this `execute_tool` span (MCP SEP-414, see #302301). Only set if not already
-		// supplied by the caller and OTel produced a real span context.
-		const optionsWithTrace = options as vscode.LanguageModelToolInvocationOptions<Object> & { traceparent?: string };
-		if (!optionsWithTrace.traceparent) {
-			const ctx = span.getSpanContext();
-			if (ctx) {
-				optionsWithTrace.traceparent = `00-${ctx.traceId}-${ctx.spanId}-01`;
+		// Propagate W3C trace context to tool invocations so downstream spans can be
+		// correlated with this `execute_tool` span. MCP tools forward this onto
+		// `_meta.traceparent`/`_meta.tracestate` of the JSON-RPC `tools/call` payload
+		// (MCP SEP-414, see #302301). Only set if not already supplied by the caller.
+		const optionsWithTrace = options as vscode.LanguageModelToolInvocationOptions<Object> & { traceparent?: string; tracestate?: string };
+		const ctx = span.getSpanContext();
+		if (ctx) {
+			if (!optionsWithTrace.traceparent) {
+				// Preserve the upstream W3C trace flags when available. Fall back to `01`
+				// (sampled) so downstream MCP servers continue to participate in the trace
+				// when the abstraction does not surface flags (e.g. tests, in-memory impl).
+				const flags = (ctx.traceFlags ?? 0x01).toString(16).padStart(2, '0');
+				optionsWithTrace.traceparent = `00-${ctx.traceId}-${ctx.spanId}-${flags}`;
+			}
+			if (!optionsWithTrace.tracestate && ctx.traceState) {
+				optionsWithTrace.tracestate = ctx.traceState;
 			}
 		}
 
