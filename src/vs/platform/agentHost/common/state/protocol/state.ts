@@ -1464,9 +1464,6 @@ export const enum CustomizationStatus {
 /**
  * A customization active in a session.
  *
- * Entries without a `clientId` are server-provided; entries with a `clientId`
- * originate from that client.
- *
  * @category Customization Types
  */
 export interface SessionCustomization {
@@ -1476,7 +1473,7 @@ export interface SessionCustomization {
 	enabled: boolean;
 	/**
 	 * The `clientId` of the client that contributed this customization.
-	 * Absent for server-provided customizations.
+	 * Absent for host-provided customizations.
 	 */
 	clientId?: string;
 	/** Server-reported loading status */
