@@ -3,15 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-use std::convert::Infallible;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::Server;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper_util::rt::TokioIo;
+use tokio::net::TcpListener;
 
 use crate::log;
 use crate::tunnels::agent_host::{handle_request, AgentHostConfig, AgentHostManager};
@@ -88,8 +89,8 @@ pub async fn agent_host(ctx: CommandContext, mut args: AgentHostArgs) -> Result<
 		Some(h) => SocketAddr::new(h.parse().map_err(CodeError::InvalidHostAddress)?, args.port),
 		None => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), args.port),
 	};
-	let builder = Server::try_bind(&addr).map_err(CodeError::CouldNotListenOnInterface)?;
-	let bound_addr = builder.local_addr();
+	let listener = TcpListener::bind(addr).await.map_err(CodeError::CouldNotListenOnInterface)?;
+	let bound_addr = listener.local_addr().map_err(CodeError::CouldNotListenOnInterface)?;
 
 	let mut url = format!("ws://{bound_addr}");
 	if let Some(ct) = &args.connection_token {
@@ -98,25 +99,33 @@ pub async fn agent_host(ctx: CommandContext, mut args: AgentHostArgs) -> Result<
 	ctx.log
 		.result(format!("Agent host proxy listening on {url}"));
 
-	let manager_for_svc = manager.clone();
-	let make_svc = move || {
-		let mgr = manager_for_svc.clone();
-		let service = service_fn(move |req| {
-			let mgr = mgr.clone();
-			async move { handle_request(mgr, req).await }
-		});
-		async move { Ok::<_, Infallible>(service) }
-	};
+	loop {
+		tokio::select! {
+			result = listener.accept() => {
+				let (stream, _) = match result {
+					Ok(r) => r,
+					Err(_) => continue,
+				};
+				let mgr = manager.clone();
+				tokio::spawn(async move {
+					let svc = service_fn(move |req| {
+						let mgr = mgr.clone();
+						async move { handle_request(mgr, req).await }
+					});
+					if let Err(e) = http1::Builder::new()
+						.serve_connection(TokioIo::new(stream), svc)
+						.with_upgrades()
+						.await
+					{
+						let _ = e; // connection closed
+					}
+				});
+			}
+			_ = shutdown.wait() => break,
+		}
+	}
 
-	let server_future = builder
-		.serve(make_service_fn(|_| make_svc()))
-		.with_graceful_shutdown(async {
-			let _ = shutdown.wait().await;
-		});
-
-	let r = server_future.await;
 	manager.kill_running_server().await;
-	r.map_err(CodeError::CouldNotListenOnInterface)?;
 
 	Ok(0)
 }

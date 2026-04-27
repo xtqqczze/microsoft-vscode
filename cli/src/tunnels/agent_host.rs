@@ -8,11 +8,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hyper::{Body, Request, Response};
+use hyper::body::Incoming;
+use ::http::{Request, Response};
+use http_body_util::BodyExt;
+use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 
 use crate::async_pipe::{get_socket_name, get_socket_rw_stream, AsyncPipe};
+use crate::util::http::{HyperBody, full_body, empty_body};
 use crate::constants::VSCODE_CLI_QUALITY;
 use crate::download_cache::DownloadCache;
 use crate::log;
@@ -318,7 +322,7 @@ impl AgentHostManager {
 		}
 
 		let quality = VSCODE_CLI_QUALITY
-			.ok_or_else(|| CodeError::UpdatesNotConfigured("no configured quality"))
+			.ok_or(CodeError::UpdatesNotConfigured("no configured quality"))
 			.and_then(|q| {
 				Quality::try_from(q).map_err(|_| CodeError::UpdatesNotConfigured("unknown quality"))
 			})?;
@@ -389,7 +393,7 @@ impl AgentHostManager {
 		let now = Instant::now();
 
 		let quality = VSCODE_CLI_QUALITY
-			.ok_or_else(|| CodeError::UpdatesNotConfigured("no configured quality"))
+			.ok_or(CodeError::UpdatesNotConfigured("no configured quality"))
 			.and_then(|q| {
 				Quality::try_from(q).map_err(|_| CodeError::UpdatesNotConfigured("unknown quality"))
 			})?;
@@ -472,20 +476,20 @@ impl AgentHostManager {
 /// Proxies an incoming HTTP/WebSocket request to the agent host's Unix socket.
 pub async fn handle_request(
 	manager: Arc<AgentHostManager>,
-	req: Request<Body>,
-) -> Result<Response<Body>, Infallible> {
+	req: Request<Incoming>,
+) -> Result<Response<HyperBody>, Infallible> {
 	let socket_path = match manager.ensure_server().await {
 		Ok(p) => p,
 		Err(e) => {
 			error!(manager.log, "Error starting agent host: {:?}", e);
 			return Ok(Response::builder()
 				.status(503)
-				.body(Body::from(format!("Error starting agent host: {e:?}")))
+				.body(full_body(format!("Error starting agent host: {e:?}")))
 				.unwrap());
 		}
 	};
 
-	let is_upgrade = req.headers().contains_key(hyper::header::UPGRADE);
+	let is_upgrade = req.headers().contains_key(::http::header::UPGRADE);
 
 	let rw = match get_socket_rw_stream(&socket_path).await {
 		Ok(rw) => rw,
@@ -496,7 +500,7 @@ pub async fn handle_request(
 			);
 			return Ok(Response::builder()
 				.status(503)
-				.body(Body::from(format!("Error connecting to agent host: {e:?}")))
+				.body(full_body(format!("Error connecting to agent host: {e:?}")))
 				.unwrap());
 		}
 	};
@@ -509,25 +513,25 @@ pub async fn handle_request(
 }
 
 /// Proxies a standard HTTP request through the socket.
-async fn forward_http_to_server(rw: AsyncPipe, req: Request<Body>) -> Response<Body> {
+async fn forward_http_to_server(rw: AsyncPipe, req: Request<Incoming>) -> Response<HyperBody> {
 	let (mut request_sender, connection) =
-		match hyper::client::conn::Builder::new().handshake(rw).await {
+		match hyper::client::conn::http1::handshake(TokioIo::new(rw)).await {
 			Ok(r) => r,
 			Err(e) => return connection_err(e),
 		};
 
 	tokio::spawn(connection);
 
-	request_sender
-		.send_request(req)
-		.await
-		.unwrap_or_else(connection_err)
+	match request_sender.send_request(req).await {
+		Ok(res) => res.map(|b| b.boxed()),
+		Err(e) => connection_err(e),
+	}
 }
 
 /// Proxies a WebSocket upgrade request through the socket.
-async fn forward_ws_to_server(rw: AsyncPipe, mut req: Request<Body>) -> Response<Body> {
+async fn forward_ws_to_server(rw: AsyncPipe, mut req: Request<Incoming>) -> Response<HyperBody> {
 	let (mut request_sender, connection) =
-		match hyper::client::conn::Builder::new().handshake(rw).await {
+		match hyper::client::conn::http1::handshake(TokioIo::new(rw)).await {
 			Ok(r) => r,
 			Err(e) => return connection_err(e),
 		};
@@ -539,23 +543,28 @@ async fn forward_ws_to_server(rw: AsyncPipe, mut req: Request<Body>) -> Response
 		proxied_req = proxied_req.header(k, v);
 	}
 
-	let mut res = request_sender
-		.send_request(proxied_req.body(Body::empty()).unwrap())
+	let mut res = match request_sender
+		.send_request(proxied_req.body(http_body_util::Empty::<bytes::Bytes>::new()).unwrap())
 		.await
-		.unwrap_or_else(connection_err);
+	{
+		Ok(r) => r,
+		Err(e) => return connection_err(e),
+	};
 
-	let mut proxied_res = Response::new(Body::empty());
+	let mut proxied_res = Response::new(empty_body());
 	*proxied_res.status_mut() = res.status();
 	for (k, v) in res.headers() {
 		proxied_res.headers_mut().insert(k, v.clone());
 	}
 
-	if res.status() == hyper::StatusCode::SWITCHING_PROTOCOLS {
+	if res.status() == ::http::StatusCode::SWITCHING_PROTOCOLS {
 		tokio::spawn(async move {
 			let (s_req, s_res) =
 				tokio::join!(hyper::upgrade::on(&mut req), hyper::upgrade::on(&mut res));
 
-			if let (Ok(mut s_req), Ok(mut s_res)) = (s_req, s_res) {
+			if let (Ok(s_req), Ok(s_res)) = (s_req, s_res) {
+				let mut s_req = TokioIo::new(s_req);
+				let mut s_res = TokioIo::new(s_res);
 				let _ = tokio::io::copy_bidirectional(&mut s_req, &mut s_res).await;
 			}
 		});
@@ -564,10 +573,10 @@ async fn forward_ws_to_server(rw: AsyncPipe, mut req: Request<Body>) -> Response
 	proxied_res
 }
 
-fn connection_err(err: hyper::Error) -> Response<Body> {
+fn connection_err(err: hyper::Error) -> Response<HyperBody> {
 	Response::builder()
 		.status(503)
-		.body(Body::from(format!(
+		.body(full_body(format!(
 			"Error connecting to agent host: {err:?}"
 		)))
 		.unwrap()

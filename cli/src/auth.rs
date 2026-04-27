@@ -10,18 +10,20 @@ use crate::{
 	trace,
 	util::{
 		errors::{
-			wrap, AnyError, CodeError, OAuthError, RefreshTokenNotAvailableError, StatusError,
+			wrap, AnyError, OAuthError, RefreshTokenNotAvailableError, StatusError,
 			WrappedError,
 		},
 		input::prompt_options,
 	},
 	warning,
 };
-use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use gethostname::gethostname;
+use jiff::{SignedDuration, Timestamp};
+#[cfg(target_os = "linux")]
+use crate::util::errors::CodeError;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{cell::Cell, fmt::Display, path::PathBuf, sync::Arc, thread};
+use std::{cell::Cell, fmt::Display, future::Future, path::PathBuf, pin::Pin, sync::Arc};
+#[cfg(target_os = "linux")]
+use std::thread;
 use tokio::time::sleep;
 use tunnels::{
 	contracts::PROD_FIRST_PARTY_APP_ID,
@@ -110,7 +112,7 @@ pub struct StoredCredential {
 	#[serde(rename = "r")]
 	refresh_token: Option<String>,
 	#[serde(rename = "e")]
-	expires_at: Option<DateTime<Utc>>,
+	expires_at: Option<Timestamp>,
 }
 
 const GH_USER_ENDPOINT: &str = "https://api.github.com/user";
@@ -132,7 +134,7 @@ impl StoredCredential {
 		match self.provider {
 			AuthProvider::Microsoft => self
 				.expires_at
-				.map(|e| Utc::now() + chrono::Duration::minutes(5) > e)
+				.map(|e| Timestamp::now() + SignedDuration::from_secs(5 * 60) > e)
 				.unwrap_or(false),
 
 			// Make an auth request to Github. Mark the credential as expired
@@ -166,7 +168,7 @@ impl StoredCredential {
 			refresh_token: auth.refresh_token,
 			expires_at: auth
 				.expires_in
-				.map(|e| Utc::now() + chrono::Duration::seconds(e)),
+				.map(|e| Timestamp::now() + SignedDuration::from_secs(e)),
 		}
 	}
 }
@@ -226,10 +228,12 @@ const CONTINUE_MARKER: &str = "<MORE>";
 
 /// Implementation that wraps the KeyringStorage on Linux to avoid
 /// https://github.com/hwchen/keyring-rs/issues/132
+#[cfg(target_os = "linux")]
 struct ThreadKeyringStorage {
 	s: Option<KeyringStorage>,
 }
 
+#[cfg(target_os = "linux")]
 impl ThreadKeyringStorage {
 	fn thread_op<R, Fn>(&mut self, f: Fn) -> Result<R, AnyError>
 	where
@@ -262,6 +266,7 @@ impl ThreadKeyringStorage {
 	}
 }
 
+#[cfg(target_os = "linux")]
 impl Default for ThreadKeyringStorage {
 	fn default() -> Self {
 		Self {
@@ -270,6 +275,7 @@ impl Default for ThreadKeyringStorage {
 	}
 }
 
+#[cfg(target_os = "linux")]
 impl StorageImplementation for ThreadKeyringStorage {
 	fn read(&mut self) -> Result<Option<StoredCredential>, AnyError> {
 		self.thread_op(|s| s.read())
@@ -494,7 +500,7 @@ impl Auth {
 				// soon in order to get the real expiry time.
 				expires_at: refresh_token
 					.as_ref()
-					.map(|_| Utc::now() + chrono::Duration::minutes(5)),
+					.map(|_| Timestamp::now() + SignedDuration::from_secs(5 * 60)),
 				refresh_token,
 			},
 			None => self.do_device_code_flow_with_provider(provider).await?,
@@ -718,7 +724,8 @@ impl Auth {
 			}
 
 			let init_code_json = init_code.json::<DeviceCodeResponse>().await?;
-			let expires_at = Utc::now() + chrono::Duration::seconds(init_code_json.expires_in);
+			let expires_at =
+				Timestamp::now() + SignedDuration::from_secs(init_code_json.expires_in);
 
 			match &init_code_json.message {
 				Some(m) => self.log.result(m),
@@ -735,7 +742,7 @@ impl Auth {
 			);
 
 			let mut interval_s = 5;
-			while Utc::now() < expires_at {
+			while Timestamp::now() < expires_at {
 				sleep(std::time::Duration::from_secs(interval_s)).await;
 
 				match self.do_grant(provider, body.clone()).await {
@@ -772,7 +779,19 @@ impl Auth {
 				min_refresh
 			} else {
 				match credential.expires_at {
-					Some(d) => ((d - Utc::now()) * 2 / 3).to_std().unwrap_or(min_refresh),
+					Some(d) => {
+						let dur = d.duration_since(Timestamp::now());
+						let nanos = dur.as_nanos() * 2 / 3;
+						let scaled = SignedDuration::new(
+							(nanos / 1_000_000_000) as i64,
+							(nanos % 1_000_000_000) as i32,
+						);
+						if scaled.is_negative() {
+							min_refresh
+						} else {
+							scaled.unsigned_abs()
+						}
+					}
 					None => default_refresh,
 				}
 			};
@@ -807,18 +826,25 @@ impl Auth {
 	}
 }
 
-#[async_trait]
 impl AuthorizationProvider for Auth {
-	async fn get_authorization(&self) -> Result<Authorization, HttpError> {
-		self.get_tunnel_authentication()
-			.await
-			.map_err(|e| HttpError::AuthorizationError(e.to_string()))
+	fn get_authorization(
+		&self,
+	) -> Pin<Box<dyn Future<Output = Result<Authorization, HttpError>> + Send + '_>> {
+		Box::pin(async move {
+			self.get_tunnel_authentication()
+				.await
+				.map_err(|e| HttpError::AuthorizationError(e.to_string()))
+		})
 	}
 }
 
-lazy_static::lazy_static! {
-	static ref HOSTNAME: Vec<u8> = gethostname().to_string_lossy().bytes().collect();
-}
+#[cfg(feature = "vscode-encrypt")]
+static HOSTNAME: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+	gethostname::gethostname()
+		.to_string_lossy()
+		.bytes()
+		.collect()
+});
 
 #[cfg(feature = "vscode-encrypt")]
 fn encrypt(value: &str) -> String {

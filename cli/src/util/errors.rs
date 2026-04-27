@@ -493,7 +493,7 @@ pub enum CodeError {
 	#[error("could not parse `host`: {0}")]
 	InvalidHostAddress(std::net::AddrParseError),
 	#[error("could not start server on the given host/port: {0}")]
-	CouldNotListenOnInterface(hyper::Error),
+	CouldNotListenOnInterface(std::io::Error),
 	#[error(
 		"Run this command again with --accept-server-license-terms to indicate your agreement."
 	)]
