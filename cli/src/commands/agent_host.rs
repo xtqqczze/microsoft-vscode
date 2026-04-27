@@ -3,28 +3,53 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+use std::convert::Infallible;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
-use hyper::server::conn::http1;
+use ::http::{Request, Response};
+use hyper::body::Incoming;
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder as ServerBuilder;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 
+use crate::auth::Auth;
+use crate::constants::{self, AGENT_HOST_PORT};
 use crate::log;
 use crate::tunnels::agent_host::{handle_request, AgentHostConfig, AgentHostManager};
-use crate::tunnels::legal;
+use crate::tunnels::dev_tunnels::DevTunnels;
 use crate::tunnels::shutdown_signal::ShutdownRequest;
 use crate::update_service::Platform;
-use crate::util::errors::AnyError;
-use crate::util::errors::CodeError;
-use crate::util::http::ReqwestSimpleHttp;
+use crate::util::errors::{AnyError, CodeError};
+use crate::util::http::{full_body, HyperBody, ReqwestSimpleHttp};
 use crate::util::prereqs::PreReqChecker;
 
-use super::{args::AgentHostArgs, CommandContext};
+use super::args::AgentHostArgs;
+use super::output;
+use super::tunnels::fulfill_existing_tunnel_args;
+use super::CommandContext;
+
+/// Bookkeeping data written to the agent host lockfile so that other CLI
+/// commands (e.g. `code agent ps`) can discover a running agent host.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentHostLockData {
+	/// WebSocket address the agent host is listening on (e.g. `ws://127.0.0.1:4567`).
+	pub address: String,
+	/// PID of the CLI process running the agent host.
+	pub pid: u32,
+	/// Connection token, if any.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub connection_token: Option<String>,
+	/// Tunnel name, if `--tunnel` was used.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub tunnel_name: Option<String>,
+}
 
 /// Runs a local agent host server. Downloads the latest VS Code server on
 /// demand, starts it with `--enable-remote-auto-shutdown`, and proxies
@@ -32,7 +57,7 @@ use super::{args::AgentHostArgs, CommandContext};
 /// socket. The server auto-shuts down when idle; the CLI checks for updates
 /// in the background and starts the latest version on the next connection.
 pub async fn agent_host(ctx: CommandContext, mut args: AgentHostArgs) -> Result<i32, AnyError> {
-	legal::require_consent(&ctx.paths, args.accept_server_license_terms)?;
+	let started = Instant::now();
 
 	let platform: Platform = PreReqChecker::new().verify().await?;
 
@@ -57,9 +82,13 @@ pub async fn agent_host(ctx: CommandContext, mut args: AgentHostArgs) -> Result<
 		Arc::new(ReqwestSimpleHttp::with_client(ctx.http.clone())),
 		AgentHostConfig {
 			server_data_dir: args.server_data_dir.clone(),
-			without_connection_token: args.without_connection_token,
-			connection_token: args.connection_token.clone(),
-			connection_token_file: args.connection_token_file.clone(),
+			// The CLI proxy enforces the connection token itself, so the
+			// underlying server always runs without one. This lets tunnel
+			// connections (which bypass the proxy token check) reach the
+			// server without needing a token at all.
+			without_connection_token: true,
+			connection_token: None,
+			connection_token_file: None,
 		},
 	);
 
@@ -89,45 +118,172 @@ pub async fn agent_host(ctx: CommandContext, mut args: AgentHostArgs) -> Result<
 		Some(h) => SocketAddr::new(h.parse().map_err(CodeError::InvalidHostAddress)?, args.port),
 		None => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), args.port),
 	};
-	let listener = TcpListener::bind(addr).await.map_err(CodeError::CouldNotListenOnInterface)?;
-	let bound_addr = listener.local_addr().map_err(CodeError::CouldNotListenOnInterface)?;
+	let listener = TcpListener::bind(addr)
+		.await
+		.map_err(CodeError::CouldNotListenOnInterface)?;
+	let bound_addr = listener
+		.local_addr()
+		.map_err(CodeError::CouldNotListenOnInterface)?;
 
 	let mut url = format!("ws://{bound_addr}");
 	if let Some(ct) = &args.connection_token {
 		url.push_str(&format!("?tkn={ct}"));
 	}
-	ctx.log
-		.result(format!("Agent host proxy listening on {url}"));
 
-	loop {
-		tokio::select! {
-			result = listener.accept() => {
-				let (stream, _) = match result {
-					Ok(r) => r,
-					Err(_) => continue,
-				};
-				let mgr = manager.clone();
+	let product = constants::QUALITYLESS_PRODUCT_NAME;
+	let token_suffix = args
+		.connection_token
+		.as_deref()
+		.map(|t| format!("?tkn={t}"))
+		.unwrap_or_default();
+
+	// If --tunnel is set, create a dev tunnel and serve connections directly.
+	let mut _tunnel_handle: Option<crate::tunnels::dev_tunnels::ActiveTunnel> = None;
+	let mut tunnel_name: Option<String> = None;
+	if args.tunnel {
+		let auth = Auth::new(&ctx.paths, ctx.log.clone());
+		let mut dt = DevTunnels::new_remote_tunnel(&ctx.log, auth, &ctx.paths);
+
+		let mut tunnel = if let Some(existing) =
+			fulfill_existing_tunnel_args(args.existing_tunnel.clone(), &args.name)
+		{
+			dt.start_existing_tunnel(existing).await
+		} else {
+			dt.start_new_launcher_tunnel(args.name.as_deref(), args.random_name, &[])
+				.await
+		}?;
+
+		// Receive tunnel connections directly (no TCP forwarding) and serve
+		// them without connection-token enforcement — the tunnel relay
+		// provides its own authentication.
+		let mut tunnel_port = tunnel.add_port_direct(AGENT_HOST_PORT).await?;
+		let mgr_for_tunnel = manager.clone();
+		let tunnel_log = ctx.log.clone();
+		tokio::spawn(async move {
+			while let Some(socket) = tunnel_port.recv().await {
+				let mgr = mgr_for_tunnel.clone();
+				let log = tunnel_log.clone();
 				tokio::spawn(async move {
+					debug!(log, "Serving tunnel agent host connection");
+					let rw = socket.into_rw();
 					let svc = service_fn(move |req| {
 						let mgr = mgr.clone();
 						async move { handle_request(mgr, req).await }
 					});
-					if let Err(e) = http1::Builder::new()
-						.serve_connection(TokioIo::new(stream), svc)
-						.with_upgrades()
+					let io = TokioIo::new(rw);
+					if let Err(e) = ServerBuilder::new(TokioExecutor::new())
+						.serve_connection_with_upgrades(io, svc)
 						.await
 					{
-						let _ = e; // connection closed
+						debug!(log, "Tunnel agent host connection ended: {:?}", e);
 					}
 				});
 			}
-			_ = shutdown.wait() => break,
-		}
+		});
+
+		tunnel_name = Some(tunnel.name.clone());
+		_tunnel_handle = Some(tunnel);
 	}
+
+	output::print_banner_header(&format!("{product} Agent Host"), started.elapsed());
+	if let Some(name) = &tunnel_name {
+		let tunnel_url = match constants::EDITOR_WEB_URL {
+			Some(base) => format!("{base}/agents?tunnel={name}"),
+			None => format!("(set VSCODE_CLI_TUNNEL_EDITOR_WEB_URL)/agents?tunnel={name}"),
+		};
+		output::print_banner_line("Tunnel", &tunnel_url);
+	}
+	output::print_network_lines(bound_addr.port(), addr.ip(), &token_suffix);
+	output::print_banner_footer();
+
+	// Write lockfile so `code agent ps` can discover this instance.
+	let lockfile_path = ctx.paths.agent_host_lockfile();
+	let lock_data = AgentHostLockData {
+		address: format!("ws://{bound_addr}/"),
+		pid: std::process::id(),
+		connection_token: args.connection_token.clone(),
+		tunnel_name: tunnel_name.clone(),
+	};
+	if let Err(e) = fs::write(&lockfile_path, serde_json::to_string(&lock_data).unwrap()) {
+		warning!(ctx.log, "Failed to write agent host lockfile: {}", e);
+	}
+
+	let manager_for_svc = manager.clone();
+	let expected_token = args.connection_token.clone();
+
+	// Accept loop: for each incoming TCP connection, serve it with hyper.
+	let accept_result: Result<(), AnyError> = loop {
+		tokio::select! {
+			_ = shutdown.wait() => break Ok(()),
+			accepted = listener.accept() => {
+				let (stream, _) = match accepted {
+					Ok(v) => v,
+					Err(e) => {
+						warning!(ctx.log, "Failed to accept connection: {}", e);
+						continue;
+					}
+				};
+				let mgr = manager_for_svc.clone();
+				let token = expected_token.clone();
+				tokio::spawn(async move {
+					let io = TokioIo::new(stream);
+					let svc = service_fn(move |req| {
+						let mgr = mgr.clone();
+						let token = token.clone();
+						async move { handle_request_with_auth(mgr, req, token).await }
+					});
+					if let Err(e) = ServerBuilder::new(TokioExecutor::new())
+						.serve_connection_with_upgrades(io, svc)
+						.await
+					{
+						// Connection-level errors are normal (client disconnect, etc.)
+						let _ = e;
+					}
+				});
+			}
+		}
+	};
 
 	manager.kill_running_server().await;
 
+	// Close the tunnel if one was created.
+	if let Some(mut tunnel) = _tunnel_handle.take() {
+		tunnel.close().await.ok();
+	}
+
+	// Clean up the lockfile.
+	let _ = fs::remove_file(&lockfile_path);
+
+	accept_result?;
+
 	Ok(0)
+}
+
+/// Wraps [`handle_request`] with connection-token enforcement.
+///
+/// When `expected_token` is `Some`, the proxy requires `?tkn=<token>` on
+/// the request URI. This only applies to the local TCP listener; tunnel
+/// connections are served directly via `add_port_direct` and bypass this
+/// function entirely.
+async fn handle_request_with_auth(
+	manager: Arc<AgentHostManager>,
+	req: Request<Incoming>,
+	expected_token: Option<String>,
+) -> Result<Response<HyperBody>, Infallible> {
+	if let Some(ref token) = expected_token {
+		let uri_query = req.uri().query().unwrap_or("");
+		let has_valid_token = url::form_urlencoded::parse(uri_query.as_bytes())
+			.any(|(k, v)| k == "tkn" && v == token.as_str());
+
+		if !has_valid_token {
+			return Ok(Response::builder()
+				.status(403)
+				.body(full_body("Forbidden: missing or invalid connection token"))
+				.unwrap());
+		}
+	}
+
+	handle_request(manager, req).await
 }
 
 fn mint_connection_token(path: &Path, prefer_token: Option<String>) -> std::io::Result<String> {

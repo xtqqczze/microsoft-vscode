@@ -603,8 +603,11 @@ impl<'a> ServerBuilder<'a> {
 		let cmd = cmd.creation_flags(
 			winapi::um::winbase::CREATE_NO_WINDOW
 				| winapi::um::winbase::CREATE_NEW_PROCESS_GROUP
-				| if get_should_use_breakaway_from_job()
-					.await { winapi::um::winbase::CREATE_BREAKAWAY_FROM_JOB } else { Default::default() },
+				| if get_should_use_breakaway_from_job().await {
+					winapi::um::winbase::CREATE_BREAKAWAY_FROM_JOB
+				} else {
+					Default::default()
+				},
 		);
 
 		let child = cmd
@@ -792,6 +795,9 @@ fn parse_port_from(text: &str) -> Option<u16> {
 }
 
 pub fn print_listening(log: &log::Logger, tunnel_name: &str) {
+	use crate::commands::output;
+	use console::style;
+
 	debug!(
 		log,
 		"{} is listening for incoming connections", QUALITYLESS_SERVER_NAME
@@ -824,8 +830,25 @@ pub fn print_listening(log: &log::Logger, tunnel_name: &str) {
 		}
 	}
 
-	let message = &format!("\nOpen this link in your browser {addr}\n");
-	log.result(message);
+	let arrow = style("➜").green().bold();
+	let product = QUALITYLESS_PRODUCT_NAME;
+	let version = crate::constants::VSCODE_CLI_VERSION.unwrap_or("dev");
+
+	println!();
+	println!(
+		"  {} {}",
+		style(format!("{product} Tunnel")).cyan().bold(),
+		style(format!("v{version}")).dim(),
+	);
+	println!();
+	output::print_banner_line("Tunnel", tunnel_name);
+	println!(
+		"  {}  {}  {}",
+		arrow,
+		style("Open:").bold(),
+		style(&addr).cyan(),
+	);
+	output::print_banner_footer();
 }
 
 pub async fn download_cli_into_cache(

@@ -9,8 +9,9 @@ use crate::util::input::prompt_yn;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-static LICENSE_TEXT: LazyLock<Option<Vec<String>>> =
-	LazyLock::new(|| option_env!("VSCODE_CLI_SERVER_LICENSE").and_then(|s| serde_json::from_str(s).unwrap()));
+static LICENSE_TEXT: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
+	option_env!("VSCODE_CLI_SERVER_LICENSE").and_then(|s| serde_json::from_str(s).unwrap())
+});
 
 const LICENSE_PROMPT: Option<&'static str> = option_env!("VSCODE_CLI_REMOTE_LICENSE_PROMPT");
 

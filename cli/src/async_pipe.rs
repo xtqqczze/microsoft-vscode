@@ -193,28 +193,40 @@ pub type AcceptedRW = (
 );
 
 pub trait AsyncRWAccepter {
-	fn accept_rw(&mut self) -> Pin<Box<dyn Future<Output = Result<AcceptedRW, CodeError>> + Send + '_>>;
+	fn accept_rw(
+		&mut self,
+	) -> Pin<Box<dyn Future<Output = Result<AcceptedRW, CodeError>> + Send + '_>>;
 }
 
 impl AsyncRWAccepter for AsyncPipeListener {
-	fn accept_rw(&mut self) -> Pin<Box<dyn Future<Output = Result<AcceptedRW, CodeError>> + Send + '_>> {
+	fn accept_rw(
+		&mut self,
+	) -> Pin<Box<dyn Future<Output = Result<AcceptedRW, CodeError>> + Send + '_>> {
 		Box::pin(async move {
 			let pipe = self.accept().await?;
 			let (read, write) = socket_stream_split(pipe);
-			Ok((Box::new(read) as Box<dyn AsyncRead + Send + Unpin>, Box::new(write) as Box<dyn AsyncWrite + Send + Unpin>))
+			Ok((
+				Box::new(read) as Box<dyn AsyncRead + Send + Unpin>,
+				Box::new(write) as Box<dyn AsyncWrite + Send + Unpin>,
+			))
 		})
 	}
 }
 
 impl AsyncRWAccepter for TcpListener {
-	fn accept_rw(&mut self) -> Pin<Box<dyn Future<Output = Result<AcceptedRW, CodeError>> + Send + '_>> {
+	fn accept_rw(
+		&mut self,
+	) -> Pin<Box<dyn Future<Output = Result<AcceptedRW, CodeError>> + Send + '_>> {
 		Box::pin(async move {
 			let (stream, _) = self
 				.accept()
 				.await
 				.map_err(CodeError::AsyncPipeListenerFailed)?;
 			let (read, write) = tokio::io::split(stream);
-			Ok((Box::new(read) as Box<dyn AsyncRead + Send + Unpin>, Box::new(write) as Box<dyn AsyncWrite + Send + Unpin>))
+			Ok((
+				Box::new(read) as Box<dyn AsyncRead + Send + Unpin>,
+				Box::new(write) as Box<dyn AsyncWrite + Send + Unpin>,
+			))
 		})
 	}
 }

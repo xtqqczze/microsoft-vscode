@@ -1201,7 +1201,9 @@ async fn handle_call_server_http(
 		request_builder = request_builder.header(k, v);
 	}
 	let request = request_builder
-		.body(Full::new(bytes::Bytes::from(params.body.unwrap_or_default())))
+		.body(Full::new(bytes::Bytes::from(
+			params.body.unwrap_or_default(),
+		)))
 		.map_err(|e| wrap(e, "invalid request"))?;
 
 	let response = request_sender
@@ -1210,14 +1212,16 @@ async fn handle_call_server_http(
 		.map_err(|e| wrap(e, "error sending request"))?;
 
 	let (parts, body) = response.into_parts();
-	let body_bytes = body.collect()
+	let body_bytes = body
+		.collect()
 		.await
 		.map_err(|e| wrap(e, "error reading response body"))?
 		.to_bytes();
 
 	Ok(CallServerHttpResult {
 		status: parts.status.as_u16(),
-		headers: parts.headers
+		headers: parts
+			.headers
 			.iter()
 			.map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
 			.collect(),

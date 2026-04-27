@@ -13,9 +13,12 @@ use tokio::fs;
 
 use super::errors::CodeError;
 
-static LDCONFIG_STDC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"libstdc\+\+.* => (.+)").unwrap());
-static LDD_VERSION_RE: LazyLock<BinRegex> = LazyLock::new(|| BinRegex::new(r"^ldd.*\s(\d+)\.(\d+)(?:\.(\d+))?\s").unwrap());
-static GENERIC_VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9]+)\.([0-9]+)$").unwrap());
+static LDCONFIG_STDC_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"libstdc\+\+.* => (.+)").unwrap());
+static LDD_VERSION_RE: LazyLock<BinRegex> =
+	LazyLock::new(|| BinRegex::new(r"^ldd.*\s(\d+)\.(\d+)(?:\.(\d+))?\s").unwrap());
+static GENERIC_VERSION_RE: LazyLock<Regex> =
+	LazyLock::new(|| Regex::new(r"^([0-9]+)\.([0-9]+)$").unwrap());
 #[cfg(target_os = "linux")]
 static LIBSTD_CXX_VERSION_RE: LazyLock<BinRegex> =
 	LazyLock::new(|| BinRegex::new(r"GLIBCXX_([0-9]+)\.([0-9]+)(?:\.([0-9]+))?").unwrap());
@@ -185,10 +188,10 @@ async fn check_is_nixos() -> bool {
 ///    minimum requirements.
 #[cfg(not(windows))]
 pub async fn skip_requirements_check() -> bool {
-	std::env::var("VSCODE_SERVER_CUSTOM_GLIBC_LINKER").is_ok() ||
-	fs::metadata("/tmp/vscode-skip-server-requirements-check")
-		.await
-		.is_ok()
+	std::env::var("VSCODE_SERVER_CUSTOM_GLIBC_LINKER").is_ok()
+		|| fs::metadata("/tmp/vscode-skip-server-requirements-check")
+			.await
+			.is_ok()
 }
 
 #[cfg(windows)]
@@ -400,5 +403,4 @@ mod tests {
 			Some(SimpleSemver::new(2, 40, 0)),
 		);
 	}
-
 }

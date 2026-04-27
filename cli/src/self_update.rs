@@ -29,8 +29,8 @@ static OLD_UPDATE_EXTENSION: &str = "Updating CLI";
 
 impl<'a> SelfUpdate<'a> {
 	pub fn new(update_service: &'a UpdateService) -> Result<Self, AnyError> {
-		let commit = VSCODE_CLI_COMMIT
-			.ok_or(CodeError::UpdatesNotConfigured("unknown build commit"))?;
+		let commit =
+			VSCODE_CLI_COMMIT.ok_or(CodeError::UpdatesNotConfigured("unknown build commit"))?;
 
 		let quality = VSCODE_CLI_QUALITY
 			.ok_or(CodeError::UpdatesNotConfigured("no configured quality"))

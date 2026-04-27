@@ -34,12 +34,16 @@ pub type HyperBody = BoxBody<Bytes, hyper::Error>;
 
 /// Creates a body from some data (string, bytes, etc.)
 pub fn full_body(data: impl Into<Bytes>) -> HyperBody {
-	Full::new(data.into()).map_err(|never| match never {}).boxed()
+	Full::new(data.into())
+		.map_err(|never| match never {})
+		.boxed()
 }
 
 /// Creates an empty body.
 pub fn empty_body() -> HyperBody {
-	Empty::<Bytes>::new().map_err(|never| match never {}).boxed()
+	Empty::<Bytes>::new()
+		.map_err(|never| match never {})
+		.boxed()
 }
 
 pub async fn download_into_file<T>(
@@ -263,54 +267,54 @@ impl SimpleHttp for DelegatedSimpleHttp {
 		url: String,
 	) -> Pin<Box<dyn Future<Output = Result<SimpleResponse, AnyError>> + Send + '_>> {
 		Box::pin(async move {
-		trace!(self.log, "making delegated request to {}", url);
-		let (tx, mut rx) = mpsc::unbounded_channel();
-		let sent = self
-			.start_request
-			.send(DelegatedHttpRequest {
-				method,
-				url: url.clone(),
-				ch: tx,
-			})
-			.await;
-
-		if sent.is_err() {
-			return Ok(SimpleResponse::generic_error(&url)); // sender shut down
-		}
-
-		match rx.recv().await {
-			Some(DelegatedHttpEvent::InitResponse {
-				status_code,
-				headers,
-			}) => {
-				trace!(
-					self.log,
-					"delegated request to {} resulted in status = {}",
-					url,
-					status_code
-				);
-				let mut headers_map = HeaderMap::with_capacity(headers.len());
-				for (k, v) in &headers {
-					if let (Ok(key), Ok(value)) = (
-						HeaderName::from_str(&k.to_lowercase()),
-						HeaderValue::from_str(v),
-					) {
-						headers_map.insert(key, value);
-					}
-				}
-
-				Ok(SimpleResponse {
-					url: url::Url::parse(&url).ok(),
-					status_code: StatusCode::from_u16(status_code)
-						.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-					headers: headers_map,
-					read: Box::pin(DelegatedReader::new(rx)),
+			trace!(self.log, "making delegated request to {}", url);
+			let (tx, mut rx) = mpsc::unbounded_channel();
+			let sent = self
+				.start_request
+				.send(DelegatedHttpRequest {
+					method,
+					url: url.clone(),
+					ch: tx,
 				})
+				.await;
+
+			if sent.is_err() {
+				return Ok(SimpleResponse::generic_error(&url)); // sender shut down
 			}
-			Some(DelegatedHttpEvent::End) => Ok(SimpleResponse::generic_error(&url)),
-			Some(_) => panic!("expected initresponse as first message from delegated http"),
-			None => Ok(SimpleResponse::generic_error(&url)), // sender shut down
-		}
+
+			match rx.recv().await {
+				Some(DelegatedHttpEvent::InitResponse {
+					status_code,
+					headers,
+				}) => {
+					trace!(
+						self.log,
+						"delegated request to {} resulted in status = {}",
+						url,
+						status_code
+					);
+					let mut headers_map = HeaderMap::with_capacity(headers.len());
+					for (k, v) in &headers {
+						if let (Ok(key), Ok(value)) = (
+							HeaderName::from_str(&k.to_lowercase()),
+							HeaderValue::from_str(v),
+						) {
+							headers_map.insert(key, value);
+						}
+					}
+
+					Ok(SimpleResponse {
+						url: url::Url::parse(&url).ok(),
+						status_code: StatusCode::from_u16(status_code)
+							.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+						headers: headers_map,
+						read: Box::pin(DelegatedReader::new(rx)),
+					})
+				}
+				Some(DelegatedHttpEvent::End) => Ok(SimpleResponse::generic_error(&url)),
+				Some(_) => panic!("expected initresponse as first message from delegated http"),
+				None => Ok(SimpleResponse::generic_error(&url)), // sender shut down
+			}
 		})
 	}
 }

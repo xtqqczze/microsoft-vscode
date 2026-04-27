@@ -8,15 +8,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hyper::body::Incoming;
 use ::http::{Request, Response};
 use http_body_util::BodyExt;
+use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 
 use crate::async_pipe::{get_socket_name, get_socket_rw_stream, AsyncPipe};
-use crate::util::http::{HyperBody, full_body, empty_body};
 use crate::constants::VSCODE_CLI_QUALITY;
 use crate::download_cache::DownloadCache;
 use crate::log;
@@ -27,6 +26,7 @@ use crate::update_service::{
 use crate::util::command::new_script_command;
 use crate::util::errors::CodeError;
 use crate::util::http::{self, BoxedHttp};
+use crate::util::http::{empty_body, full_body, HyperBody};
 use crate::util::io::SilentCopyProgress;
 use crate::util::sync::{new_barrier, Barrier, BarrierOpener};
 
@@ -506,7 +506,7 @@ pub async fn handle_request(
 	};
 
 	if is_upgrade {
-		Ok(forward_ws_to_server(rw, req).await)
+		Ok(forward_ws_to_server(manager.log.clone(), rw, req).await)
 	} else {
 		Ok(forward_http_to_server(rw, req).await)
 	}
@@ -529,14 +529,18 @@ async fn forward_http_to_server(rw: AsyncPipe, req: Request<Incoming>) -> Respon
 }
 
 /// Proxies a WebSocket upgrade request through the socket.
-async fn forward_ws_to_server(rw: AsyncPipe, mut req: Request<Incoming>) -> Response<HyperBody> {
+async fn forward_ws_to_server(
+	log: log::Logger,
+	rw: AsyncPipe,
+	mut req: Request<Incoming>,
+) -> Response<HyperBody> {
 	let (mut request_sender, connection) =
 		match hyper::client::conn::http1::handshake(TokioIo::new(rw)).await {
 			Ok(r) => r,
 			Err(e) => return connection_err(e),
 		};
 
-	tokio::spawn(connection);
+	tokio::spawn(connection.with_upgrades());
 
 	let mut proxied_req = Request::builder().uri(req.uri());
 	for (k, v) in req.headers() {
@@ -544,7 +548,11 @@ async fn forward_ws_to_server(rw: AsyncPipe, mut req: Request<Incoming>) -> Resp
 	}
 
 	let mut res = match request_sender
-		.send_request(proxied_req.body(http_body_util::Empty::<bytes::Bytes>::new()).unwrap())
+		.send_request(
+			proxied_req
+				.body(http_body_util::Empty::<bytes::Bytes>::new())
+				.unwrap(),
+		)
 		.await
 	{
 		Ok(r) => r,
@@ -562,10 +570,28 @@ async fn forward_ws_to_server(rw: AsyncPipe, mut req: Request<Incoming>) -> Resp
 			let (s_req, s_res) =
 				tokio::join!(hyper::upgrade::on(&mut req), hyper::upgrade::on(&mut res));
 
-			if let (Ok(s_req), Ok(s_res)) = (s_req, s_res) {
-				let mut s_req = TokioIo::new(s_req);
-				let mut s_res = TokioIo::new(s_res);
-				let _ = tokio::io::copy_bidirectional(&mut s_req, &mut s_res).await;
+			match (s_req, s_res) {
+				(Ok(s_req), Ok(s_res)) => {
+					let mut s_req = TokioIo::new(s_req);
+					let mut s_res = TokioIo::new(s_res);
+					if let Err(e) = tokio::io::copy_bidirectional(&mut s_req, &mut s_res).await {
+						debug!(log, "Agent host WebSocket proxy ended with error: {:?}", e);
+					}
+				}
+				(Err(e), _) => {
+					warning!(
+						log,
+						"Agent host client-side WebSocket upgrade failed: {:?}",
+						e
+					);
+				}
+				(_, Err(e)) => {
+					warning!(
+						log,
+						"Agent host server-side WebSocket upgrade failed: {:?}",
+						e
+					);
+				}
 			}
 		});
 	}

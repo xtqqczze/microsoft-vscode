@@ -12,15 +12,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::util::http::{empty_body, full_body, HyperBody};
 use ::http::{Request, Response};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use tokio::net::TcpListener;
-use crate::util::http::{HyperBody, full_body, empty_body};
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::net::TcpListener;
 use tokio::{pin, time};
 
 use crate::async_pipe::{
@@ -140,10 +140,14 @@ pub async fn serve_web(ctx: CommandContext, mut args: ServeWebArgs) -> Result<i3
 			}
 			None => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), args.port),
 		};
-		let listener = TcpListener::bind(addr).await.map_err(CodeError::CouldNotListenOnInterface)?;
+		let listener = TcpListener::bind(addr)
+			.await
+			.map_err(CodeError::CouldNotListenOnInterface)?;
 
 		// Get the actual bound address (important when port 0 is used for random port assignment)
-		let bound_addr = listener.local_addr().map_err(CodeError::CouldNotListenOnInterface)?;
+		let bound_addr = listener
+			.local_addr()
+			.map_err(CodeError::CouldNotListenOnInterface)?;
 		let mut listening = format!("Web UI available at http://{bound_addr}");
 		if let Some(base) = args.server_base_path {
 			if !base.starts_with('/') {
@@ -188,7 +192,10 @@ struct HandleContext {
 }
 
 /// Handler function for an inbound request
-async fn handle(ctx: HandleContext, req: Request<Incoming>) -> Result<Response<HyperBody>, Infallible> {
+async fn handle(
+	ctx: HandleContext,
+	req: Request<Incoming>,
+) -> Result<Response<HyperBody>, Infallible> {
 	let client_key_half = get_client_key_half(&req);
 	let path = req.uri().path();
 
@@ -349,7 +356,11 @@ async fn forward_ws_req_to_server(
 	}
 
 	let mut res = match request_sender
-		.send_request(proxied_req.body(http_body_util::Empty::<bytes::Bytes>::new()).unwrap())
+		.send_request(
+			proxied_req
+				.body(http_body_util::Empty::<bytes::Bytes>::new())
+				.unwrap(),
+		)
 		.await
 	{
 		Ok(r) => r,

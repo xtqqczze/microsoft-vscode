@@ -10,20 +10,15 @@ use crate::{
 	trace,
 	util::{
 		errors::{
-			wrap, AnyError, OAuthError, RefreshTokenNotAvailableError, StatusError,
-			WrappedError,
+			wrap, AnyError, OAuthError, RefreshTokenNotAvailableError, StatusError, WrappedError,
 		},
 		input::prompt_options,
 	},
 	warning,
 };
 use jiff::{SignedDuration, Timestamp};
-#[cfg(target_os = "linux")]
-use crate::util::errors::CodeError;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{cell::Cell, fmt::Display, future::Future, path::PathBuf, pin::Pin, sync::Arc};
-#[cfg(target_os = "linux")]
-use std::thread;
 use tokio::time::sleep;
 use tunnels::{
 	contracts::PROD_FIRST_PARTY_APP_ID,
@@ -130,6 +125,11 @@ async fn get_github_user(
 }
 
 impl StoredCredential {
+	/// Returns the raw access token string.
+	pub fn access_token(&self) -> &str {
+		&self.access_token
+	}
+
 	pub async fn is_expired(&self, log: &log::Logger, client: &reqwest::Client) -> bool {
 		match self.provider {
 			AuthProvider::Microsoft => self
@@ -185,6 +185,8 @@ pub struct Auth {
 	log: log::Logger,
 	file_storage_path: PathBuf,
 	storage: Arc<std::sync::Mutex<Option<StorageWithLastRead>>>,
+	/// Prefix for keyring entries, derived from the namespace.
+	keyring_prefix: String,
 }
 
 trait StorageImplementation: Send + Sync {
@@ -235,11 +237,20 @@ struct ThreadKeyringStorage {
 
 #[cfg(target_os = "linux")]
 impl ThreadKeyringStorage {
+	fn new(prefix: String) -> Self {
+		Self {
+			s: Some(KeyringStorage::new(prefix)),
+		}
+	}
+
 	fn thread_op<R, Fn>(&mut self, f: Fn) -> Result<R, AnyError>
 	where
 		Fn: 'static + Send + FnOnce(&mut KeyringStorage) -> Result<R, AnyError>,
 		R: 'static + Send,
 	{
+		use crate::util::errors::CodeError;
+		use std::thread;
+
 		let mut s = match self.s.take() {
 			Some(s) => s,
 			None => return Err(CodeError::KeyringTimeout.into()),
@@ -267,15 +278,6 @@ impl ThreadKeyringStorage {
 }
 
 #[cfg(target_os = "linux")]
-impl Default for ThreadKeyringStorage {
-	fn default() -> Self {
-		Self {
-			s: Some(KeyringStorage::default()),
-		}
-	}
-}
-
-#[cfg(target_os = "linux")]
 impl StorageImplementation for ThreadKeyringStorage {
 	fn read(&mut self) -> Result<Option<StoredCredential>, AnyError> {
 		self.thread_op(|s| s.read())
@@ -290,11 +292,18 @@ impl StorageImplementation for ThreadKeyringStorage {
 	}
 }
 
-#[derive(Default)]
 struct KeyringStorage {
-	// keyring storage can be split into multiple entries due to entry length limits
-	// on Windows https://github.com/microsoft/vscode-cli/issues/358
+	prefix: String,
 	entries: Vec<keyring::Entry>,
+}
+
+impl KeyringStorage {
+	fn new(prefix: String) -> Self {
+		Self {
+			prefix,
+			entries: vec![],
+		}
+	}
 }
 
 macro_rules! get_next_entry {
@@ -302,7 +311,8 @@ macro_rules! get_next_entry {
 		match $self.entries.get($i) {
 			Some(e) => e,
 			None => {
-				let e = keyring::Entry::new("vscode-cli", &format!("vscode-cli-{}", $i)).unwrap();
+				let e = keyring::Entry::new(&$self.prefix, &format!("{}-{}", $self.prefix, $i))
+					.unwrap();
 				$self.entries.push(e);
 				$self.entries.last().unwrap()
 			}
@@ -388,11 +398,31 @@ impl StorageImplementation for FileStorage {
 
 impl Auth {
 	pub fn new(paths: &LauncherPaths, log: log::Logger) -> Auth {
+		Self::with_namespace(paths, log, None)
+	}
+
+	/// Creates an `Auth` instance with an isolated credential namespace.
+	/// Credentials are stored separately from the global CLI credentials,
+	/// so logging in here does not affect tunnel or other global auth.
+	pub fn with_namespace(
+		paths: &LauncherPaths,
+		log: log::Logger,
+		namespace: Option<String>,
+	) -> Auth {
+		let filename = match &namespace {
+			None => "token.json".to_string(),
+			Some(ns) => format!("token-{ns}.json"),
+		};
+		let keyring_prefix = match &namespace {
+			None => "vscode-cli".to_string(),
+			Some(ns) => format!("vscode-cli-{ns}"),
+		};
 		Auth {
 			log,
 			client: reqwest::Client::new(),
-			file_storage_path: paths.root().join("token.json"),
+			file_storage_path: paths.root().join(filename),
 			storage: Arc::new(std::sync::Mutex::new(None)),
+			keyring_prefix,
 		}
 	}
 
@@ -406,9 +436,9 @@ impl Auth {
 		}
 
 		#[cfg(not(target_os = "linux"))]
-		let mut keyring_storage = KeyringStorage::default();
+		let mut keyring_storage = KeyringStorage::new(self.keyring_prefix.clone());
 		#[cfg(target_os = "linux")]
-		let mut keyring_storage = ThreadKeyringStorage::default();
+		let mut keyring_storage = ThreadKeyringStorage::new(self.keyring_prefix.clone());
 		let mut file_storage = FileStorage(PersistedState::new_with_mode(
 			self.file_storage_path.clone(),
 			0o600,
@@ -506,6 +536,22 @@ impl Auth {
 			None => self.do_device_code_flow_with_provider(provider).await?,
 		};
 
+		self.store_credentials(credentials.clone());
+		Ok(credentials)
+	}
+
+	/// Runs the device-flow login for a specific provider with custom OAuth
+	/// scopes. Unlike [`login`], this is purpose-built for agent host auth
+	/// where the scopes are dictated by the server's protected resource
+	/// metadata rather than hardcoded defaults.
+	pub async fn login_with_scopes(
+		&self,
+		provider: AuthProvider,
+		scopes: Option<String>,
+	) -> Result<StoredCredential, AnyError> {
+		let credentials = self
+			.do_device_code_flow_with_scopes(provider, scopes)
+			.await?;
 		self.store_credentials(credentials.clone());
 		Ok(credentials)
 	}
@@ -681,7 +727,7 @@ impl Auth {
 	/// Implements the device code flow, returning the credentials upon success.
 	async fn do_device_code_flow(&self) -> Result<StoredCredential, AnyError> {
 		let provider = self.prompt_for_provider().await?;
-		self.do_device_code_flow_with_provider(provider).await
+		self.do_device_code_flow_with_scopes(provider, None).await
 	}
 
 	async fn prompt_for_provider(&self) -> Result<AuthProvider, AnyError> {
@@ -706,6 +752,17 @@ impl Auth {
 		&self,
 		provider: AuthProvider,
 	) -> Result<StoredCredential, AnyError> {
+		self.do_device_code_flow_with_scopes(provider, None).await
+	}
+
+	/// Runs the OAuth device code flow with optional custom scopes.
+	/// If `scopes` is `None`, falls back to the provider's default scopes.
+	pub async fn do_device_code_flow_with_scopes(
+		&self,
+		provider: AuthProvider,
+		scopes: Option<String>,
+	) -> Result<StoredCredential, AnyError> {
+		let scopes = scopes.unwrap_or_else(|| provider.get_default_scopes());
 		loop {
 			let init_code = self
 				.client
@@ -714,7 +771,7 @@ impl Auth {
 				.body(format!(
 					"client_id={}&scope={}",
 					provider.client_id(),
-					provider.get_default_scopes(),
+					scopes,
 				))
 				.send()
 				.await?;
