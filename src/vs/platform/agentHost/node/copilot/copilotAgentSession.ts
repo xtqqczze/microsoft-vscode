@@ -553,7 +553,6 @@ export class CopilotAgentSession extends Disposable {
 			// Build the protocol SessionInputRequest from the SDK's simple format
 			const inputRequest: SessionInputRequest = {
 				id: requestId,
-				message: request.question,
 				questions: [request.choices && request.choices.length > 0
 					? {
 						kind: SessionInputQuestionKind.SingleSelect,

@@ -1736,7 +1736,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			questions.push({
 				id: 'answer',
 				type: 'text',
-				title: inputReq.message,
+				title: inputReq.message ?? '',
 				required: true,
 			});
 		}
@@ -1747,7 +1747,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			/* resolveId */ undefined,
 			/* data */ undefined,
 			/* isUsed */ undefined,
-			/* message */ rawMarkdownToString(inputReq.message, this._config.connectionAuthority),
+			/* message */ inputReq.message ? rawMarkdownToString(inputReq.message, this._config.connectionAuthority) : undefined,
 		);
 
 		progress([carousel]);
