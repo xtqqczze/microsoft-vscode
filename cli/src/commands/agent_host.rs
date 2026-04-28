@@ -39,7 +39,7 @@ use super::CommandContext;
 /// commands (e.g. `code agent ps`) can discover a running agent host.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentHostLockData {
-	/// WebSocket address the agent host is listening on (e.g. `ws://127.0.0.1:4567`).
+	/// WebSocket address the agent host is listening on (e.g. `ws://127.0.0.1:4567/`).
 	pub address: String,
 	/// PID of the CLI process running the agent host.
 	pub pid: u32,
@@ -125,10 +125,7 @@ pub async fn agent_host(ctx: CommandContext, mut args: AgentHostArgs) -> Result<
 		.local_addr()
 		.map_err(CodeError::CouldNotListenOnInterface)?;
 
-	let mut url = format!("ws://{bound_addr}");
-	if let Some(ct) = &args.connection_token {
-		url.push_str(&format!("?tkn={ct}"));
-	}
+	let local_agent_host_url = format!("ws://{bound_addr}/");
 
 	let product = constants::QUALITYLESS_PRODUCT_NAME;
 	let token_suffix = args
@@ -199,12 +196,12 @@ pub async fn agent_host(ctx: CommandContext, mut args: AgentHostArgs) -> Result<
 	// Write lockfile so `code agent ps` can discover this instance.
 	let lockfile_path = ctx.paths.agent_host_lockfile();
 	let lock_data = AgentHostLockData {
-		address: format!("ws://{bound_addr}/"),
+		address: local_agent_host_url,
 		pid: std::process::id(),
 		connection_token: args.connection_token.clone(),
 		tunnel_name: tunnel_name.clone(),
 	};
-	if let Err(e) = fs::write(&lockfile_path, serde_json::to_string(&lock_data).unwrap()) {
+	if let Err(e) = write_agent_host_lockfile(&lockfile_path, &lock_data) {
 		warning!(ctx.log, "Failed to write agent host lockfile: {}", e);
 	}
 
@@ -290,27 +287,43 @@ fn mint_connection_token(path: &Path, prefer_token: Option<String>) -> std::io::
 	#[cfg(not(windows))]
 	use std::os::unix::fs::OpenOptionsExt;
 
-	let mut f = fs::OpenOptions::new();
-	f.create(true);
-	f.write(true);
-	f.read(true);
+	let mut file_options = fs::OpenOptions::new();
+	file_options.create(true);
+	file_options.write(true);
+	file_options.read(true);
 	#[cfg(not(windows))]
-	f.mode(0o600);
-	let mut f = f.open(path)?;
+	file_options.mode(0o600);
+	let mut file = file_options.open(path)?;
 
 	if prefer_token.is_none() {
-		let mut t = String::new();
-		f.read_to_string(&mut t)?;
-		let t = t.trim();
-		if !t.is_empty() {
-			return Ok(t.to_string());
+		let mut token = String::new();
+		file.read_to_string(&mut token)?;
+		let token = token.trim();
+		if !token.is_empty() {
+			return Ok(token.to_string());
 		}
 	}
 
-	f.set_len(0)?;
+	file.set_len(0)?;
 	let prefer_token = prefer_token.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-	f.write_all(prefer_token.as_bytes())?;
+	file.write_all(prefer_token.as_bytes())?;
 	Ok(prefer_token)
+}
+
+fn write_agent_host_lockfile(path: &Path, lock_data: &AgentHostLockData) -> std::io::Result<()> {
+	#[cfg(not(windows))]
+	use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+	let mut file_options = fs::OpenOptions::new();
+	file_options.create(true);
+	file_options.write(true);
+	file_options.truncate(true);
+	#[cfg(not(windows))]
+	file_options.mode(0o600);
+	let mut file = file_options.open(path)?;
+	#[cfg(not(windows))]
+	file.set_permissions(fs::Permissions::from_mode(0o600))?;
+	file.write_all(serde_json::to_string(lock_data).unwrap().as_bytes())
 }
 
 #[cfg(test)]
