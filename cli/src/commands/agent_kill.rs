@@ -34,7 +34,7 @@ pub async fn agent_kill(ctx: CommandContext) -> Result<i32, AnyError> {
 	if !process_exists(lock.pid) {
 		let _ = fs::remove_file(&lockfile_path);
 		ctx.log
-			.result("Agent host is not running (stale lockfile cleaned up).".to_string());
+			.result("Agent host is not running (stale lockfile cleaned up).");
 		return Ok(0);
 	}
 

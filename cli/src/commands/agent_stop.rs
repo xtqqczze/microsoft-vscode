@@ -37,7 +37,7 @@ pub async fn agent_stop(ctx: CommandContext, args: AgentStopArgs) -> Result<i32,
 	let turn_id = match turn_id {
 		Some(id) => id,
 		None => {
-			ctx.log.result("No active turn to cancel.".to_string());
+			ctx.log.result("No active turn to cancel.");
 			client.shutdown().await;
 			return Ok(0);
 		}

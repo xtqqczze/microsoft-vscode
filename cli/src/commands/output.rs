@@ -202,7 +202,7 @@ fn draw_page(term: &Term, lines: &[&str], offset: usize, page: usize) {
 /// Draws the status bar at the bottom showing scroll position.
 fn draw_status_bar(term: &Term, offset: usize, total: usize, page: usize) {
 	let end = (offset + page).min(total);
-	let pct = if total == 0 { 100 } else { (end * 100) / total };
+	let pct = (end * 100).checked_div(total).unwrap_or(100);
 	let bar = format!(
 		" lines {}-{} of {} ({pct}%)  ↑↓ scroll  PgUp/PgDn page  q quit ",
 		offset + 1,

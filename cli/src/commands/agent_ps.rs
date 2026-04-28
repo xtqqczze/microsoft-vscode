@@ -34,14 +34,14 @@ pub async fn agent_ps(ctx: CommandContext, args: AgentPsArgs) -> Result<i32, Any
 	};
 
 	// Most-recently-modified first.
-	items.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+	items.sort_by_key(|b| std::cmp::Reverse(b.modified_at));
 
 	if args.json {
 		let json = serde_json::to_string_pretty(&items)
 			.map_err(|e| crate::util::errors::wrap(e, "Failed to serialize sessions"))?;
 		output::print_paged(&json);
 	} else if items.is_empty() {
-		ctx.log.result("No active sessions.".to_string());
+		ctx.log.result("No active sessions.");
 	} else {
 		let out = format_sessions_list(&items);
 		output::print_paged(&out);

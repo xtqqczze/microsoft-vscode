@@ -413,7 +413,7 @@ impl DevTunnels {
 
 		let client = RelayTunnelClient::new(self.client.clone());
 		let handle = client
-			.connect(&endpoint, connect_token)
+			.connect(endpoint, connect_token)
 			.await
 			.map_err(|e| wrap(e, "failed to connect to tunnel relay"))?;
 

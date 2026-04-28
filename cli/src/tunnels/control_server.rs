@@ -772,7 +772,7 @@ async fn handle_serve(
 	// fill params.extensions into code_server_args.install_extensions
 	let mut csa = c.code_server_args.clone();
 	csa.connection_token = params.connection_token.or(csa.connection_token);
-	csa.install_extensions.extend(params.extensions.into_iter());
+	csa.install_extensions.extend(params.extensions);
 
 	let params_raw = ServerParamsRaw {
 		commit_id: params.commit_id,
