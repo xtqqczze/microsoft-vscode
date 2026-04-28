@@ -23,7 +23,7 @@ module.exports = {
 			return [];
 		}
 		return [
-			`node --experimental-strip-types ../../build/lib/formatter.ts --replace --verify ${filesToLint}`,
+			`node --experimental-strip-types ../../build/lib/formatter.ts --replace ${filesToLint}`,
 			`eslint --max-warnings=0 ${filesToLint}`
 		];
 	},
