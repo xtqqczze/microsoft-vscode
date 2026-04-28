@@ -38,7 +38,7 @@
 	background-repeat: no-repeat;
 	background-position: center center;
 	background-size: contain;
-	/* Desaturated at rest; full color on hover/focus. */
+	/* Keep desaturated for legibility against light/dark titlebar backgrounds; brighten on hover/focus. */
 	filter: grayscale(1) opacity(0.75);
 	transition: filter 150ms ease;
 }
