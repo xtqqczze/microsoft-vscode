@@ -279,7 +279,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 	private async _ensureClient(): Promise<ICopilotClient> {
 		const tokenAtStartup = this._githubToken;
 		if (!tokenAtStartup) {
-			throw new ProtocolError(AHP_AUTH_REQUIRED, 'Authentication is required to use Copilot');
+			throw new ProtocolError(AHP_AUTH_REQUIRED, 'Authentication is required to use Copilot', this.getProtectedResources());
 		}
 		if (this._client) {
 			return this._client;
