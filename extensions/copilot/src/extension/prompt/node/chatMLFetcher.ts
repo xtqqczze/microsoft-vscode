@@ -217,6 +217,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 				const countTokens = () => tokenCountPromise ??= chatEndpoint.acquireTokenizer().countMessagesTokens(messages);
 				const copilotToken = await this._authenticationService.getCopilotToken();
 				usernameToScrub = copilotToken.username;
+
 				const fetchResult = await this._fetchAndStreamChat(
 					chatEndpoint,
 					requestBody,

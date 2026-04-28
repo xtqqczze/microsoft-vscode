@@ -176,6 +176,7 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 	private agentSpan: ISpanHandle | undefined;
 	private chatSessionIdForTools: string | undefined;
 	private toolsAvailableEmitted = false;
+	private lastHeaderRequestId: string | undefined;
 
 	public appendAdditionalHookContext(context: string): void {
 		if (!context) {
@@ -269,6 +270,7 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 			hasStopHookQuery,
 			modeInstructions: this.options.request.modeInstructions2,
 			additionalHookContext: this.additionalHookContext,
+			parentHeaderRequestId: this.lastHeaderRequestId,
 		};
 	}
 
@@ -1382,6 +1384,14 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 			this.stopHookUserInitiated = false;
 		});
 		markChatExt(this.options.conversation.sessionId, ChatExtPerfMark.DidFetch);
+
+		// Store the headerRequestId from the fetch response for subagent telemetry linking.
+		// Use requestId (the client-generated UUID sent as X-Request-Id header), not serverRequestId
+		// (the server's response header value), because requestId is what appears as headerRequestId
+		// across all telemetry events.
+		if (fetchResult.type === ChatFetchResponseType.Success) {
+			this.lastHeaderRequestId = fetchResult.requestId;
+		}
 
 		const promptTokenDetails = await computePromptTokenDetails({
 			messages: effectiveBuildPromptResult.messages,
