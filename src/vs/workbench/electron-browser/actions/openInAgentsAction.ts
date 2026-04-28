@@ -9,7 +9,7 @@ import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDel
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction } from '../../../base/common/actions.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
-import { isLinux } from '../../../base/common/platform.js';
+import { isMacintosh, isWindows } from '../../../base/common/platform.js';
 import { localize, localize2 } from '../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../platform/actions/common/actions.js';
 import { IActionViewItemService } from '../../../platform/actions/browser/actionViewItemService.js';
@@ -116,10 +116,11 @@ class OpenInAgentsAction extends Action2 {
 		);
 
 		// In built builds with a sibling Agents app available, launch it.
-		// Otherwise (dev / OSS / Linux / no sibling), open a new agents window of
-		// the current Electron app. Linux has no sibling app implementation, so
-		// always fall back to the in-process window there.
-		const mode: OpenInAgentsMode = environmentService.isBuilt && hasSibling && !isLinux ? 'siblingApp' : 'newWindow';
+		// Otherwise (dev / OSS / unsupported platform / no sibling), open a new agents window of
+		// the current Electron app. `launchSiblingApp` is only implemented for macOS/Windows
+		// (see `src/vs/platform/native/node/siblingApp.ts`), so gate on actual platform support.
+		const canLaunchSiblingApp = isMacintosh || isWindows;
+		const mode: OpenInAgentsMode = environmentService.isBuilt && hasSibling && canLaunchSiblingApp ? 'siblingApp' : 'newWindow';
 		telemetryService.publicLog2<OpenInAgentsEvent, OpenInAgentsClassification>('vscode.openInAgents', { mode });
 
 		if (mode === 'siblingApp') {
