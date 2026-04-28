@@ -193,6 +193,10 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 	private readonly _onDidReceiveResponse = this._register(new Emitter<IToolCallingResponseEvent>());
 	public readonly onDidReceiveResponse = this._onDidReceiveResponse.event;
 
+	protected get currentToolCallRounds(): readonly IToolCallRound[] {
+		return this.toolCallRounds;
+	}
+
 	private get turn() {
 		return this.options.conversation.getLatestTurn();
 	}
