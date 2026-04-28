@@ -115,17 +115,16 @@ if (import.meta.main) {
 	for (const file of files) {
 		const absolutePath = path.resolve(file);
 		const text = fs.readFileSync(absolutePath, 'utf8');
-		const formatted = format(absolutePath, text);
-		if (text !== formatted) {
-			if (replace) {
+		if (replace) {
+			const formatted = format(absolutePath, text);
+			if (text !== formatted) {
 				fs.writeFileSync(absolutePath, formatted, 'utf8');
 				console.log(`Formatted ${file}`);
-			} else if (verify) {
-				console.error(`File not formatted. Run the 'Format Document' command to fix it: ${file}`);
-				errorCount++;
-			} else {
-				console.error(`File not formatted: ${file}`);
 			}
+		}
+		if (verify && !verifyFormatting(absolutePath, replace ? fs.readFileSync(absolutePath, 'utf8') : text)) {
+			console.error(`File not formatted. Run the 'Format Document' command to fix it: ${file}`);
+			errorCount++;
 		}
 	}
 	if (errorCount > 0) {
