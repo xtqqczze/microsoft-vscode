@@ -961,6 +961,82 @@ suite('AgentSideEffects', () => {
 		});
 	});
 
+	// ---- tool_ready progress dispatch -----------------------------------
+
+	suite('tool_ready dispatches progress actions to advance tool call state', () => {
+
+		test('tool_ready for a non-permission tool dispatches SessionToolCallReady and advances state from Streaming to Running', () => {
+			setupSession();
+			startTurn('turn-1');
+			disposables.add(sideEffects.registerProgressListener(agent));
+
+			// tool_start puts the tool call into Streaming state
+			agent.fireProgress({
+				session: sessionUri,
+				type: 'tool_start',
+				toolCallId: 'tc-ready-1',
+				toolName: 'runTask',
+				displayName: 'Run Task',
+				invocationMessage: 'Running task...',
+				toolClientId: 'test-client',
+			});
+
+			const stateAfterStart = stateManager.getSessionState(sessionUri.toString());
+			const partAfterStart = stateAfterStart?.activeTurn?.responseParts[0];
+			assert.strictEqual(partAfterStart?.kind, ResponsePartKind.ToolCall);
+			assert.strictEqual(partAfterStart?.kind === ResponsePartKind.ToolCall ? partAfterStart.toolCall.status : undefined, ToolCallStatus.Streaming);
+
+			// tool_ready without confirmationTitle should dispatch the ready
+			// action and advance the tool call to Running
+			agent.fireProgress({
+				session: sessionUri,
+				type: 'tool_ready',
+				toolCallId: 'tc-ready-1',
+				invocationMessage: 'Run Task',
+				toolInput: '{"task":"build"}',
+			});
+
+			const stateAfterReady = stateManager.getSessionState(sessionUri.toString());
+			const partAfterReady = stateAfterReady?.activeTurn?.responseParts[0];
+			assert.strictEqual(partAfterReady?.kind, ResponsePartKind.ToolCall);
+			assert.strictEqual(partAfterReady?.kind === ResponsePartKind.ToolCall ? partAfterReady.toolCall.status : undefined, ToolCallStatus.Running,
+				'tool call should advance from Streaming to Running after tool_ready');
+		});
+
+		test('tool_ready for a permission-gated tool dispatches SessionToolCallReady and advances state to PendingConfirmation', () => {
+			setupSession();
+			startTurn('turn-1');
+			disposables.add(sideEffects.registerProgressListener(agent));
+
+			agent.fireProgress({
+				session: sessionUri,
+				type: 'tool_start',
+				toolCallId: 'tc-perm-1',
+				toolName: 'write',
+				displayName: 'Write File',
+				invocationMessage: 'Writing file...',
+				toolClientId: 'test-client',
+			});
+
+			// tool_ready with confirmationTitle should dispatch the ready
+			// action and advance the tool call to PendingConfirmation
+			agent.fireProgress({
+				session: sessionUri,
+				type: 'tool_ready',
+				toolCallId: 'tc-perm-1',
+				invocationMessage: 'Write .env',
+				confirmationTitle: 'Write .env',
+				toolInput: '{"path":".env"}',
+			});
+
+			const state = stateManager.getSessionState(sessionUri.toString());
+			const part = state?.activeTurn?.responseParts[0];
+			assert.strictEqual(part?.kind, ResponsePartKind.ToolCall);
+			assert.strictEqual(part?.kind === ResponsePartKind.ToolCall ? part.toolCall.status : undefined, ToolCallStatus.PendingConfirmation,
+				'tool call should advance to PendingConfirmation for permission-gated tool_ready');
+		});
+	});
+
 	// ---- Session-level auto-approve (config) ----------------------------
 
 	suite('session config auto-approve', () => {

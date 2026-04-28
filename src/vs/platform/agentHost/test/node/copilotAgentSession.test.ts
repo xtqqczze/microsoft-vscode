@@ -83,12 +83,12 @@ class CapturingLogService extends NullLogService {
  * {@link ToolResultObject} — which is what {@link CopilotAgentSession}'s
  * handler implementation actually returns.
  */
-function invokeClientToolHandler(tool: Pick<Tool, 'name' | 'handler'>, toolCallId: string): Promise<ToolResultObject> {
-	return Promise.resolve(tool.handler({}, {
+function invokeClientToolHandler(tool: Pick<Tool, 'name' | 'handler'>, toolCallId: string, args: Record<string, unknown> = {}): Promise<ToolResultObject> {
+	return Promise.resolve(tool.handler(args, {
 		sessionId: 'test-session-1',
 		toolCallId,
 		toolName: tool.name,
-		arguments: {},
+		arguments: args,
 	})) as Promise<ToolResultObject>;
 }
 
@@ -940,7 +940,7 @@ suite('CopilotAgentSession', () => {
 			plugins: [],
 		};
 
-		test('tool_start fires immediately for client tools', async () => {
+		test('client tool handler waits for completion without emitting tool_ready', async () => {
 			const { session, mockSession, progressEvents } = await createAgentSession(disposables, { clientSnapshot: snapshot });
 
 			// SDK emits tool.execution_start — tool_start fires immediately
@@ -956,9 +956,13 @@ suite('CopilotAgentSession', () => {
 				assert.strictEqual(progressEvents[0].toolClientId, 'test-client');
 			}
 
-			// SDK invokes the handler
+			// SDK invokes the handler — it creates a deferred and waits,
+			// but does NOT fire tool_ready (that comes from the permission flow).
 			const tools = session.createClientSdkTools();
-			const handlerPromise = invokeClientToolHandler(tools[0], 'tc-client-1');
+			const handlerPromise = invokeClientToolHandler(tools[0], 'tc-client-1', { file: 'test.ts' });
+
+			// No tool_ready should have been emitted by the handler
+			assert.strictEqual(progressEvents.filter(e => e.type === 'tool_ready').length, 0);
 
 			// Complete the tool call
 			session.handleClientToolCallComplete('tc-client-1', {
@@ -972,7 +976,7 @@ suite('CopilotAgentSession', () => {
 			assert.strictEqual(result.textResultForLlm, 'result text');
 		});
 
-		test('permission request consumes pending auto-ready for client tools', async () => {
+		test('client tool handler does not emit tool_ready (permission flow owns it)', async () => {
 			const { session, mockSession, progressEvents, waitForProgress } = await createAgentSession(disposables, { clientSnapshot: snapshot });
 
 			// SDK emits tool.execution_start — tool_start fires immediately
@@ -986,8 +990,7 @@ suite('CopilotAgentSession', () => {
 			assert.strictEqual(progressEvents.filter(e => e.type === 'tool_start').length, 1);
 			assert.strictEqual(progressEvents.filter(e => e.type === 'tool_ready').length, 0);
 
-			// Permission request fires — tool_ready from permission flow
-			// (with confirmationTitle) replaces the auto-ready
+			// Permission request fires — tool_ready from permission flow.
 			const resultPromise = session.handlePermissionRequest({
 				kind: 'custom-tool',
 				toolCallId: 'tc-client-perm',
@@ -996,17 +999,29 @@ suite('CopilotAgentSession', () => {
 
 			// tool_ready from permission flow should have fired (with confirmationTitle)
 			await waitForProgress(e => e.type === 'tool_ready');
-			const toolReadys = progressEvents.filter(e => e.type === 'tool_ready');
-			assert.strictEqual(toolReadys.length, 1);
-			if (toolReadys[0].type === 'tool_ready') {
-				assert.strictEqual(toolReadys[0].toolCallId, 'tc-client-perm');
-				assert.ok(toolReadys[0].confirmationTitle);
+			const permissionReady = progressEvents.filter(e => e.type === 'tool_ready');
+			assert.strictEqual(permissionReady.length, 1);
+			if (permissionReady[0].type === 'tool_ready') {
+				assert.strictEqual(permissionReady[0].toolCallId, 'tc-client-perm');
+				assert.ok(permissionReady[0].confirmationTitle);
 			}
+
+			const tools = session.createClientSdkTools();
+			const handlerPromise = invokeClientToolHandler(tools[0], 'tc-client-perm');
+
+			// The handler should NOT emit its own tool_ready — only the
+			// permission flow fires tool_ready for client tools.
+			assert.strictEqual(progressEvents.filter(e => e.type === 'tool_ready').length, 1, 'handler should not emit a second tool_ready');
 
 			// Approve and clean up
 			session.respondToPermissionRequest('tc-client-perm', true);
 			const permResult = await resultPromise;
 			assert.strictEqual(permResult.kind, 'approved');
+			session.handleClientToolCallComplete('tc-client-perm', {
+				success: true,
+				pastTenseMessage: 'did it',
+			});
+			await handlerPromise;
 		});
 
 		test('handleClientToolCallComplete pre-completes when no handler is waiting yet', async () => {
@@ -1120,7 +1135,7 @@ suite('CopilotAgentSession', () => {
 			assert.strictEqual(entry.args[0], '[Copilot:test-session-1] Failed in client tool handler: tool=my_tool, toolCallId=tc-client-error');
 		});
 
-		test('tool_start stores pending auto-ready data for client tools', async () => {
+		test('permission request before client tool handler emits only confirmation ready', async () => {
 			const { session, mockSession, progressEvents, waitForProgress } = await createAgentSession(disposables, { clientSnapshot: snapshot });
 
 			mockSession.fire('tool.execution_start', {
@@ -1132,11 +1147,8 @@ suite('CopilotAgentSession', () => {
 			// tool_start should have fired
 			assert.strictEqual(progressEvents.filter(e => e.type === 'tool_start').length, 1);
 
-			// The session should have stored pending auto-ready data.
-			// We verify this indirectly: if we now fire a permission request
-			// for the same toolCallId, the pending auto-ready is consumed
-			// (tested by the permission request test above), and we get
-			// tool_ready with confirmationTitle instead.
+			// Permission before the handler should produce only the confirmation
+			// tool_ready, not a synthetic auto-ready.
 			const resultPromise = session.handlePermissionRequest({
 				kind: 'custom-tool',
 				toolCallId: 'tc-ready-data',

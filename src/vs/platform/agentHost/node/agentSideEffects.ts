@@ -124,6 +124,18 @@ export class AgentSideEffects extends Disposable {
 			const agents = this._options.agents.read(reader);
 			this._publishAgentInfos(agents, reader);
 		}));
+
+		// Server-dispatched SessionToolCallComplete actions (e.g. from
+		// the disconnect timeout in ProtocolServerHandler) bypass
+		// handleAction, so the agent's SDK deferred never resolves.
+		// Listen for these envelopes and notify the agent directly.
+		this._register(this._stateManager.onDidEmitEnvelope(envelope => {
+			if (!envelope.origin && envelope.action.type === ActionType.SessionToolCallComplete) {
+				const action = envelope.action;
+				const agent = this._options.getAgent(action.session);
+				agent?.onClientToolCallComplete(URI.parse(action.session), action.toolCallId, action.result);
+			}
+		}));
 	}
 
 	/**
@@ -622,7 +634,7 @@ export class AgentSideEffects extends Disposable {
 		if (autoApproval !== undefined) {
 			this._toolCallAgents.delete(`${sessionKey}:${e.toolCallId}`);
 			agent.respondToPermissionRequest(e.toolCallId, true);
-			return;
+			e = { ...e, confirmationTitle: undefined }; // don't trigger confirmation
 		}
 		this._stateManager.dispatchServerAction(
 			this._permissionManager.createToolReadyAction(e, sessionKey, turnId)

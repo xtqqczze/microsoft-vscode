@@ -464,8 +464,10 @@ export class ScriptedMockAgent implements IAgent {
 			}
 
 			case 'client-tool': {
-				// Fires tool_start with toolClientId to simulate a client-provided tool.
-				// The server waits for the client to dispatch toolCallComplete.
+				// Fires tool_start with toolClientId followed by tool_ready
+				// (without confirmationTitle) to simulate a client-provided tool
+				// that is ready for execution. The real SDK handler fires
+				// tool_ready once its deferred is in place.
 				(async () => {
 					await timeout(10);
 					this._onDidSessionProgress.fire({
@@ -476,6 +478,14 @@ export class ScriptedMockAgent implements IAgent {
 						displayName: 'Run Tests',
 						invocationMessage: 'Running tests...',
 						toolClientId: 'test-client-tool',
+					});
+					await timeout(5);
+					this._onDidSessionProgress.fire({
+						type: 'tool_ready',
+						session,
+						toolCallId: 'tc-client-1',
+						invocationMessage: 'Running tests...',
+						toolInput: '{}',
 					});
 				})();
 				// The tool stays pending — the client is responsible for dispatching toolCallComplete.
@@ -627,7 +637,14 @@ export class ScriptedMockAgent implements IAgent {
 
 	setClientTools(): void { }
 
+	private didCompleteToolCalls = new Set<string>();
+
 	onClientToolCallComplete(session: URI, toolCallId: string, result: ToolCallResult): void {
+		const key = `${session.toString()}:${toolCallId}`;
+		if (this.didCompleteToolCalls.has(key)) {
+			return;
+		}
+		this.didCompleteToolCalls.add(key);
 		// Fire tool_complete and resolve any pending callback.
 		this._onDidSessionProgress.fire({
 			type: 'tool_complete',
