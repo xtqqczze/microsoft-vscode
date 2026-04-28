@@ -51,7 +51,7 @@ import { InstantiationType, registerSingleton } from '../../../../platform/insta
 const AccountMenu = Menus.AccountMenu;
 const SessionsTitleBarAccountWidgetAction = 'sessions.action.titleBarAccountWidget';
 const SessionsTitleBarUpdateWidgetAction = 'sessions.action.titleBarUpdateWidget';
-const SESSIONS_ACCOUNT_TITLEBAR_PANEL_WIDTH = 280;
+const SESSIONS_ACCOUNT_TITLEBAR_PANEL_WIDTH = 360;
 
 function shouldHideSessionsTitleBarUpdateWidget(type: StateType): boolean {
 	return type === StateType.Uninitialized
