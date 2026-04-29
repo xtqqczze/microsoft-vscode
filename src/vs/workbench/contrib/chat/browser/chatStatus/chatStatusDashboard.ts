@@ -143,8 +143,8 @@ export class ChatStatusDashboard extends DomWidget {
 			const headerHost = this.options?.titleHeaderContainer ?? this.element;
 			const header = this.renderHeader(headerHost, this._store, planName, toAction({
 				id: 'workbench.action.manageCopilot',
-				label: localize('quotaLabel', "Manage Chat"),
-				tooltip: localize('quotaTooltip', "Manage Chat"),
+				label: localize('quotaLabel', "Manage Copilot Settings"),
+				tooltip: localize('quotaTooltip', "Manage Copilot Settings"),
 				class: ThemeIcon.asClassName(Codicon.settings),
 				run: () => this.runCommandAndClose(() => this.openerService.open(URI.parse(defaultChat.manageSettingsUrl))),
 			}));
@@ -188,8 +188,9 @@ export class ChatStatusDashboard extends DomWidget {
 		}
 
 		// Premium chat included indicator (shown when premium chat is unlimited)
-		if (premiumChat?.unlimited) {
-			const includedTitle = premiumChat.usageBasedBilling
+		const hasPremiumUnlimited = !!premiumChat?.unlimited;
+		if (hasPremiumUnlimited) {
+			const includedTitle = premiumChat!.usageBasedBilling
 				? localize('includedTitleTBB', "Monthly Limit")
 				: localize('includedTitle', "Premium Requests");
 			const includedContainer = this.element.appendChild($('div.quota-indicator.included'));
@@ -199,7 +200,8 @@ export class ChatStatusDashboard extends DomWidget {
 
 		// Quick Settings — collapsible region
 		if (hasQuickSettingsContent) {
-			this.renderQuickSettings(contributedEntries);
+			const hasContentAbove = hasUsageSection || hasVisibleUsageContent || hasPremiumUnlimited;
+			this.renderQuickSettings(contributedEntries, hasContentAbove);
 		}
 
 		// New to Chat / Signed out
@@ -272,7 +274,7 @@ export class ChatStatusDashboard extends DomWidget {
 		}
 	}
 
-	private renderQuickSettings(contributedEntries: ChatStatusEntry[]): void {
+	private renderQuickSettings(contributedEntries: ChatStatusEntry[], hasContentAbove: boolean): void {
 		const nonCollapsible = !!this.options?.disableQuickSettingsCollapsible;
 		const collapsed = !nonCollapsible && this.storageService.getBoolean(ChatStatusDashboard.QUICK_SETTINGS_COLLAPSED_KEY, StorageScope.PROFILE, true);
 
@@ -280,6 +282,9 @@ export class ChatStatusDashboard extends DomWidget {
 		let chevron: HTMLElement | undefined;
 		if (!nonCollapsible) {
 			disclosureHeader = this.element.appendChild($('button.collapsible-header'));
+			if (!hasContentAbove) {
+				disclosureHeader.classList.add('no-border');
+			}
 			disclosureHeader.setAttribute('aria-expanded', String(!collapsed));
 
 			chevron = disclosureHeader.appendChild($('span.collapsible-chevron'));
