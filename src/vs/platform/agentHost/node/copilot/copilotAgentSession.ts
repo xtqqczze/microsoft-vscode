@@ -747,8 +747,8 @@ export class CopilotAgentSession extends Disposable {
 		const isAutopilot = this._configurationService.getEffectiveValue(this.sessionUri.toString(), platformSessionSchema, SessionConfigKey.AutoApprove) === 'autopilot';
 		if (isAutopilot) {
 			return {
-				answer: request.choices?.[0] || 'Proceed with the recommended action.',
-				wasFreeform: !request.choices?.length,
+				answer: 'The user is not available to answer your question. Choose a pragmatic option best aligned with the context of the request.',
+				wasFreeform: true,
 			};
 		}
 

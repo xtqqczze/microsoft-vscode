@@ -236,9 +236,9 @@ suite('isWellKnownModeSchema', () => {
 		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['plan'] })), false);
 	});
 
-	test('rejects schemas with the legacy "autopilot" mode value', () => {
-		// `autopilot` is exposed as an `autoApprove` level, not a mode.
-		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive', 'autopilot'] })), false);
-		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive', 'plan', 'autopilot'] })), false);
+	test('rejects non-string types and missing/empty enums', () => {
+		assert.strictEqual(isWellKnownModeSchema(schema({ type: 'number' as 'string' })), false);
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: undefined })), false);
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: [] })), false);
 	});
 });
