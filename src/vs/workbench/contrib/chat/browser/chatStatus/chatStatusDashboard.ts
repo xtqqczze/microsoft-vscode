@@ -73,6 +73,15 @@ export interface IChatStatusDashboardOptions {
 	disableProviderOptions?: boolean;
 	/** When true, disables the completions snooze button. */
 	disableCompletionsSnooze?: boolean;
+	/** When true, the Quick Settings region is rendered always-expanded without a collapsible header. */
+	disableQuickSettingsCollapsible?: boolean;
+	/**
+	 * When provided, the title header (plan name + manage / CTA actions) is
+	 * rendered into this caller-owned container instead of inline at the top
+	 * of the dashboard. Use this to embed the title header in a host layout
+	 * without reaching into the dashboard's private DOM.
+	 */
+	titleHeaderContainer?: HTMLElement;
 }
 
 export class ChatStatusDashboard extends DomWidget {
@@ -131,7 +140,8 @@ export class ChatStatusDashboard extends DomWidget {
 		let headerAdditionalSpendButton: Button | undefined;
 		if (hasUsageSection) {
 			const planName = getChatPlanName(this.chatEntitlementService.entitlement);
-			const header = this.renderHeader(this.element, this._store, planName, toAction({
+			const headerHost = this.options?.titleHeaderContainer ?? this.element;
+			const header = this.renderHeader(headerHost, this._store, planName, toAction({
 				id: 'workbench.action.manageCopilot',
 				label: localize('quotaLabel', "Manage Chat"),
 				tooltip: localize('quotaTooltip', "Manage Chat"),
@@ -263,15 +273,20 @@ export class ChatStatusDashboard extends DomWidget {
 	}
 
 	private renderQuickSettings(contributedEntries: ChatStatusEntry[]): void {
-		const collapsed = this.storageService.getBoolean(ChatStatusDashboard.QUICK_SETTINGS_COLLAPSED_KEY, StorageScope.PROFILE, true);
+		const nonCollapsible = !!this.options?.disableQuickSettingsCollapsible;
+		const collapsed = !nonCollapsible && this.storageService.getBoolean(ChatStatusDashboard.QUICK_SETTINGS_COLLAPSED_KEY, StorageScope.PROFILE, true);
 
-		const disclosureHeader = this.element.appendChild($('button.collapsible-header'));
-		disclosureHeader.setAttribute('aria-expanded', String(!collapsed));
+		let disclosureHeader: HTMLElement | undefined;
+		let chevron: HTMLElement | undefined;
+		if (!nonCollapsible) {
+			disclosureHeader = this.element.appendChild($('button.collapsible-header'));
+			disclosureHeader.setAttribute('aria-expanded', String(!collapsed));
 
-		const chevron = disclosureHeader.appendChild($('span.collapsible-chevron'));
-		chevron.classList.add(...ThemeIcon.asClassNameArray(collapsed ? Codicon.chevronRight : Codicon.chevronDown));
+			chevron = disclosureHeader.appendChild($('span.collapsible-chevron'));
+			chevron.classList.add(...ThemeIcon.asClassNameArray(collapsed ? Codicon.chevronRight : Codicon.chevronDown));
 
-		disclosureHeader.appendChild($('span.collapsible-label', undefined, localize('quickSettingsTab', "Quick Settings")));
+			disclosureHeader.appendChild($('span.collapsible-label', undefined, localize('quickSettingsTab', "Quick Settings")));
+		}
 
 		const collapsibleContent = this.element.appendChild($('div.collapsible-content'));
 		const collapsibleInner = collapsibleContent.appendChild($('div.collapsible-inner'));
@@ -279,15 +294,17 @@ export class ChatStatusDashboard extends DomWidget {
 			collapsibleContent.classList.add('collapsed');
 		}
 
-		const toggle = () => {
-			const isCollapsed = collapsibleContent.classList.toggle('collapsed');
-			disclosureHeader.setAttribute('aria-expanded', String(!isCollapsed));
-			chevron.className = 'collapsible-chevron';
-			chevron.classList.add(...ThemeIcon.asClassNameArray(isCollapsed ? Codicon.chevronRight : Codicon.chevronDown));
-			this.storageService.store(ChatStatusDashboard.QUICK_SETTINGS_COLLAPSED_KEY, isCollapsed, StorageScope.PROFILE, StorageTarget.USER);
-		};
+		if (disclosureHeader && chevron) {
+			const toggle = () => {
+				const isCollapsed = collapsibleContent.classList.toggle('collapsed');
+				disclosureHeader!.setAttribute('aria-expanded', String(!isCollapsed));
+				chevron!.className = 'collapsible-chevron';
+				chevron!.classList.add(...ThemeIcon.asClassNameArray(isCollapsed ? Codicon.chevronRight : Codicon.chevronDown));
+				this.storageService.store(ChatStatusDashboard.QUICK_SETTINGS_COLLAPSED_KEY, isCollapsed, StorageScope.PROFILE, StorageTarget.USER);
+			};
 
-		this._store.add(addDisposableListener(disclosureHeader, EventType.CLICK, () => toggle()));
+			this._store.add(addDisposableListener(disclosureHeader, EventType.CLICK, () => toggle()));
+		}
 
 		this.renderInlineSuggestionsContent(collapsibleInner);
 
