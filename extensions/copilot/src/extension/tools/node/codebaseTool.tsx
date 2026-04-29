@@ -68,7 +68,7 @@ export class CodebaseTool implements vscode.LanguageModelTool<ICodebaseToolParam
 			async searchToken => {
 				const hasSemanticSearch = await this.workspaceChunkSearchService.isAvailable();
 				if (!hasSemanticSearch) {
-					return undefined;
+					return null; // Use null as undefined is treated as a timeout by raceTimeoutAndCancellationError
 				}
 
 				return renderPromptElementJSON(this.instantiationService, WorkspaceContextWrapper, {
