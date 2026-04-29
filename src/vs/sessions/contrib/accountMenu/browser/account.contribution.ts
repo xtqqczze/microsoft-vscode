@@ -242,6 +242,17 @@ MenuRegistry.appendMenuItem(AccountMenu, {
 	order: 2,
 });
 
+// Keyboard Shortcuts (hidden on phone — no keybindings UI on mobile)
+MenuRegistry.appendMenuItem(AccountMenu, {
+	command: {
+		id: 'workbench.action.openGlobalKeybindings',
+		title: localize('keyboardShortcuts', "Keyboard Shortcuts"),
+	},
+	when: IsPhoneLayoutContext.negate(),
+	group: '2_settings',
+	order: 3,
+});
+
 // Update actions
 registerUpdateMenuItems(AccountMenu, '3_updates');
 
@@ -547,6 +558,32 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 			}
 		}
 
+		const personalizeActions = this.getPersonalizeActions();
+		if (personalizeActions.length > 0) {
+			const personalizeSection = append(panel, $('.sessions-account-titlebar-panel-section'));
+			const personalizeHeading = append(personalizeSection, $('.sessions-account-titlebar-panel-section-title'));
+			personalizeHeading.textContent = localize('personalize', "Personalize");
+			const personalizeActionsContainer = append(personalizeSection, $('.sessions-account-titlebar-panel-actions'));
+
+			for (const action of personalizeActions) {
+				const button = append(personalizeActionsContainer, $('button.sessions-account-titlebar-panel-action.with-icon', { type: 'button' })) as HTMLButtonElement;
+				button.disabled = !action.enabled;
+				button.setAttribute('aria-label', action.tooltip || action.label);
+				const iconElement = append(button, $('span.sessions-account-titlebar-panel-action-icon'));
+				iconElement.classList.add(...ThemeIcon.asClassNameArray(this.getPersonalizeActionIcon(action)));
+				const labelElement = append(button, $('span.sessions-account-titlebar-panel-action-label'));
+				append(labelElement, ...renderLabelWithIcons(action.label));
+
+				panelStore.add(addDisposableListener(button, EventType.CLICK, async event => {
+					event.preventDefault();
+					event.stopPropagation();
+					this.hoverService.hideHover(true);
+					this.clickPanelDisposable.clear();
+					await Promise.resolve(action.run());
+				}));
+			}
+		}
+
 		const actions = this.getPanelActions();
 		if (actions.length > 0) {
 			const actionsSection = append(panel, $('.sessions-account-titlebar-panel-actions'));
@@ -580,7 +617,19 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 
 		const contentSection = append(panel, $('.sessions-account-titlebar-panel-content'));
 		if (this.shouldShowCopilotDashboardHover()) {
-			append(contentSection, this.createCopilotHoverContent());
+			const subscriptionSection = append(contentSection, $('.sessions-account-titlebar-panel-section.subscription'));
+			const subscriptionHeader = append(subscriptionSection, $('.sessions-account-titlebar-panel-section-header'));
+			const subscriptionHeading = append(subscriptionHeader, $('.sessions-account-titlebar-panel-section-title'));
+			subscriptionHeading.textContent = localize('subscription', "Subscription");
+			const dashboard = this.createCopilotHoverContent();
+			append(subscriptionSection, dashboard);
+			// Move the dashboard's plan-name + manage action header into our section header row,
+			// so the plan name and settings button appear right-aligned next to "Subscription".
+			const tooltipRoot = dashboard.firstElementChild;
+			const dashboardHeader = tooltipRoot?.firstElementChild;
+			if (dashboardHeader && dashboardHeader.classList.contains('header')) {
+				subscriptionHeader.appendChild(dashboardHeader);
+			}
 		} else if (!this.isAccountLoading) {
 			const summary = append(contentSection, $('.sessions-account-titlebar-panel-summary'));
 			summary.textContent = this.lastState.ariaLabel;
@@ -607,11 +656,25 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		fillInActionBarActions(menu.getActions(), rawActions);
 		menu.dispose();
 
-		const themeAction = rawActions.find(action => !(action instanceof Separator) && action.id === 'workbench.action.selectTheme');
-		const settingsAction = rawActions.find(action => !(action instanceof Separator) && action.id === 'workbench.action.openSettings');
 		const signOutAction = rawActions.find(action => !(action instanceof Separator) && action.id === 'workbench.action.agenticSignOut');
 
-		return [themeAction, settingsAction, signOutAction].filter((action): action is IAction => !!action);
+		return [signOutAction].filter((action): action is IAction => !!action);
+	}
+
+	private getPersonalizeActions(): IAction[] {
+		const menu = this.menuService.createMenu(AccountMenu, this.contextKeyService);
+		const rawActions: IAction[] = [];
+		fillInActionBarActions(menu.getActions(), rawActions);
+		menu.dispose();
+
+		const ids = [
+			'workbench.action.openSettings',
+			'workbench.action.openGlobalKeybindings',
+			'workbench.action.selectTheme',
+		];
+		return ids
+			.map(id => rawActions.find(action => !(action instanceof Separator) && action.id === id))
+			.filter((action): action is IAction => !!action);
 	}
 
 	private getPanelActions(): IAction[] {
@@ -632,6 +695,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 
 			return action.id !== 'workbench.action.agenticSignOut'
 				&& action.id !== 'workbench.action.openSettings'
+				&& action.id !== 'workbench.action.openGlobalKeybindings'
 				&& action.id !== 'workbench.action.selectTheme'
 				&& !action.id.startsWith('update.');
 		});
@@ -645,6 +709,19 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 				return Codicon.settingsGear;
 			case 'workbench.action.agenticSignOut':
 				return Codicon.signOut;
+			default:
+				return Codicon.circleLargeFilled;
+		}
+	}
+
+	private getPersonalizeActionIcon(action: IAction): ThemeIcon {
+		switch (action.id) {
+			case 'workbench.action.openSettings':
+				return Codicon.settingsGear;
+			case 'workbench.action.openGlobalKeybindings':
+				return Codicon.keyboard;
+			case 'workbench.action.selectTheme':
+				return Codicon.symbolColor;
 			default:
 				return Codicon.circleLargeFilled;
 		}
