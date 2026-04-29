@@ -39,7 +39,7 @@ import { IWorkspaceService } from '../../../workspace/common/workspaceService';
 import { StrategySearchSizing, WorkspaceChunkQueryWithEmbeddings } from '../../common/workspaceChunkSearch';
 import { shouldPotentiallyIndexFile } from '../workspaceFileIndex';
 import { CodeSearchRepoStatus, TriggerIndexingError, TriggerRemoteIndexingError } from './codeSearchRepo';
-import { computeCheckpointHash, ExternalIngestFile, ExternalIngestRequestError, IExternalIngestClient } from './externalIngestClient';
+import { computeCheckpointHash, ExternalIngestFile, ExternalIngestFileSet, ExternalIngestRequestError, IExternalIngestClient } from './externalIngestClient';
 import { WorkspaceFolderIdMap } from './workspaceFolderIdMap';
 
 const debug = false;
@@ -332,6 +332,14 @@ export class ExternalIngestIndex extends Disposable {
 		}
 		const checkpointHash = computeCheckpointHash(allFiles);
 
+		const fileSet: ExternalIngestFileSet = { files: allFiles, checkpoint: checkpointHash };
+
+		// If the checkpoint matches the stored one, the index is already up to date.
+		if (checkpointHash === currentCheckpoint) {
+			this._logService.info('ExternalIngestIndex::doIngest(): Checkpoint matches current checkpoint, skipping ingest.');
+			return Result.ok(true);
+		}
+
 		// If there is a running operation with the same checkpoint hash,
 		// the workspace state has not changed — reuse the existing operation.
 		if (this._currentIngestOperation && !this._currentIngestOperation.completed && this._currentIngestOperation.checkpointHash === checkpointHash) {
@@ -364,8 +372,7 @@ export class ExternalIngestIndex extends Disposable {
 			try {
 				const result = await this._client.updateIndex(
 					filesetName,
-					currentCheckpoint,
-					allFiles,
+					fileSet,
 					telemetryInfo.callTracker,
 					token,
 					wrappedOnProgress
