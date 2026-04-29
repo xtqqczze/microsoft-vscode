@@ -151,15 +151,20 @@ return this._otelService.startActiveSpan('invoke_agent child', { parentTraceCont
 
 ### Content capture
 
-Always gate prompt/response/tool-arg bodies on `otel.config.captureContent`:
+The extension uses two conventions side-by-side; pick the right one for the attribute you're adding.
+
+1. **Always emit (truncated)** — used for inputs/outputs that the Agent Debug Log panel needs to be useful even when OTel export is off (e.g. `gen_ai.tool.call.arguments` in [`toolsService.ts`](../../../extensions/copilot/src/extension/tools/vscode-node/toolsService.ts), and `copilot_chat.hook_input` / `hook_output` in [`chatHookService.ts`](../../../extensions/copilot/src/extension/chat/vscode-node/chatHookService.ts)). The attribute is captured unconditionally but always passed through `truncateForOTel`. Use this for moderate-sized, generally-non-secret arguments / results.
+2. **Gate on `config.captureContent`** — used for full prompt / response / system-instruction bodies (e.g. `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.tool.definitions` in [`chatMLFetcher.ts`](../../../extensions/copilot/src/extension/prompt/node/chatMLFetcher.ts) and the BYOK providers). These are larger and more likely to contain user secrets.
 
 ```ts
+// Pattern 1 — always emit, always truncate
+span.setAttribute(GenAiAttr.TOOL_CALL_ARGUMENTS, truncateForOTel(JSON.stringify(args)));
+
+// Pattern 2 — gated on captureContent
 if (this._otelService.config.captureContent) {
     span.setAttribute(GenAiAttr.INPUT_MESSAGES, truncateForOTel(JSON.stringify(messages)));
 }
 ```
-
-`truncateForOTel` from `messageFormatters.ts` is mandatory for any free-form content attribute — it prevents OTLP batch failures.
 
 ### Debug panel vs OTLP isolation
 
@@ -185,7 +190,7 @@ For sub-process env vars, also update:
 1. Add the attribute key as a constant to `genAiAttributes.ts` (under `GenAiAttr`, `CopilotChatAttr`, or a new domain group). Never inline a raw `'copilot_chat.foo'` literal.
 2. Add it to the public barrel in [`index.ts`](../../../extensions/copilot/src/platform/otel/common/index.ts) if it lives in a new group.
 3. Use `IOTelService.startActiveSpan` (preferred) or `startSpan` — never `BasicTracerProvider` / `getTracer` directly.
-4. Always gate content-bearing attributes on `config.captureContent` and pass the value through `truncateForOTel`.
+4. Pass the value through `truncateForOTel` (mandatory for any free-form content attribute — prevents OTLP batch failures). Decide whether the attribute should be **always-emitted** (debug-panel-essential, e.g. tool args, hook input/output) or **gated on `config.captureContent`** (large prompt/response bodies, system instructions); follow the existing convention for similar data.
 5. If the new operation should reach OTLP, add its op-name to `EXPORTABLE_OPERATION_NAMES` in `otelServiceImpl.ts`.
 6. Document the new attribute in `agent_monitoring.md` (under the relevant span table) **and** add a test in `src/platform/otel/common/test/`.
 
@@ -244,6 +249,7 @@ These are documented in `agent_monitoring_arch.md` — preserve them:
 - ❌ Hard-coded attribute keys: `'copilot_chat.hook_type'` instead of `CopilotChatAttr.HOOK_TYPE`.
 - ❌ Hard-coded provider strings: `'github'` / `'anthropic'` / `'gemini'` instead of `GenAiProviderName.*`.
 - ❌ Magic `SpanStatusCode` numbers (`code: 1`, `code: 2`) — use the enum.
-- ❌ Logging full prompt/response content without `config.captureContent` gating, or without `truncateForOTel`.
+- ❌ Emitting any free-form content attribute without passing it through `truncateForOTel` — OTLP batches will silently drop or fail.
+- ❌ Logging full prompt / response / system-instruction bodies without `config.captureContent` gating (these are pattern 2 above).
 - ❌ Adding a span operation name without deciding whether it's exportable (`EXPORTABLE_OPERATION_NAMES`).
 - ❌ Updating instrumentation without updating `agent_monitoring.md` / `agent_monitoring_arch.md` in the same change.

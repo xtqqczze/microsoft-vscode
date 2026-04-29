@@ -150,11 +150,11 @@ export const CopilotChatAttr = {
 	FILE_RELATIVE_PATH: 'copilot_chat.file.relative_path',
 	/** Hook type / event name (e.g. PreToolUse, PostToolUse, Stop) */
 	HOOK_TYPE: 'copilot_chat.hook_type',
-	/** Serialized hook command input (truncated, content-gated) */
+	/** Serialized hook command input (truncated; emitters may or may not gate on captureContent — used by the Agent Debug Log panel) */
 	HOOK_INPUT: 'copilot_chat.hook_input',
-	/** Serialized hook command output (truncated, content-gated) */
+	/** Serialized hook command output (truncated; emitters may or may not gate on captureContent — used by the Agent Debug Log panel) */
 	HOOK_OUTPUT: 'copilot_chat.hook_output',
-	/** Hook result kind: 'success' or 'error' */
+	/** Hook result kind: 'success', 'error', or 'non_blocking_error' */
 	HOOK_RESULT_KIND: 'copilot_chat.hook_result_kind',
 	/** Custom chat mode name (when a custom mode is active) */
 	MODE_NAME: 'copilot_chat.mode_name',

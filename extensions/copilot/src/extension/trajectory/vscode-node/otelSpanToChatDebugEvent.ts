@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import type { IDebugLogEntry } from '../../../platform/chat/common/chatDebugFileLoggerService';
 import { CopilotChatAttr, CopilotCliSdkAttr, GenAiAttr, GenAiOperationName } from '../../../platform/otel/common/index';
-import type { ICompletedSpanData, ISpanEventData, SpanStatusCode } from '../../../platform/otel/common/otelService';
+import { type ICompletedSpanData, type ISpanEventData, SpanStatusCode } from '../../../platform/otel/common/otelService';
 
 // ── Event ID conventions ──
 // {spanId} → direct span mapping (tool calls, model turns, subagent invocations)
@@ -335,9 +335,9 @@ function spanToToolCallEvent(span: ICompletedSpanData): vscode.ChatDebugToolCall
 	evt.toolCallId = asString(span.attributes[GenAiAttr.TOOL_CALL_ID]);
 	evt.input = asString(span.attributes[GenAiAttr.TOOL_CALL_ARGUMENTS]);
 	evt.output = asString(span.attributes[GenAiAttr.TOOL_CALL_RESULT]);
-	evt.result = span.status.code === 1 /* OK */
+	evt.result = span.status.code === SpanStatusCode.OK
 		? vscode.ChatDebugToolCallResult.Success
-		: span.status.code === 2 /* ERROR */
+		: span.status.code === SpanStatusCode.ERROR
 			? vscode.ChatDebugToolCallResult.Error
 			: undefined;
 	evt.durationInMillis = span.endTime - span.startTime;
@@ -375,9 +375,9 @@ function spanToSubagentEvent(span: ICompletedSpanData): vscode.ChatDebugSubagent
 	evt.durationInMillis = span.endTime - span.startTime;
 	const agentDescription = asString(span.attributes[GenAiAttr.AGENT_DESCRIPTION]);
 	evt.description = agentDescription ?? `Subagent: ${agentName}`;
-	evt.status = span.status.code === 1 /* OK */
+	evt.status = span.status.code === SpanStatusCode.OK
 		? vscode.ChatDebugSubagentStatus.Completed
-		: span.status.code === 2 /* ERROR */
+		: span.status.code === SpanStatusCode.ERROR
 			? vscode.ChatDebugSubagentStatus.Failed
 			: vscode.ChatDebugSubagentStatus.Running;
 	const turnCount = asNumber(span.attributes[CopilotChatAttr.TURN_COUNT]);
@@ -400,7 +400,7 @@ function resolveHookExecutionContent(span: ICompletedSpanData): vscode.ChatDebug
 	content.durationInMillis = span.endTime - span.startTime;
 	content.input = asString(span.attributes[CopilotChatAttr.HOOK_INPUT]);
 	content.output = asString(span.attributes[CopilotChatAttr.HOOK_OUTPUT]);
-	if (span.status.code === 2 /* ERROR */ && span.status.message) {
+	if (span.status.code === SpanStatusCode.ERROR && span.status.message) {
 		content.errorMessage = span.status.message;
 	}
 	content.exitCode = asNumber(span.attributes['copilot_chat.hook_exit_code']);
@@ -435,7 +435,7 @@ function spanToHookExecutionEvent(span: ICompletedSpanData): vscode.ChatDebugGen
 function spanToSdkHookEvent(span: ICompletedSpanData): vscode.ChatDebugGenericEvent {
 	const hookType = asString(span.attributes[CopilotCliSdkAttr.HOOK_TYPE]) ?? 'unknown';
 	const durationMs = span.endTime - span.startTime;
-	const isError = span.status.code === 2; /* ERROR */
+	const isError = span.status.code === SpanStatusCode.ERROR;
 	const level = isError ? vscode.ChatDebugLogLevel.Error : vscode.ChatDebugLogLevel.Info;
 	const evt = new vscode.ChatDebugGenericEvent(`Hook: ${hookType}`, level, new Date(span.startTime));
 	evt.id = span.spanId;
@@ -461,9 +461,9 @@ function resolveToolCallContent(span: ICompletedSpanData): vscode.ChatDebugEvent
 	const content = new vscode.ChatDebugEventToolCallContent(toolName);
 	content.input = asString(span.attributes[GenAiAttr.TOOL_CALL_ARGUMENTS]);
 	content.output = asString(span.attributes[GenAiAttr.TOOL_CALL_RESULT]);
-	content.result = span.status.code === 1 /* OK */
+	content.result = span.status.code === SpanStatusCode.OK
 		? vscode.ChatDebugToolCallResult.Success
-		: span.status.code === 2 /* ERROR */
+		: span.status.code === SpanStatusCode.ERROR
 			? vscode.ChatDebugToolCallResult.Error
 			: undefined;
 	content.durationInMillis = span.endTime - span.startTime;
@@ -503,7 +503,7 @@ function resolveModelTurnContent(span: ICompletedSpanData): vscode.ChatDebugEven
 	if (sections.length > 0) {
 		content.sections = sections;
 	}
-	if (span.status.code === 2 /* ERROR */ && span.status.message) {
+	if (span.status.code === SpanStatusCode.ERROR && span.status.message) {
 		content.errorMessage = span.status.message;
 	}
 	return content;
