@@ -12,17 +12,22 @@ import { join } from '../../../../base/common/path.js';
 import { extUriBiasedIgnorePathCase, normalizePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
+import { localize } from '../../../../nls.js';
 import type { IParsedPlugin } from '../../../agentPlugins/common/pluginParsers.js';
 import { INativeEnvironmentService } from '../../../environment/common/environment.js';
 import { IFileService } from '../../../files/common/files.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
+import { platformSessionSchema } from '../../common/agentHostSchema.js';
 import { AgentSignal, IAgentAttachment } from '../../common/agentService.js';
 import { stripRedundantCdPrefix } from '../../common/commandLineHelpers.js';
+import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
 import type { FileEdit, ToolDefinition } from '../../common/state/protocol/state.js';
 import { ActionType, type SessionAction } from '../../common/state/sessionActions.js';
-import { ResponsePartKind, SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, type PendingMessage, type SessionInputAnswer, type SessionInputRequest, type ToolCallResult, type ToolResultContent, type Turn, type URI as ProtocolURI } from '../../common/state/sessionState.js';
+import { ResponsePartKind, SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, type PendingMessage, type URI as ProtocolURI, type SessionInputAnswer, type SessionInputRequest, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
+import { IAgentConfigurationService } from '../agentConfigurationService.js';
+import type { IExitPlanModeRequestParams, IExitPlanModeResponse } from './copilotAgent.js';
 import { CopilotSessionWrapper } from './copilotSessionWrapper.js';
 import type { ShellManager } from './copilotShellTools.js';
 import { getEditFilePath, getInvocationMessage, getPastTenseMessage, getPermissionDisplay, getShellLanguage, getSubagentMetadata, getToolDisplayName, getToolInputString, getToolKind, isEditTool, isHiddenTool, isShellTool, synthesizeSkillToolCall, tryStringify, type ITypedPermissionRequest } from './copilotToolDisplay.js';
@@ -30,8 +35,49 @@ import { FileEditTracker } from './fileEditTracker.js';
 import { mapSessionEvents } from './mapSessionEvents.js';
 import { buildPendingEditContentUri } from './pendingEditContentStore.js';
 
+/**
+ * The full set of agent modes the Copilot SDK accepts. Wider than the
+ * {@link SessionMode} the AHP exposes — the SDK has a first-class
+ * `'autopilot'` mode while AHP models that as
+ * `mode='interactive', autoApprove='autopilot'`. The Copilot agent
+ * translates between the two views in {@link CopilotAgentSession.send}
+ * and the `session.mode_changed` listener.
+ */
+export type CopilotSdkMode = 'interactive' | 'plan' | 'autopilot';
+
 const COPILOT_HOME_DIRECTORY = '.copilot';
 const SESSION_STATE_DIRECTORY = join(COPILOT_HOME_DIRECTORY, 'session-state');
+
+/**
+ * Display labels and descriptions for the SDK's `exit_plan_mode` action ids.
+ * Keys not present here fall back to the raw action id.
+ */
+function getPlanActionDescription(actionId: string): { label: string; description: string } | undefined {
+	switch (actionId) {
+		case 'autopilot':
+			return {
+				label: localize('agentHost.planReview.autopilot.label', "Implement with Autopilot"),
+				description: localize('agentHost.planReview.autopilot.description', "Auto-approve all tool calls and continue until done."),
+			};
+		case 'autopilot_fleet':
+			return {
+				label: localize('agentHost.planReview.autopilotFleet.label', "Implement with Autopilot Fleet"),
+				description: localize('agentHost.planReview.autopilotFleet.description', "Auto-approve all tool calls, including fleet management actions, and continue until done."),
+			};
+		case 'interactive':
+			return {
+				label: localize('agentHost.planReview.interactive.label', "Implement Plan"),
+				description: localize('agentHost.planReview.interactive.description', "Implement the plan, asking for input and approval for each action."),
+			};
+		case 'exit_only':
+			return {
+				label: localize('agentHost.planReview.exitOnly.label', "Approve Plan Only"),
+				description: localize('agentHost.planReview.exitOnly.description', "Approve the plan without executing it. I will implement it myself."),
+			};
+		default:
+			return undefined;
+	}
+}
 
 type UserInputHandler = NonNullable<SessionConfig['onUserInputRequest']>;
 type UserInputRequest = Parameters<UserInputHandler>[0];
@@ -109,6 +155,20 @@ export class CopilotAgentSession extends Disposable {
 	private readonly _pendingPermissions = new Map<string, DeferredPromise<boolean>>();
 	/** Pending user input requests awaiting a renderer-side answer. */
 	private readonly _pendingUserInputs = new Map<string, { deferred: DeferredPromise<{ response: SessionInputResponseKind; answers?: Record<string, SessionInputAnswer> }>; questionId: string }>();
+	/**
+	 * Pending plan-review requests originating from the CLI's
+	 * `exitPlanMode.request` RPC. Tracked separately from
+	 * {@link _pendingUserInputs} so the completion handler can resolve the
+	 * RPC with a structured {@link IExitPlanModeResponse} (which the CLI
+	 * forwards to `session.respondToExitPlanMode`) rather than feeding it
+	 * back through the SDK's `ask_user` callback.
+	 */
+	private readonly _pendingPlanReviews = new Map<string, {
+		readonly actions: readonly string[];
+		readonly recommendedAction: string;
+		readonly questionId: string;
+		readonly deferred: DeferredPromise<IExitPlanModeResponse>;
+	}>();
 	/** File edit tracker for this session. */
 	private readonly _editTracker: FileEditTracker;
 	/** Session database reference. */
@@ -117,6 +177,8 @@ export class CopilotAgentSession extends Disposable {
 	private _turnId = '';
 	/** SDK session wrapper, set by {@link initializeSession}. */
 	private _wrapper!: CopilotSessionWrapper;
+	/** Last agent mode pushed to the SDK via {@link applyMode}, to elide redundant `rpc.mode.set` calls. */
+	private _lastAppliedMode: CopilotSdkMode | undefined;
 
 	/** Snapshot captured at session creation for refresh detection. */
 	private readonly _appliedSnapshot: IActiveClientSnapshot;
@@ -152,6 +214,7 @@ export class CopilotAgentSession extends Disposable {
 		@ISessionDataService sessionDataService: ISessionDataService,
 		@IFileService private readonly _fileService: IFileService,
 		@INativeEnvironmentService private readonly _environmentService: INativeEnvironmentService,
+		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
 	) {
 		super();
 		this.sessionId = options.rawSessionId;
@@ -173,6 +236,7 @@ export class CopilotAgentSession extends Disposable {
 		this._register(toDisposable(() => this._denyPendingPermissions()));
 		this._register(toDisposable(() => this._shellManager?.dispose()));
 		this._register(toDisposable(() => this._cancelPendingUserInputs()));
+		this._register(toDisposable(() => this._cancelPendingPlanReviews()));
 
 		// When a shell tool associates a terminal with a tool call, fire a
 		// tool_content_changed event so the UI can connect to the terminal
@@ -395,7 +459,7 @@ export class CopilotAgentSession extends Disposable {
 
 	// ---- session operations -------------------------------------------------
 
-	async send(prompt: string, attachments?: IAgentAttachment[], turnId?: string): Promise<void> {
+	async send(prompt: string, attachments?: IAgentAttachment[], turnId?: string, mode?: CopilotSdkMode): Promise<void> {
 		if (turnId) {
 			this._turnId = turnId;
 		}
@@ -412,8 +476,27 @@ export class CopilotAgentSession extends Disposable {
 			this._logService.trace(`[Copilot:${this.sessionId}] Attachments: ${JSON.stringify(sdkAttachments.map(a => ({ type: a.type, path: a.type === 'selection' ? a.filePath : a.path })))}`);
 		}
 
+		await this.applyMode(mode);
 		await this._wrapper.session.send({ prompt, attachments: sdkAttachments });
 		this._logService.info(`[Copilot:${this.sessionId}] session.send() returned`);
+	}
+
+	/**
+	 * Pushes `mode` to the SDK via `rpc.mode.set` if it differs from the
+	 * last applied value. Failures are logged and swallowed so that mode
+	 * propagation does not block the turn.
+	 */
+	async applyMode(mode: CopilotSdkMode | undefined): Promise<void> {
+		if (!mode || mode === this._lastAppliedMode) {
+			return;
+		}
+		try {
+			await this._wrapper.session.rpc.mode.set({ mode });
+			this._lastAppliedMode = mode;
+			this._logService.info(`[Copilot:${this.sessionId}] rpc.mode.set succeeded: mode=${mode}`);
+		} catch (err) {
+			this._logService.error(err, `[Copilot:${this.sessionId}] rpc.mode.set failed: mode=${mode}`);
+		}
 	}
 
 	async sendSteering(steeringMessage: PendingMessage): Promise<void> {
@@ -495,13 +578,13 @@ export class CopilotAgentSession extends Disposable {
 			if (!toolCallId) {
 				// TODO: handle permission requests without a toolCallId by creating a synthetic tool call
 				this._logService.warn(`[Copilot:${this.sessionId}] Permission request without toolCallId, auto-denying: kind=${request.kind}`);
-				return { kind: 'denied-interactively-by-user' };
+				return { kind: 'reject' };
 			}
 
 			const sessionResourcePath = this._getInternalSessionResourcePath(request);
 			if (sessionResourcePath) {
 				this._logService.info(`[Copilot:${this.sessionId}] Auto-approving internal session resource ${sessionResourcePath}`);
-				return { kind: 'approved' };
+				return { kind: 'approve-once' };
 			}
 
 			this._logService.info(`[Copilot:${this.sessionId}] Requesting confirmation for tool call: ${toolCallId}`);
@@ -524,7 +607,7 @@ export class CopilotAgentSession extends Disposable {
 			// `pending-edit-content:` entry has been cleaned up. Bail without
 			// firing tool_ready.
 			if (!this._pendingPermissions.has(toolCallId)) {
-				return { kind: 'denied-interactively-by-user' };
+				return { kind: 'reject' };
 			}
 
 			// Fire a pending_confirmation signal to transition the tool to PendingConfirmation
@@ -548,7 +631,7 @@ export class CopilotAgentSession extends Disposable {
 
 			const approved = await deferred.p;
 			this._logService.info(`[Copilot:${this.sessionId}] Permission response: toolCallId=${toolCallId}, approved=${approved}`);
-			return { kind: approved ? 'approved' : 'denied-interactively-by-user' };
+			return { kind: approved ? 'approve-once' : 'reject' };
 		} catch (error) {
 			this._logService.error(error, `[Copilot:${this.sessionId}] Failed to handle permission request: kind=${request.kind}, toolCallId=${request.toolCallId ?? 'missing'}`);
 			throw error;
@@ -661,6 +744,14 @@ export class CopilotAgentSession extends Disposable {
 		request: UserInputRequest,
 		_invocation: { sessionId: string },
 	): Promise<UserInputResponse> {
+		const isAutopilot = this._configurationService.getEffectiveValue(this.sessionUri.toString(), platformSessionSchema, SessionConfigKey.AutoApprove) === 'autopilot';
+		if (isAutopilot) {
+			return {
+				answer: 'The user is not available to answer your question. Choose a pragmatic option best aligned with the context of the request.',
+				wasFreeform: true,
+			};
+		}
+
 		const questionPreview = request.question.substring(0, 100);
 		try {
 			const requestId = generateUuid();
@@ -726,6 +817,13 @@ export class CopilotAgentSession extends Disposable {
 	}
 
 	respondToUserInputRequest(requestId: string, response: SessionInputResponseKind, answers?: Record<string, SessionInputAnswer>): boolean {
+		const pendingPlanReview = this._pendingPlanReviews.get(requestId);
+		if (pendingPlanReview) {
+			this._pendingPlanReviews.delete(requestId);
+			pendingPlanReview.deferred.complete(this._resolveExitPlanMode(pendingPlanReview, response, answers));
+			return true;
+		}
+
 		const pending = this._pendingUserInputs.get(requestId);
 		if (pending) {
 			this._pendingUserInputs.delete(requestId);
@@ -733,6 +831,87 @@ export class CopilotAgentSession extends Disposable {
 			return true;
 		}
 		return false;
+	}
+
+	/**
+	 * Maps an `exit_plan_mode` input response back to an
+	 * {@link IExitPlanModeResponse} that the CLI can feed into
+	 * `session.respondToExitPlanMode`. Mapping rules:
+	 *
+	 *  - Decline / Cancel / no answer → `{ approved: false }` (model gets a
+	 *    rejection result and stays in plan mode).
+	 *  - Accept + freeform feedback → `{ approved: false, feedback, selectedAction? }`
+	 *    (the SDK treats this as a revision request and re-emits
+	 *    `exit_plan_mode.requested` after revising the plan).
+	 *  - Accept + selected option → `{ approved: true, selectedAction, autoApproveEdits }`
+	 *    where `autoApproveEdits` is set for the autopilot variants.
+	 *
+	 * `selectedAction` is validated against the SDK's offered `actions`; an
+	 * unknown value is treated as a decline so the SDK isn't fed a value it
+	 * cannot handle.
+	 */
+	private _resolveExitPlanMode(
+		pending: { actions: readonly string[]; recommendedAction: string; questionId: string },
+		response: SessionInputResponseKind,
+		answers?: Record<string, SessionInputAnswer>,
+	): IExitPlanModeResponse {
+		if (response !== SessionInputResponseKind.Accept) {
+			return { approved: false };
+		}
+		const answer = answers?.[pending.questionId];
+		if (!answer || answer.state === SessionInputAnswerState.Skipped) {
+			return { approved: false };
+		}
+		const value = answer.value;
+
+		// Determine the selected action and any freeform feedback. The
+		// `single-select` question may carry both (when the user picks an
+		// option AND types feedback), or just freeform text (when the
+		// user types instead of picking). Normalize to one shape.
+		let candidateAction: string | undefined;
+		let feedback: string | undefined;
+		if (value.kind === SessionInputAnswerValueKind.Selected) {
+			candidateAction = value.value;
+			const freeform = value.freeformValues?.find(s => s.trim().length > 0)?.trim();
+			feedback = freeform;
+		} else if (value.kind === SessionInputAnswerValueKind.Text) {
+			feedback = value.value.trim() || undefined;
+		} else {
+			return { approved: false };
+		}
+
+		// Clamp `selectedAction` to the SDK's offered set. Anything else
+		// (including freeform text smuggled into the `value` field) falls
+		// back to the recommended action so we never feed the SDK a value
+		// it can't act on.
+		const selectedAction = candidateAction && pending.actions.includes(candidateAction)
+			? candidateAction
+			: pending.actions.includes(pending.recommendedAction)
+				? pending.recommendedAction
+				: undefined;
+
+		// Freeform feedback => revision request. The SDK semantics are
+		// `approved: false` with a non-empty `feedback`; it will revise
+		// the plan and re-emit `exit_plan_mode.requested`.
+		if (feedback) {
+			return {
+				approved: false,
+				feedback,
+				...(selectedAction ? { selectedAction } : {}),
+			};
+		}
+
+		// No selectable action and no feedback — nothing actionable.
+		if (!selectedAction) {
+			return { approved: false };
+		}
+
+		const isAutopilot = selectedAction === 'autopilot' || selectedAction === 'autopilot_fleet';
+		return {
+			approved: true,
+			selectedAction,
+			...(isAutopilot ? { autoApproveEdits: true } : {}),
+		};
 	}
 
 	private async _handlePreToolUse(input: PreToolUseHookInput): Promise<void> {
@@ -1033,6 +1212,145 @@ export class CopilotAgentSession extends Disposable {
 			this._logService.trace(`[Copilot:${sessionId}] Reasoning delta: ${e.data.deltaContent.length} chars`);
 			this._emitReasoningDelta(e.data.deltaContent);
 		}));
+
+		// Sync the AHP session config when the SDK's `currentMode` changes
+		// (e.g. after the model approves a plan, or after we set the mode
+		// before sending). The SDK has three modes (`interactive` / `plan` /
+		// `autopilot`); AHP only models `interactive` / `plan` and treats
+		// autopilot as `mode='interactive', autoApprove='autopilot'`, so we
+		// translate before writing.
+		this._register(wrapper.onSessionModeChanged(e => {
+			this._logService.info(`[Copilot:${sessionId}] session.mode_changed: ${e.data.previousMode} -> ${e.data.newMode}`);
+			const newMode = e.data.newMode;
+			if (newMode !== 'interactive' && newMode !== 'plan' && newMode !== 'autopilot') {
+				return;
+			}
+			this._lastAppliedMode = newMode;
+			this._syncAhpConfigFromSdkMode(newMode);
+		}));
+	}
+
+	/**
+	 * Translates the SDK's three-mode space (`interactive` / `plan` /
+	 * `autopilot`) to AHP's two-axis model:
+	 *
+	 *  - SDK `plan` → AHP `mode='plan'`.
+	 *  - SDK `interactive` → AHP `mode='interactive'`.
+	 *  - SDK `autopilot` → AHP `mode='interactive', autoApprove='autopilot'`.
+	 *    Autopilot is exposed in AHP as the highest auto-approval level on
+	 *    the orthogonal `autoApprove` axis, not as a mode value.
+	 *
+	 * Patches that already match the current AHP values are still
+	 * dispatched (the reducer is a no-op in that case) but written values
+	 * propagate to all subscribed clients via `session/configChanged`.
+	 */
+	private _syncAhpConfigFromSdkMode(sdkMode: CopilotSdkMode): void {
+		const sessionUri = this.sessionUri.toString();
+		const patch: Record<string, unknown> = {};
+		switch (sdkMode) {
+			case 'plan':
+				patch[SessionConfigKey.Mode] = 'plan';
+				break;
+			case 'autopilot':
+				patch[SessionConfigKey.Mode] = 'interactive';
+				patch[SessionConfigKey.AutoApprove] = 'autopilot';
+				break;
+			case 'interactive':
+				patch[SessionConfigKey.Mode] = 'interactive';
+				break;
+		}
+		this._configurationService.updateSessionConfig(sessionUri, patch);
+	}
+
+	/**
+	 * Handles the CLI's `exitPlanMode.request` RPC by surfacing it as a
+	 * {@link SessionInputRequest} and awaiting the client's response. The
+	 * resolved {@link IExitPlanModeResponse} flows back to the CLI, which
+	 * calls `session.respondToExitPlanMode` internally — that resumes the
+	 * paused `exit_plan_mode` tool call and (on accept) updates the SDK's
+	 * `currentMode` so the model can continue with implementation.
+	 */
+	async handleExitPlanModeRequest(data: IExitPlanModeRequestParams): Promise<IExitPlanModeResponse> {
+		const requestId = generateUuid();
+		const questionId = generateUuid();
+		this._logService.info(`[Copilot:${this.sessionId}] exitPlanMode.request: rpcId=${requestId}, actions=[${data.actions.join(',')}], recommended=${data.recommendedAction}`);
+
+		// When the session's effective auto-approval level is `autopilot`,
+		// approve the plan automatically without surfacing a question to
+		// the user. Mirrors the "autopilot fast-path" in the Copilot CLI's
+		// own plan-mode handler.
+		const autoApprove = this._configurationService.getEffectiveValue(this.sessionUri.toString(), platformSessionSchema, SessionConfigKey.AutoApprove);
+		if (autoApprove === 'autopilot') {
+			const response = autoApproveExitPlanMode(data);
+			this._logService.info(`[Copilot:${this.sessionId}] exitPlanMode.request auto-accepted (autoApprove=autopilot): selectedAction=${response.selectedAction ?? '(none)'}`);
+			return response;
+		}
+
+		// Resolve the plan file path so we can embed a markdown link.
+		let planPath: string | null = null;
+		try {
+			const planRead = await this._wrapper.session.rpc.plan.read();
+			planPath = planRead.path ?? null;
+		} catch (err) {
+			this._logService.warn(`[Copilot:${this.sessionId}] rpc.plan.read failed for exit_plan_mode: ${err instanceof Error ? err.message : String(err)}`);
+		}
+
+		// Build the input-request markdown: summary + link to the plan file.
+		let message = data.summary || localize('agentHost.planReview.fallbackSummary', "A plan is ready for review.");
+		if (planPath) {
+			const planUri = URI.file(planPath);
+			message += `\n\n[${localize('agentHost.planReview.viewPlanLink', "View full plan")}](${planUri.toString()})`;
+		}
+
+		this._emitMarkdownDelta(message);
+
+		const options = data.actions.map(actionId => {
+			const desc = getPlanActionDescription(actionId);
+			return {
+				id: actionId,
+				label: desc?.label ?? actionId,
+				description: desc?.description,
+				recommended: actionId === data.recommendedAction,
+			};
+		});
+
+		const inputRequest: SessionInputRequest = {
+			id: requestId,
+			questions: [{
+				kind: SessionInputQuestionKind.SingleSelect,
+				id: questionId,
+				title: localize('agentHost.planReview.title', "Review Plan"),
+				message: localize('agentHost.planReview.questionMessage', "How would you like to proceed?"),
+				required: true,
+				options,
+				allowFreeformInput: true,
+			}],
+		};
+
+		const deferred = new DeferredPromise<IExitPlanModeResponse>();
+		this._pendingPlanReviews.set(requestId, {
+			actions: data.actions,
+			recommendedAction: data.recommendedAction,
+			questionId,
+			deferred,
+		});
+
+		this._onDidSessionProgress.fire({
+			kind: 'action',
+			session: this.sessionUri,
+			action: {
+				type: ActionType.SessionInputRequested,
+				session: this.sessionUri.toString(),
+				request: inputRequest,
+			}
+		});
+
+		try {
+			return await deferred.p;
+		} catch (err) {
+			this._logService.error(err, `[Copilot:${this.sessionId}] exitPlanMode.request handler failed: rpcId=${requestId}`);
+			return { approved: false };
+		}
 	}
 
 	private _subscribeForLogging(): void {
@@ -1236,12 +1554,60 @@ export class CopilotAgentSession extends Disposable {
 		this._pendingUserInputs.clear();
 	}
 
+	private _cancelPendingPlanReviews(): void {
+		for (const [, pending] of this._pendingPlanReviews) {
+			pending.deferred.complete({ approved: false });
+		}
+		this._pendingPlanReviews.clear();
+	}
+
 	private _cancelPendingClientToolCalls(): void {
 		for (const [, deferred] of this._pendingClientToolCalls) {
 			deferred.complete({ textResultForLlm: 'Tool call cancelled: session ended', resultType: 'failure', error: 'Session ended' });
 		}
 		this._pendingClientToolCalls.clear();
 	}
+}
+
+/**
+ * Builds the {@link IExitPlanModeResponse} used when the session is in
+ * autopilot and we approve the plan without user interaction.
+ *
+ * Selection priority mirrors the Copilot CLI's own autopilot handler.
+ *
+ * 1. If the SDK's `recommendedAction` is offered, take it.
+ * 2. Otherwise fall back to `autopilot` → `autopilot_fleet` → `interactive`
+ *    → `exit_only`.
+ * 3. As a last resort, approve without picking a `selectedAction` (the SDK
+ *    keeps `currentMode='interactive'` in that case).
+ *
+ * `autoApproveEdits: true` is set whenever the chosen action is one of the
+ * autopilot variants, mirroring the CLI behavior.
+ */
+function autoApproveExitPlanMode(data: IExitPlanModeRequestParams): IExitPlanModeResponse {
+	const choices = data.actions ?? [];
+	const isAutopilotAction = (action: string) => action === 'autopilot' || action === 'autopilot_fleet';
+
+	if (data.recommendedAction && choices.includes(data.recommendedAction)) {
+		const selectedAction = data.recommendedAction;
+		return {
+			approved: true,
+			selectedAction,
+			...(isAutopilotAction(selectedAction) ? { autoApproveEdits: true } : {}),
+		};
+	}
+
+	for (const action of ['autopilot', 'autopilot_fleet', 'interactive', 'exit_only']) {
+		if (choices.includes(action)) {
+			return {
+				approved: true,
+				selectedAction: action,
+				...(isAutopilotAction(action) ? { autoApproveEdits: true } : {}),
+			};
+		}
+	}
+
+	return { approved: true, autoApproveEdits: true };
 }
 
 /**

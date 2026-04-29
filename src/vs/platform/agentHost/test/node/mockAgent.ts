@@ -845,7 +845,7 @@ export type LegacyMockEvent =
 		invocationMessage: StringOrMarkdown;
 		toolInput?: string;
 		confirmationTitle?: StringOrMarkdown;
-		permissionKind?: 'shell' | 'write' | 'mcp' | 'read' | 'url' | 'custom-tool';
+		permissionKind?: 'shell' | 'write' | 'mcp' | 'read' | 'url' | 'custom-tool' | 'hook' | 'memory';
 		permissionPath?: string;
 		edits?: { items: FileEdit[] };
 	}
