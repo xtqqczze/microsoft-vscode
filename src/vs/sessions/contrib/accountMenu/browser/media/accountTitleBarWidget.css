@@ -303,7 +303,8 @@
 	display: none;
 }
 
-.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip div.header {
+.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip > div.header,
+.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .contribution > div.header {
 	border-bottom: none;
 	padding-bottom: 0;
 }
@@ -368,6 +369,7 @@
 	height: 16px;
 	flex: 0 0 auto;
 	color: var(--vscode-descriptionForeground);
+	/* `!important` to override `.codicon`'s own `font-size` rule. */
 	font-size: 14px !important;
 }
 

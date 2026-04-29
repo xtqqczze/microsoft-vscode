@@ -558,7 +558,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		if (partitioned.signOut) {
 			const headerActionsContainer = append(headerSection, $('.sessions-account-titlebar-panel-header-actions'));
 			this.createPanelButton(headerActionsContainer, partitioned.signOut, panelStore, {
-				className: 'sessions-account-titlebar-panel-header-action',
+				classNames: ['sessions-account-titlebar-panel-header-action'],
 				icon: this.getHeaderActionIcon(partitioned.signOut),
 			});
 		}
@@ -572,7 +572,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 			const personalizeActionsContainer = append(personalizeSection, $('.sessions-account-titlebar-panel-actions'));
 			for (const action of partitioned.personalize) {
 				this.createPanelButton(personalizeActionsContainer, action, panelStore, {
-					className: 'sessions-account-titlebar-panel-action with-icon',
+					classNames: ['sessions-account-titlebar-panel-action', 'with-icon'],
 					icon: this.getPersonalizeActionIcon(action),
 					includeLabel: true,
 				});
@@ -593,7 +593,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 				}
 				lastWasSeparator = false;
 				this.createPanelButton(actionsSection, action, panelStore, {
-					className: 'sessions-account-titlebar-panel-action',
+					classNames: ['sessions-account-titlebar-panel-action'],
 					includeLabel: true,
 					checked: !!action.checked,
 				});
@@ -637,9 +637,18 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		const personalizeMap = new Map<string, IAction>();
 		const other: IAction[] = [];
 
+		const pushSeparator = () => {
+			// Collapse runs and skip leading separators so groups whose only
+			// items get filtered (e.g. update.*) don't leave orphans behind.
+			if (other.length === 0 || other[other.length - 1] instanceof Separator) {
+				return;
+			}
+			other.push(new Separator());
+		};
+
 		for (const action of rawActions) {
 			if (action instanceof Separator) {
-				other.push(action);
+				pushSeparator();
 				continue;
 			}
 			if (action.id === SIGN_OUT_ACTION_ID) {
@@ -659,6 +668,11 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 			other.push(action);
 		}
 
+		// Trim trailing separator left after filtering.
+		if (other.length > 0 && other[other.length - 1] instanceof Separator) {
+			other.pop();
+		}
+
 		// Preserve canonical personalize order.
 		const personalize = PERSONALIZE_ACTION_IDS
 			.map(id => personalizeMap.get(id))
@@ -671,9 +685,10 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		parent: HTMLElement,
 		action: IAction,
 		panelStore: DisposableStore,
-		options: { className: string; icon?: ThemeIcon; includeLabel?: boolean; checked?: boolean },
+		options: { classNames: readonly string[]; icon?: ThemeIcon; includeLabel?: boolean; checked?: boolean },
 	): HTMLButtonElement {
-		const button = append(parent, $(`button.${options.className.replace(/\s+/g, '.')}`, { type: 'button' })) as HTMLButtonElement;
+		const button = append(parent, $('button', { type: 'button' })) as HTMLButtonElement;
+		button.classList.add(...options.classNames);
 		button.disabled = !action.enabled;
 		button.setAttribute('aria-label', action.tooltip || action.label);
 		if (options.checked) {
@@ -721,7 +736,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 				return Codicon.symbolColor;
 			case 'workbench.action.openSettings':
 				return Codicon.settingsGear;
-			case 'workbench.action.agenticSignOut':
+			case SIGN_OUT_ACTION_ID:
 				return Codicon.signOut;
 			default:
 				return Codicon.circleLargeFilled;
