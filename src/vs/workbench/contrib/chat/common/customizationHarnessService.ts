@@ -684,7 +684,7 @@ export class CustomizationHarnessServiceBase implements ICustomizationHarnessSer
 
 		const result: ICustomAgent[] = [];
 		for (const item of items) {
-			if ((item.enabled !== false) && item.type === PromptsType.agent) {
+			if (item.type === PromptsType.agent) {
 				const promptFile = await this.promptsService.parseNew(item.uri, token);
 				const extra = {
 					name: item.name,
@@ -693,6 +693,7 @@ export class CustomizationHarnessServiceBase implements ICustomizationHarnessSer
 					hooks: undefined,
 					source: getSource(item),
 					type: PromptsType.agent,
+					enabled: item.enabled !== false,
 				};
 				result.push(CustomAgent.fromParsedPromptFile(promptFile, extra));
 			}

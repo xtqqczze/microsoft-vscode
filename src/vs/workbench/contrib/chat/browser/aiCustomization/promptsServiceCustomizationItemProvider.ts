@@ -74,7 +74,7 @@ export class PromptsServiceCustomizationItemProvider implements ICustomizationIt
 					name: agent.name,
 					description: agent.description,
 					storage: agent.source.storage,
-					enabled: !disabledUris.has(agent.uri),
+					enabled: agent.enabled,
 					extensionId: agent.source.storage === PromptsStorage.extension ? agent.source.extensionId.value : undefined,
 					pluginUri: agent.source.storage === PromptsStorage.plugin ? agent.source.pluginUri : undefined,
 					userInvocable: agent.visibility.userInvocable
@@ -187,7 +187,7 @@ export class PromptsServiceCustomizationItemProvider implements ICustomizationIt
 		// Agent-embedded hooks (not in sessions window).
 		const agents = !this.workspaceService.isSessionsWindow ? await this.promptsService.getCustomAgents(CancellationToken.None) : [];
 		for (const agent of agents) {
-			if (!agent.hooks) {
+			if (!agent.hooks || !agent.enabled) {
 				continue;
 			}
 			for (const hookType of Object.values(HookType)) {

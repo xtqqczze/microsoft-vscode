@@ -357,7 +357,7 @@ export class CopilotCLIAgents extends Disposable implements ICopilotCLIAgents {
 
 	async resolveAgent(agentId: string): Promise<SweCustomAgent | undefined> {
 		for (const customAgent of await this.promptsService.getCustomAgents(CancellationToken.None)) {
-			if (isEnabledForCopilotCLI(customAgent) && agentId === customAgent.uri.toString()) {
+			if (customAgent.enabled && isEnabledForCopilotCLI(customAgent) && agentId === customAgent.uri.toString()) {
 				return this.toCustomAgent(customAgent)?.agent;
 			}
 		}
@@ -389,7 +389,7 @@ export class CopilotCLIAgents extends Disposable implements ICopilotCLIAgents {
 			});
 		}
 		for (const customAgent of await this.promptsService.getCustomAgents(CancellationToken.None)) {
-			if (!isEnabledForCopilotCLI(customAgent)) {
+			if (!customAgent.enabled || !isEnabledForCopilotCLI(customAgent)) {
 				continue;
 			}
 			// Skip legacy .chatmode.md files — they are a deprecated format
