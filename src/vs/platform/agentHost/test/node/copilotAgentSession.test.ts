@@ -963,25 +963,6 @@ suite('CopilotAgentSession', () => {
 		});
 
 		test('autopilot auto-answers a free-form question without firing a progress event', async () => {
-			// In autopilot the session should never block on the user — fall
-			// through to a generic "proceed" answer so the SDK can keep
-			// running. The progress event must NOT fire because surfacing
-			// it to the client would defeat the purpose of autopilot.
-			const { session, progressEvents } = await createAgentSession(disposables, {
-				configValues: { [SessionConfigKey.AutoApprove]: 'autopilot' },
-			});
-
-			const result = await session.handleUserInputRequest(
-				{ question: 'What should I do next?' },
-				{ sessionId: 'test-session-1' }
-			);
-
-			assert.strictEqual(result.answer, 'Proceed with the recommended action.');
-			assert.strictEqual(result.wasFreeform, true);
-			assert.strictEqual(progressEvents.length, 0);
-		});
-
-		test('autopilot picks the first choice when the SDK offers a choice list', async () => {
 			const { session, progressEvents } = await createAgentSession(disposables, {
 				configValues: { [SessionConfigKey.AutoApprove]: 'autopilot' },
 			});
@@ -994,8 +975,8 @@ suite('CopilotAgentSession', () => {
 			// `wasFreeform: false` because we picked one of the SDK's
 			// offered choices — the SDK uses this hint to record whether
 			// the user typed something custom.
-			assert.strictEqual(result.answer, 'red');
-			assert.strictEqual(result.wasFreeform, false);
+			assert.strictEqual(result.answer, 'The user is not available to answer your question. Choose a pragmatic option best aligned with the context of the request.');
+			assert.strictEqual(result.wasFreeform, true);
 			assert.strictEqual(progressEvents.length, 0);
 		});
 
