@@ -801,8 +801,9 @@ export class ExternalIngestIndex extends Disposable {
 	}
 
 	private async *getFilesToIndexFromDb(token: CancellationToken): AsyncIterable<ExternalIngestFile> {
-		// Get files that are either already marked "Yes" or "need to be evaluated" (Undetermined)
-		const rows = this._db.prepare('SELECT path, size, mtime, docSha, shouldIngest FROM Files WHERE shouldIngest IN (?, ?)').all(ShouldIngestState.Yes, ShouldIngestState.Undetermined) as unknown as Array<DbFileEntry>;
+		// Get files that are either already marked "Yes" or "need to be evaluated" (Undetermined).
+		// Order by path for deterministic results (important for stable checkpoint hashes).
+		const rows = this._db.prepare('SELECT path, size, mtime, docSha, shouldIngest FROM Files WHERE shouldIngest IN (?, ?) ORDER BY path').all(ShouldIngestState.Yes, ShouldIngestState.Undetermined) as unknown as Array<DbFileEntry>;
 
 		const limiter = new Limiter<ExternalIngestFile | undefined>(20);
 
