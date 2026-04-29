@@ -224,6 +224,7 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 			model: agent.model,
 			userInvocable: agent.visibility.userInvocable,
 			disableModelInvocation: !agent.visibility.agentInvocable,
+			enabled: agent.enabled,
 		};
 	}
 

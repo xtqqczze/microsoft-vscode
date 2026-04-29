@@ -65,7 +65,7 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
-          GITHUB_TOKEN: ${{ github.event.pull_request.head.repo.full_name == github.repository && secrets.VSCODE_OSS || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create node_modules archive
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -82,7 +82,7 @@ jobs:
       - name: Compile & Hygiene
         run: npm exec -- npm-run-all2 -lp core-ci hygiene eslint valid-layers-check define-class-fields-check vscode-dts-compile-check tsec-compile-check test-build-scripts
         env:
-          GITHUB_TOKEN: ${{ github.event.pull_request.head.repo.full_name == github.repository && secrets.VSCODE_OSS || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check cyclic dependencies
         run: node build/lib/checkCyclicDependencies.ts out-build
@@ -269,6 +269,9 @@ jobs:
         working-directory: extensions/copilot
         run: tar -xzf .build/build_cache/cache.tgz
 
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts --no-workspaces
+
       - name: Install dependencies
         if: steps.build-cache.outputs.cache-hit != 'true'
         working-directory: extensions/copilot
@@ -364,6 +367,9 @@ jobs:
         if: steps.build-cache.outputs.cache-hit == 'true'
         working-directory: extensions/copilot
         run: 7z.exe x .build/build_cache/cache.7z -aoa
+
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts --no-workspaces
 
       - name: Install dependencies
         if: steps.build-cache.outputs.cache-hit != 'true'

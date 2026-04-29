@@ -1137,7 +1137,7 @@ export class ChatService extends Disposable implements IChatService {
 				if (agentName) {
 					try {
 						const agents = await this.promptsService.getCustomAgents(token);
-						const customAgent = agents.find(a => a.name === agentName);
+						const customAgent = agents.find(a => a.name === agentName && a.enabled);
 						if (customAgent?.hooks) {
 							collectedHooks = mergeHooks(collectedHooks, customAgent.hooks);
 						}

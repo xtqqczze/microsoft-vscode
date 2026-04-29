@@ -57,6 +57,7 @@ const enum CopilotToolName {
 	AskUser = 'ask_user',
 	ReportIntent = 'report_intent',
 	Skill = 'skill',
+	ExitPlanMode = 'exit_plan_mode',
 }
 
 /** Parameters for the `bash` / `powershell` shell tools. */
@@ -249,6 +250,7 @@ export function getToolDisplayName(toolName: string): string {
 		case CopilotToolName.WebSearch: return localize('toolName.webSearch', "Web Search");
 		case CopilotToolName.WebFetch: return localize('toolName.webFetch', "Web Fetch");
 		case CopilotToolName.AskUser: return localize('toolName.askUser', "Ask User");
+		case CopilotToolName.ExitPlanMode: return localize('toolName.exitPlanMode', "Plan");
 		default: return toolName;
 	}
 }
@@ -323,6 +325,8 @@ export function getInvocationMessage(toolName: string, displayName: string, para
 			}
 			return localize('toolInvoke.glob', "Finding files");
 		}
+		case CopilotToolName.ExitPlanMode:
+			return localize('toolInvoke.exitPlanMode', "Presenting plan");
 		default:
 			return localize('toolInvoke.generic', "Using \"{0}\"", displayName);
 	}
@@ -402,6 +406,8 @@ export function getPastTenseMessage(toolName: string, displayName: string, param
 			}
 			return localize('toolComplete.glob', "Found files");
 		}
+		case CopilotToolName.ExitPlanMode:
+			return localize('toolComplete.exitPlanMode', "Exited plan mode");
 		default:
 			return localize('toolComplete.generic', "Used \"{0}\"", displayName);
 	}

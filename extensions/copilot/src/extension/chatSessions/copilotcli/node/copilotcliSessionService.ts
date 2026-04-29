@@ -1076,7 +1076,7 @@ export class CopilotCLISessionService extends Disposable implements ICopilotCLIS
 		const agents = await this._promptsService.getCustomAgents(CancellationToken.None);
 		const lookup = new Map<string, [ChatCustomAgent, Lazy<Promise<string>>]>();
 		for (const agent of agents) {
-			if (!isEnabledForCopilotCLI(agent)) {
+			if (!agent.enabled || !isEnabledForCopilotCLI(agent)) {
 				continue;
 			}
 			const lazyContent = new Lazy(() => this._promptsService.parseFile(agent.uri, CancellationToken.None).then(parsed => parsed.body?.getContent() ?? ''));

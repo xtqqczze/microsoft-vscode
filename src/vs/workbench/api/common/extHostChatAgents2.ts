@@ -545,6 +545,7 @@ export class ExtHostChatAgents2 extends Disposable implements ExtHostChatAgentsS
 			model: dto.model,
 			userInvocable: dto.userInvocable,
 			disableModelInvocation: dto.disableModelInvocation,
+			enabled: dto.enabled,
 		});
 	}
 
