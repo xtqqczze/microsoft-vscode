@@ -40,8 +40,8 @@ function createMockExternalIngestClient(options?: {
 			return Array.from(ingestedFiles.values());
 		},
 		searchCalls,
-		async updateIndex(_filesetName: string, _currentCheckpoint: string | undefined, allFiles: AsyncIterable<ExternalIngestFile>, _callTracker: CallTracker, _token: CancellationToken, _onProgress?: (message: string) => void): Promise<Result<ExternalIngestUpdateIndexResult, Error>> {
-			for await (const file of allFiles) {
+		async updateIndex(_filesetName: string, _currentCheckpoint: string | undefined, allFiles: readonly ExternalIngestFile[], _callTracker: CallTracker, _token: CancellationToken, _onProgress?: (message: string) => void): Promise<Result<ExternalIngestUpdateIndexResult, Error>> {
+			for (const file of allFiles) {
 				ingestedFiles.set(file.uri, file);
 			}
 			return Result.ok({ checkpoint: 'mock-checkpoint', totalFileCount: ingestedFiles.size, updatedFileCount: ingestedFiles.size });

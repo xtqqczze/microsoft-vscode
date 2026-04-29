@@ -39,7 +39,7 @@ import { IWorkspaceService } from '../../../workspace/common/workspaceService';
 import { StrategySearchSizing, WorkspaceChunkQueryWithEmbeddings } from '../../common/workspaceChunkSearch';
 import { shouldPotentiallyIndexFile } from '../workspaceFileIndex';
 import { CodeSearchRepoStatus, TriggerIndexingError, TriggerRemoteIndexingError } from './codeSearchRepo';
-import { ExternalIngestFile, ExternalIngestRequestError, IExternalIngestClient } from './externalIngestClient';
+import { computeCheckpointHash, ExternalIngestFile, ExternalIngestRequestError, IExternalIngestClient } from './externalIngestClient';
 import { WorkspaceFolderIdMap } from './workspaceFolderIdMap';
 
 const debug = false;
@@ -110,6 +110,8 @@ export class ExternalIngestIndex extends Disposable {
 		progressMessage: string | undefined;
 
 		completed: boolean;
+
+		readonly checkpointHash: string;
 	};
 
 	/**
@@ -322,11 +324,27 @@ export class ExternalIngestIndex extends Disposable {
 
 		const currentCheckpoint = this.getCurrentIndexCheckpoint();
 
+		// Pre-collect all files and compute the checkpoint hash so we can
+		// detect whether the workspace state has actually changed.
+		const allFiles: ExternalIngestFile[] = [];
+		for await (const file of this.getFilesToIndexFromDb(callerToken)) {
+			allFiles.push(file);
+		}
+		const checkpointHash = computeCheckpointHash(allFiles);
+
+		// If there is a running operation with the same checkpoint hash,
+		// the workspace state has not changed — reuse the existing operation.
+		if (this._currentIngestOperation && !this._currentIngestOperation.completed && this._currentIngestOperation.checkpointHash === checkpointHash) {
+			this._logService.info('ExternalIngestIndex::doIngest(): Workspace state unchanged, reusing existing ingest operation');
+			return this._currentIngestOperation.promise;
+		}
+
 		// Track building state
 		const operation: typeof this._currentIngestOperation = {
 			promise: undefined!,
 			progressMessage: undefined,
 			completed: false,
+			checkpointHash,
 		};
 
 		const sw = new StopWatch();
@@ -347,7 +365,7 @@ export class ExternalIngestIndex extends Disposable {
 				const result = await this._client.updateIndex(
 					filesetName,
 					currentCheckpoint,
-					this.getFilesToIndexFromDb(token),
+					allFiles,
 					telemetryInfo.callTracker,
 					token,
 					wrappedOnProgress
@@ -425,7 +443,7 @@ export class ExternalIngestIndex extends Disposable {
 			}
 		});
 
-		// Cancel existing
+		// Cancel existing since workspace state has changed
 		this._currentIngestOperation?.promise.cancel();
 
 		operation.promise = updatePromise;
