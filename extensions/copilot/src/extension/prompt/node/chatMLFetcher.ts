@@ -27,7 +27,7 @@ import { sendEngineMessagesTelemetry } from '../../../platform/networking/node/c
 import { CAPIWebSocketErrorEvent, IChatWebSocketManager, isCAPIWebSocketError } from '../../../platform/networking/node/chatWebSocketManager';
 import { sendCommunicationErrorTelemetry } from '../../../platform/networking/node/stream';
 import { ChatFailKind, ChatRequestCanceled, ChatRequestFailed, ChatResults, FetchResponseKind } from '../../../platform/openai/node/fetch';
-import { CopilotChatAttr, emitInferenceDetailsEvent, GenAiAttr, GenAiMetrics, GenAiOperationName, GenAiProviderName, normalizeProviderMessages, StdAttr, toSystemInstructions, truncateForOTel } from '../../../platform/otel/common/index';
+import { CopilotChatAttr, emitInferenceDetailsEvent, GenAiAttr, GenAiMetrics, GenAiOperationName, GenAiProviderName, normalizeProviderMessages, StdAttr, toSystemInstructions, toToolDefinitions, truncateForOTel } from '../../../platform/otel/common/index';
 import { IOTelService, ISpanHandle, SpanKind, SpanStatusCode } from '../../../platform/otel/common/otelService';
 import { IRequestLogger } from '../../../platform/requestLogger/common/requestLogger';
 import { getCurrentCapturingToken } from '../../../platform/requestLogger/node/requestLogger';
@@ -217,6 +217,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 				const countTokens = () => tokenCountPromise ??= chatEndpoint.acquireTokenizer().countMessagesTokens(messages);
 				const copilotToken = await this._authenticationService.getCopilotToken();
 				usernameToScrub = copilotToken.username;
+
 				const fetchResult = await this._fetchAndStreamChat(
 					chatEndpoint,
 					requestBody,
@@ -294,6 +295,13 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 					if (capiMessages) {
 						// Normalize provider-specific content (Anthropic tool_use/tool_result, OpenAI tool messages) to OTel schema
 						otelInferenceSpan.setAttribute(GenAiAttr.INPUT_MESSAGES, truncateForOTel(JSON.stringify(normalizeProviderMessages(capiMessages))));
+					}
+					// Tool definitions: emit on every chat span so trace viewers can render the
+					// tool catalog per LLM call (issue #299934). Includes `parameters` per
+					// OTel GenAI semantic conventions (issue #300318).
+					const toolDefs = toToolDefinitions(requestBody.tools);
+					if (toolDefs) {
+						otelInferenceSpan.setAttribute(GenAiAttr.TOOL_DEFINITIONS, truncateForOTel(JSON.stringify(toolDefs)));
 					}
 				}
 				tokenCount = await countTokens();

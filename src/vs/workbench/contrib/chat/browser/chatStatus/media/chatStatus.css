@@ -23,7 +23,8 @@
 	align-items: center;
 	gap: 6px;
 	width: 100%;
-	padding: 14px 0 0 0;
+	margin-top: 8px;
+	padding: 6px 0 6px 0;
 	border: none;
 	border-top: 1px solid var(--vscode-editorWidget-border);
 	background: none;
@@ -60,11 +61,13 @@
 }
 
 .chat-status-bar-entry-tooltip .collapsible-content > .collapsible-inner {
-	overflow: hidden;
+	overflow-y: clip;
+	overflow-x: visible;
+	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
-	padding-top: 10px;
+	padding: 10px 0 4px;
 }
 
 .chat-status-bar-entry-tooltip .collapsible-content > .collapsible-inner > hr {
