@@ -86,9 +86,15 @@ export class AgentEventMapper {
 			}
 
 			case 'tool_start': {
-				// A new tool call invalidates the current markdown part so the
-				// next text delta creates a fresh part after the tool call.
+				// A new tool call invalidates the current markdown and reasoning
+				// parts so the next text/reasoning delta creates fresh parts
+				// after the tool call. The Copilot SDK emits multiple rounds
+				// of (reasoning → message → tool calls) within a single chat
+				// turn; without this, every later round's reasoning would be
+				// appended onto the very first reasoning part and bunch at
+				// the top of the response on restore.
 				this._currentMarkdownPartId.delete(session);
+				this._currentReasoningPartId.delete(session);
 
 				// The Copilot SDK provides full parameters at tool_start time.
 				// We emit both toolCallStart (streaming → created) and toolCallReady

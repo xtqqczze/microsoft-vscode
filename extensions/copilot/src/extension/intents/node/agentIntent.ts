@@ -133,6 +133,11 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 	// The tool is registered in core as a built-in but needs explicit opt-in here.
 	allowTools['task_complete'] = request.permissionLevel === 'autopilot';
 
+	// Disable askQuestions in autopilot mode — the user is not available to respond.
+	if (request.permissionLevel === 'autopilot') {
+		allowTools[ToolName.CoreAskQuestions] = false;
+	}
+
 	allowTools[ToolName.EditFilesPlaceholder] = false;
 	allowTools[ToolName.SessionStoreSql] = false; // Only available via /chronicle
 	// todo@connor4312: string check here is for back-compat for 1.109 Insiders

@@ -238,6 +238,63 @@ suite('AgentEventMapper', () => {
 		assert.strictEqual(reasoning.partId, partId);
 	});
 
+	test('reasoning event after tool_start creates a fresh responsePart', () => {
+		// The Copilot SDK emits multiple rounds of (reasoning → message →
+		// tool calls) within a single chat turn. Each new reasoning batch
+		// after a tool call must produce a fresh Reasoning ResponsePart so
+		// it renders interleaved with the tool calls in the response.
+		// Otherwise the SessionReasoning reducer appends every later round
+		// onto the very first part, causing all reasoning to bunch at the
+		// top of the response when the session is later restored from state.
+		const first: IAgentReasoningEvent = { session, type: 'reasoning', content: 'Round 1 thoughts' };
+		mapper.mapProgressEventToActions(first, session.toString(), turnId);
+
+		const toolStart: IAgentToolStartEvent = {
+			session, type: 'tool_start',
+			toolCallId: 'tc-1', toolName: 'bash', displayName: 'Bash',
+			invocationMessage: 'Running', toolInput: 'ls',
+		};
+		mapper.mapProgressEventToActions(toolStart, session.toString(), turnId);
+
+		const second: IAgentReasoningEvent = { session, type: 'reasoning', content: 'Round 2 thoughts' };
+		const actions = mapToArray(mapper.mapProgressEventToActions(second, session.toString(), turnId));
+		assert.strictEqual(actions.length, 1);
+		assert.strictEqual(actions[0].type, 'session/responsePart');
+		const part = (actions[0] as IResponsePartAction).part;
+		assert.strictEqual(part.kind, 'reasoning');
+		assert.strictEqual(part.content, 'Round 2 thoughts');
+	});
+
+	test('reasoning event after tool_complete creates a fresh responsePart', () => {
+		// Symmetric to the tool_start case: after a tool call finishes,
+		// the next reasoning batch belongs to a new round and must not
+		// be appended onto the previous round's reasoning part.
+		const first: IAgentReasoningEvent = { session, type: 'reasoning', content: 'Round 1 thoughts' };
+		mapper.mapProgressEventToActions(first, session.toString(), turnId);
+
+		const toolStart: IAgentToolStartEvent = {
+			session, type: 'tool_start',
+			toolCallId: 'tc-1', toolName: 'bash', displayName: 'Bash',
+			invocationMessage: 'Running', toolInput: 'ls',
+		};
+		mapper.mapProgressEventToActions(toolStart, session.toString(), turnId);
+
+		const toolComplete: IAgentToolCompleteEvent = {
+			session, type: 'tool_complete',
+			toolCallId: 'tc-1',
+			result: { success: true, content: [{ type: ToolResultContentType.Text, text: 'ok' }], pastTenseMessage: 'Ran' },
+		};
+		mapper.mapProgressEventToActions(toolComplete, session.toString(), turnId);
+
+		const second: IAgentReasoningEvent = { session, type: 'reasoning', content: 'Round 2 thoughts' };
+		const actions = mapToArray(mapper.mapProgressEventToActions(second, session.toString(), turnId));
+		assert.strictEqual(actions.length, 1);
+		assert.strictEqual(actions[0].type, 'session/responsePart');
+		const part = (actions[0] as IResponsePartAction).part;
+		assert.strictEqual(part.kind, 'reasoning');
+		assert.strictEqual(part.content, 'Round 2 thoughts');
+	});
+
 	test('message event with no prior deltas creates responsePart', () => {
 		const event: IAgentMessageEvent = {
 			session,

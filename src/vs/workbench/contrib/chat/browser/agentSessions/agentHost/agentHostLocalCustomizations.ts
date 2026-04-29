@@ -6,7 +6,8 @@
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
-import { basename, isEqualOrParent } from '../../../../../../base/common/resources.js';
+import { ResourceMap } from '../../../../../../base/common/map.js';
+import { basename, dirname, isEqualOrParent } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { type URI as ProtocolURI } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { type CustomizationRef } from '../../../../../../platform/agentHost/common/state/sessionState.js';
@@ -110,19 +111,42 @@ export class LocalAgentHostCustomizationItemProvider extends Disposable implemen
 	}
 
 	async provideChatSessionCustomizations(token: CancellationToken): Promise<ICustomizationItem[]> {
-		const enumerated = await enumerateLocalCustomizationsForHarness(this._promptsService, this._syncProvider, token);
+		const [enumerated, skills] = await Promise.all([
+			enumerateLocalCustomizationsForHarness(this._promptsService, this._syncProvider, token),
+			this._promptsService.findAgentSkills(token),
+		]);
 		if (token.isCancellationRequested) {
 			return [];
 		}
-		return enumerated.map(file => ({
-			uri: file.uri,
-			type: file.type,
-			name: getFriendlyName(basename(file.uri)),
-			storage: file.storage,
-			enabled: !file.disabled,
-			extensionId: undefined,
-			pluginUri: undefined,
-		}));
+		// Skill files are conventionally named SKILL.md inside a per-skill
+		// folder, so the filename is not a useful display name. Look up the
+		// parsed skill metadata (name + description from frontmatter) and
+		// fall back to the parent folder name when a skill failed to parse.
+		const skillByUri = new ResourceMap<{ name: string; description: string | undefined }>();
+		for (const skill of skills ?? []) {
+			skillByUri.set(skill.uri, { name: skill.name, description: skill.description });
+		}
+		return enumerated.map(file => {
+			let name: string;
+			let description: string | undefined;
+			if (file.type === PromptsType.skill) {
+				const parsed = skillByUri.get(file.uri);
+				name = parsed?.name ?? basename(dirname(file.uri));
+				description = parsed?.description;
+			} else {
+				name = getFriendlyName(basename(file.uri));
+			}
+			return {
+				uri: file.uri,
+				type: file.type,
+				name,
+				description,
+				storage: file.storage,
+				enabled: !file.disabled,
+				extensionId: undefined,
+				pluginUri: undefined,
+			};
+		});
 	}
 }
 
