@@ -709,11 +709,6 @@ export class ExternalIngestIndex extends Disposable {
 	 * This does NOT consider whether the file should be ingested, only whether it should be tracked.
 	 */
 	public async shouldTrackFile(uri: URI, token: CancellationToken): Promise<boolean> {
-		// TODO: Support non-file schemes?
-		if (uri.scheme !== Schemas.file) {
-			return false;
-		}
-
 		// Only track files within the current workspace
 		if (!this._instantiationService.invokeFunction(accessor => shouldPotentiallyIndexFile(accessor, uri))) {
 			return false;
