@@ -225,9 +225,11 @@ export function normalizeProviderMessages(messages: ReadonlyArray<Record<string,
  * Accepts the variants emitted by the different request bodies/providers:
  * - OpenAI Chat Completions: `{ type: 'function', function: { name, description, parameters } }`
  * - OpenAI Responses API:    `{ type: 'function', name, description, parameters }`
- * - OpenAI tool search:      `{ type: 'tool_search', description, parameters }`
  * - Anthropic Messages API:  `{ name, description, input_schema }`
  * - VS Code tool info:       `{ name, description, inputSchema }`
+ *
+ * Tools without a name (e.g. OpenAI client-side `tool_search`) are skipped
+ * because OTel `gen_ai.tool.definitions` requires a name per entry.
  *
  * @see https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/#gen-ai-tool-definitions
  */

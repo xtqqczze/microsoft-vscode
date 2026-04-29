@@ -884,14 +884,14 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 						// Includes `parameters` (inputSchema) per OTel GenAI semantic convention so
 						// trace viewers can render full tool signatures (issue #300318).
 						if (result.availableTools.length > 0) {
-							span.setAttribute(GenAiAttr.TOOL_DEFINITIONS, JSON.stringify(
+							span.setAttribute(GenAiAttr.TOOL_DEFINITIONS, truncateForOTel(JSON.stringify(
 								result.availableTools.map(t => ({
 									type: 'function',
 									name: t.name,
 									description: t.description,
 									parameters: t.inputSchema,
 								}))
-							));
+							)));
 						}
 					}
 					span.setStatus(SpanStatusCode.OK);
@@ -1199,12 +1199,12 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 		if (!this.toolsAvailableEmitted && this.agentSpan && availableTools.length > 0) {
 			this.toolsAvailableEmitted = true;
 			this.agentSpan.addEvent('tools_available', {
-				toolDefinitions: JSON.stringify(availableTools.map(t => ({
+				toolDefinitions: truncateForOTel(JSON.stringify(availableTools.map(t => ({
 					type: 'function',
 					name: t.name,
 					description: t.description,
 					parameters: t.inputSchema,
-				}))),
+				})))),
 				...(this.chatSessionIdForTools ? { [CopilotChatAttr.CHAT_SESSION_ID]: this.chatSessionIdForTools } : {}),
 			});
 		}
