@@ -392,11 +392,15 @@ function createTestServices(disposables: DisposableStore, workingDirectoryResolv
 	instantiationService.stub(IChatEditingService, {
 		registerEditingSessionProvider: () => toDisposable(() => { }),
 	});
-	instantiationService.stub(IChatService, {
+	const chatService = {
 		getSession: () => undefined,
 		onDidCreateModel: Event.None,
-		removePendingRequest: () => { },
-	});
+		removePendingRequestCalls: [] as { sessionResource: URI; requestId: string }[],
+		removePendingRequest(sessionResource: URI, requestId: string) {
+			this.removePendingRequestCalls.push({ sessionResource, requestId });
+		},
+	};
+	instantiationService.stub(IChatService, chatService);
 	instantiationService.stub(IAgentHostFileSystemService, {
 		registerAuthority: () => toDisposable(() => { }),
 		ensureSyncedCustomizationProvider: () => { },
@@ -436,11 +440,11 @@ function createTestServices(disposables: DisposableStore, workingDirectoryResolv
 	});
 	instantiationService.stub(IWorkbenchEnvironmentService, { isSessionsWindow: false } as Partial<IWorkbenchEnvironmentService>);
 
-	return { instantiationService, agentHostService, chatAgentService, chatWidgetService };
+	return { instantiationService, agentHostService, chatAgentService, chatWidgetService, chatService };
 }
 
 function createContribution(disposables: DisposableStore, opts?: { authServiceOverride?: Partial<IAuthenticationService>; workingDirectoryResolver?: { resolve(sessionResource: URI): URI | undefined } }) {
-	const { instantiationService, agentHostService, chatAgentService, chatWidgetService } = createTestServices(disposables, opts?.workingDirectoryResolver, opts?.authServiceOverride);
+	const { instantiationService, agentHostService, chatAgentService, chatWidgetService, chatService } = createTestServices(disposables, opts?.workingDirectoryResolver, opts?.authServiceOverride);
 
 	const listController = disposables.add(instantiationService.createInstance(AgentHostSessionListController, 'agent-host-copilot', 'copilot', agentHostService, undefined, 'local'));
 	const sessionHandler = disposables.add(instantiationService.createInstance(AgentHostSessionHandler, {
@@ -454,7 +458,7 @@ function createContribution(disposables: DisposableStore, opts?: { authServiceOv
 	}));
 	const contribution = disposables.add(instantiationService.createInstance(AgentHostContribution));
 
-	return { contribution, listController, sessionHandler, agentHostService, chatAgentService, chatWidgetService };
+	return { contribution, listController, sessionHandler, agentHostService, chatAgentService, chatWidgetService, chatService };
 }
 
 function makeRequest(overrides: Partial<{ message: string; sessionResource: URI; variables: IChatAgentRequest['variables']; userSelectedModelId: string; modelConfiguration: Record<string, unknown>; agentHostSessionConfig: Record<string, string>; agentId: string }> = {}): IChatAgentRequest {
@@ -946,6 +950,17 @@ suite('AgentHostChatContribution', () => {
 			assert.strictEqual(totalContent, 'hello world');
 		}));
 
+		test('live turn marks chat session complete after turnComplete', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
+
+			const { turnPromise, chatSession, session, turnId, fire } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables);
+
+			fire({ type: 'session/turnComplete', session, turnId } as SessionAction);
+			await turnPromise;
+
+			assert.strictEqual(chatSession.isCompleteObs?.get(), true, 'should be complete after turn finishes');
+		}));
+
 		test('tool_start events become toolInvocation progress', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
 			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
 
@@ -1297,6 +1312,45 @@ suite('AgentHostChatContribution', () => {
 
 			// Cancellation now dispatches session/turnCancelled action
 			assert.ok(agentHostService.dispatchedActions.some(a => a.action.type === 'session/turnCancelled'));
+		}));
+
+		test('cancellation marks chat session complete', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
+
+			const cts = new CancellationTokenSource();
+			disposables.add(cts);
+
+			const { turnPromise, chatSession } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables, {
+				cancellationToken: cts.token,
+			});
+
+			cts.cancel();
+			await turnPromise;
+
+			assert.strictEqual(chatSession.isCompleteObs?.get(), true, 'chat session should be marked complete after cancellation');
+		}));
+
+		test('cancellation after natural completion does not dispatch turnCancelled', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
+
+			const cts = new CancellationTokenSource();
+			disposables.add(cts);
+
+			const { turnPromise, session, turnId, fire } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables, {
+				cancellationToken: cts.token,
+			});
+
+			// Turn completes naturally on its own.
+			fire({ type: 'session/turnComplete', session, turnId } as SessionAction);
+			await turnPromise;
+
+			// Now the request's cancellation token fires (e.g. ChatService
+			// cancelling a long-disposed token, or a stale 'stop' click). We
+			// must NOT dispatch turnCancelled for an already-finished turn.
+			const beforeCancelCount = agentHostService.dispatchedActions.filter(a => a.action.type === 'session/turnCancelled').length;
+			cts.cancel();
+			const afterCancelCount = agentHostService.dispatchedActions.filter(a => a.action.type === 'session/turnCancelled').length;
+			assert.strictEqual(afterCancelCount, beforeCancelCount, 'turnCancelled should not be dispatched after natural completion');
 		}));
 	});
 
@@ -3118,6 +3172,92 @@ suite('AgentHostChatContribution', () => {
 			await timeout(10);
 
 			assert.strictEqual(chatSession.isCompleteObs!.get(), true);
+		}));
+
+		test('removes consumed queued message from chat model when server-initiated turn appears', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService, chatAgentService, chatService } = createContribution(disposables);
+
+			const sessionResource = URI.from({ scheme: 'agent-host-copilot', path: '/untitled-queue-removal' });
+			const chatSession = await sessionHandler.provideChatSessionContent(sessionResource, CancellationToken.None);
+			disposables.add(toDisposable(() => chatSession.dispose()));
+
+			const registered = chatAgentService.registeredAgents.get('agent-host-copilot')!;
+			agentHostService.dispatchedActions.length = 0;
+
+			// First, do a normal turn so the backend session exists.
+			const turn1Promise = registered.impl.invoke(
+				makeRequest({ message: 'Init', sessionResource }),
+				() => { }, [], CancellationToken.None,
+			);
+			await timeout(10);
+			const dispatch1 = agentHostService.turnActions[0];
+			const action1 = dispatch1.action as ITurnStartedAction;
+			const session = action1.session;
+			agentHostService.fireAction({ action: dispatch1.action, serverSeq: 1, origin: { clientId: agentHostService.clientId, clientSeq: dispatch1.clientSeq } });
+			agentHostService.fireAction({ action: { type: 'session/turnComplete', session, turnId: action1.turnId } as SessionAction, serverSeq: 2, origin: undefined });
+			await turn1Promise;
+
+			// Add a queued message to the protocol state so it's tracked.
+			agentHostService.fireAction({
+				action: { type: 'session/pendingMessageSet', session, kind: 'queued', id: 'q-1', userMessage: { text: 'will be consumed' } } as SessionAction,
+				serverSeq: 3, origin: undefined,
+			});
+			await timeout(10);
+
+			// Now the server consumes it: a server-initiated turn appears
+			// and the queued message disappears in the same state change.
+			chatService.removePendingRequestCalls.length = 0;
+			agentHostService.fireAction({
+				action: { type: 'session/turnStarted', session, turnId: 'server-turn-q', userMessage: { text: 'will be consumed' }, queuedMessageId: 'q-1' } as SessionAction,
+				serverSeq: 4, origin: undefined,
+			});
+			await timeout(10);
+
+			// The handler should have removed the consumed queued request from the chat model.
+			const removedQueueIds = chatService.removePendingRequestCalls.filter(c => c.requestId === 'q-1');
+			assert.strictEqual(removedQueueIds.length, 1, 'consumed queued message should be removed from chat model');
+		}));
+
+		test('removes steering message from chat model when steering id changes', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService, chatAgentService, chatService } = createContribution(disposables);
+
+			const sessionResource = URI.from({ scheme: 'agent-host-copilot', path: '/untitled-steering-removal' });
+			const chatSession = await sessionHandler.provideChatSessionContent(sessionResource, CancellationToken.None);
+			disposables.add(toDisposable(() => chatSession.dispose()));
+
+			const registered = chatAgentService.registeredAgents.get('agent-host-copilot')!;
+			agentHostService.dispatchedActions.length = 0;
+
+			// Backend session is created via a normal turn.
+			const turn1Promise = registered.impl.invoke(
+				makeRequest({ message: 'Init', sessionResource }),
+				() => { }, [], CancellationToken.None,
+			);
+			await timeout(10);
+			const dispatch1 = agentHostService.turnActions[0];
+			const action1 = dispatch1.action as ITurnStartedAction;
+			const session = action1.session;
+			agentHostService.fireAction({ action: dispatch1.action, serverSeq: 1, origin: { clientId: agentHostService.clientId, clientSeq: dispatch1.clientSeq } });
+			agentHostService.fireAction({ action: { type: 'session/turnComplete', session, turnId: action1.turnId } as SessionAction, serverSeq: 2, origin: undefined });
+			await turn1Promise;
+
+			// Set a steering message on the protocol state.
+			agentHostService.fireAction({
+				action: { type: 'session/pendingMessageSet', session, kind: 'steering', id: 'steer-1', userMessage: { text: 'be more careful' } } as SessionAction,
+				serverSeq: 3, origin: undefined,
+			});
+			await timeout(10);
+			chatService.removePendingRequestCalls.length = 0;
+
+			// Steering message is consumed by the agent.
+			agentHostService.fireAction({
+				action: { type: 'session/pendingMessageRemoved', session, kind: 'steering', id: 'steer-1' } as SessionAction,
+				serverSeq: 4, origin: undefined,
+			});
+			await timeout(10);
+
+			const removed = chatService.removePendingRequestCalls.filter(c => c.requestId === 'steer-1');
+			assert.strictEqual(removed.length, 1, 'previously-set steering message should be removed from chat model when it is cleared');
 		}));
 	});
 

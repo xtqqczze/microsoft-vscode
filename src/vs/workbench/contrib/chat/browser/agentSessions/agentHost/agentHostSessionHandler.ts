@@ -653,11 +653,6 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 
 		await this._handleTurn(resolvedSession, request, progress, cancellationToken);
 
-		const activeSession = this._activeSessions.get(request.sessionResource);
-		if (activeSession) {
-			activeSession.isCompleteObs.set(true, undefined);
-		}
-
 		return {};
 	}
 
@@ -961,16 +956,31 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 
 		// Wait for the turn to reach a terminal state. The observable graph
 		// installed below drives all progress emission via the `progress`
-		// sink and resolves `done` from the `onTurnEnded` callback.
+		// sink and resolves the promise from `onTurnEnded`. Cancellation is
+		// surfaced through the same path: the observer disposes itself when
+		// `cancellationToken` fires, then calls `onTurnEnded(undefined)`.
 		await new Promise<void>(resolve => {
-			const turnObserver = this._observeTurn({
+			const store = new DisposableStore();
+			const cancelSub = store.add(cancellationToken.onCancellationRequested(() => {
+				cancelSub.dispose();
+				this._logService.info(`[AgentHost] Cancellation requested for ${session.toString()}, dispatching turnCancelled`);
+				this._config.connection.dispatch({
+					type: ActionType.SessionTurnCancelled,
+					session: session.toString(),
+					turnId,
+				});
+			}));
+
+			store.add(this._observeTurn({
 				backendSession: session,
 				sessionResource: request.sessionResource,
 				turnId,
 				sink: progress,
 				cancellationToken,
 				onTurnEnded: () => {
+					store.dispose();
 					this._clientDispatchedTurnIds.delete(turnId);
+					this._activeSessions.get(request.sessionResource)?.isCompleteObs.set(true, undefined);
 					resolve();
 				},
 				onFileEdits: (tc) => {
@@ -979,20 +989,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 						progress(editParts);
 					}
 				},
-			});
-
-			const cancelSub = cancellationToken.onCancellationRequested(() => {
-				this._logService.info(`[AgentHost] Cancellation requested for ${session.toString()}, dispatching turnCancelled`);
-				this._config.connection.dispatch({
-					type: ActionType.SessionTurnCancelled,
-					session: session.toString(),
-					turnId,
-				});
-				cancelSub.dispose();
-				turnObserver.dispose();
-				this._clientDispatchedTurnIds.delete(turnId);
-				resolve();
-			});
+			}));
 		});
 	}
 
@@ -1172,9 +1169,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				try {
 					opts.onTurnEnded?.(lastTurn);
 				} finally {
-					if (!store.isDisposed) {
-						store.dispose();
-					}
+					store.dispose();
 				}
 			});
 		};

@@ -16,7 +16,8 @@ import { IFileService } from '../../../files/common/files.js';
 import { InstantiationService } from '../../../instantiation/common/instantiationService.js';
 import { ServiceCollection } from '../../../instantiation/common/serviceCollection.js';
 import { ILogService, NullLogService } from '../../../log/common/log.js';
-import { AgentSession, IAgentProgressEvent, IAgentUserInputRequestEvent } from '../../common/agentService.js';
+import { AgentSession, AgentSignal } from '../../common/agentService.js';
+import { signalToLegacyView, type LegacyMockEvent } from './mockAgent.js';
 import { IDiffComputeService } from '../../common/diffComputeService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import { AttachmentType, SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, ToolResultContentType } from '../../common/state/sessionState.js';
@@ -93,7 +94,7 @@ function invokeClientToolHandler(tool: Pick<Tool, 'name' | 'handler'>, toolCallI
 }
 
 type ISessionInternalsForTest = {
-	_onDidSessionProgress: { fire(event: IAgentProgressEvent): void };
+	_onDidSessionProgress: { fire(event: AgentSignal): void };
 	_editTracker: {
 		trackEditStart(path: string): Promise<void>;
 		completeEdit(path: string): Promise<void>;
@@ -114,29 +115,53 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 }): Promise<{
 	session: CopilotAgentSession;
 	mockSession: MockCopilotSession;
-	progressEvents: IAgentProgressEvent[];
-	waitForProgress: (predicate: (event: IAgentProgressEvent) => boolean) => Promise<IAgentProgressEvent>;
+	progressEvents: LegacyMockEvent[];
+	waitForProgress: (predicate: (event: LegacyMockEvent) => boolean) => Promise<LegacyMockEvent>;
 }> {
-	const progressEmitter = disposables.add(new Emitter<IAgentProgressEvent>());
-	const progressEvents: IAgentProgressEvent[] = [];
-	const waiters: { predicate: (event: IAgentProgressEvent) => boolean; deferred: DeferredPromise<IAgentProgressEvent> }[] = [];
-	disposables.add(progressEmitter.event(e => {
-		progressEvents.push(e);
+	const progressEmitter = disposables.add(new Emitter<AgentSignal>());
+	const progressEvents: LegacyMockEvent[] = [];
+	const waiters: { predicate: (event: LegacyMockEvent) => boolean; deferred: DeferredPromise<LegacyMockEvent> }[] = [];
+
+	const notify = (view: LegacyMockEvent): void => {
+		progressEvents.push(view);
 		for (let i = waiters.length - 1; i >= 0; i--) {
-			if (waiters[i].predicate(e)) {
+			if (waiters[i].predicate(view)) {
 				const { deferred } = waiters[i];
 				waiters.splice(i, 1);
-				deferred.complete(e);
+				deferred.complete(view);
 			}
 		}
+	};
+
+	disposables.add(progressEmitter.event(signal => {
+		const view = signalToLegacyView(signal);
+		if (!view) {
+			return;
+		}
+		// Auto-ready Ready actions emitted in the same fire-batch as a tool_start
+		// describe the same logical event in the legacy vocabulary. Merge the
+		// invocation/toolInput/edits fields back into the prior tool_start view
+		// so existing tests that assert on `tool_start.invocationMessage` etc.
+		// see a single combined entry. Permission-driven ready signals (kind:
+		// 'tool_ready') and externally triggered ready actions are pushed
+		// separately.
+		if (view.type === 'tool_ready' && signal.kind === 'action') {
+			const last = progressEvents[progressEvents.length - 1];
+			if (last?.type === 'tool_start' && last.toolCallId === view.toolCallId) {
+				last.invocationMessage = view.invocationMessage;
+				last.toolInput = view.toolInput;
+				return;
+			}
+		}
+		notify(view);
 	}));
 
-	const waitForProgress = (predicate: (event: IAgentProgressEvent) => boolean): Promise<IAgentProgressEvent> => {
+	const waitForProgress = (predicate: (event: LegacyMockEvent) => boolean): Promise<LegacyMockEvent> => {
 		const existing = progressEvents.find(predicate);
 		if (existing) {
 			return Promise.resolve(existing);
 		}
-		const deferred = new DeferredPromise<IAgentProgressEvent>();
+		const deferred = new DeferredPromise<LegacyMockEvent>();
 		waiters.push({ predicate, deferred });
 		return deferred.p;
 	};
@@ -693,7 +718,7 @@ suite('CopilotAgentSession', () => {
 			}
 		});
 
-		test('complete message with tool requests is forwarded', async () => {
+		test('complete assistant message without preceding deltas surfaces a markdown response part', async () => {
 			const { mockSession, progressEvents } = await createAgentSession(disposables);
 			mockSession.fire('assistant.message', {
 				messageId: 'msg-2',
@@ -706,12 +731,14 @@ suite('CopilotAgentSession', () => {
 				}],
 			} as SessionEventPayload<'assistant.message'>['data']);
 
+			// The session emits a fresh markdown response part for the
+			// content. Tool calls fire their own `tool_start` events, so
+			// `toolRequests` on the assistant message are not forwarded
+			// during live streaming.
 			assert.strictEqual(progressEvents.length, 1);
-			assert.strictEqual(progressEvents[0].type, 'message');
-			if (progressEvents[0].type === 'message') {
+			assert.strictEqual(progressEvents[0].type, 'delta');
+			if (progressEvents[0].type === 'delta') {
 				assert.strictEqual(progressEvents[0].content, 'Let me help you.');
-				assert.strictEqual(progressEvents[0].toolRequests?.length, 1);
-				assert.strictEqual(progressEvents[0].toolRequests?.[0].toolCallId, 'tc-20');
 			}
 		});
 	});
@@ -720,7 +747,7 @@ suite('CopilotAgentSession', () => {
 
 	suite('user input handling', () => {
 
-		function assertUserInputEvent(event: IAgentProgressEvent): asserts event is IAgentUserInputRequestEvent {
+		function assertUserInputEvent(event: LegacyMockEvent): asserts event is LegacyMockEvent & { type: 'user_input_request' } {
 			assert.strictEqual(event.type, 'user_input_request');
 		}
 
