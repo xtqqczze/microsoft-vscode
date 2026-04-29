@@ -35,7 +35,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { isWindows, isMacintosh } from '../../../../base/common/platform.js';
 import { UpdateHoverWidget } from './updateHoverWidget.js';
 import { ChatEntitlement, ChatEntitlementService, IChatEntitlementService } from '../../../../workbench/services/chat/common/chatEntitlementService.js';
-import { ChatStatusDashboard } from '../../../../workbench/contrib/chat/browser/chatStatus/chatStatusDashboard.js';
+import { ChatStatusDashboard, IChatStatusDashboardOptions } from '../../../../workbench/contrib/chat/browser/chatStatus/chatStatusDashboard.js';
 import { HoverPosition } from '../../../../base/browser/ui/hover/hoverWidget.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { getAccountProfileImageUrl, getAccountTitleBarBadgeKey, getAccountTitleBarState, resolveAccountInfo } from '../../../browser/accountTitleBarState.js';
@@ -608,22 +608,10 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 			const subscriptionHeader = append(subscriptionSection, $('.sessions-account-titlebar-panel-section-header'));
 			const subscriptionHeading = append(subscriptionHeader, $('div.sessions-account-titlebar-panel-section-title', { id: subscriptionId }));
 			subscriptionHeading.textContent = localize('sessionsAccountMenu.subscription', "Subscription");
-			const dashboard = this.createCopilotHoverContent();
+			// Render the dashboard's title header (plan name + manage / CTA actions)
+			// directly into our section header row via the dashboard's public API.
+			const dashboard = this.createCopilotHoverContent({ titleHeaderContainer: subscriptionHeader });
 			append(subscriptionSection, dashboard);
-			// Move the dashboard's plan-name + manage-action header into our section header row,
-			// so the plan name and settings button appear right-aligned next to "Subscription".
-			// The dashboard is wrapped in a `display: contents` div, hence reaching one level in.
-			// Note: the dashboard renders the title header synchronously and never re-creates it,
-			// so a one-time move is safe today. Tolerate non-`.header` first children defensively.
-			const tooltipRoot = dashboard.firstElementChild;
-			if (tooltipRoot) {
-				for (const child of Array.from(tooltipRoot.children)) {
-					if (child.classList.contains('header')) {
-						subscriptionHeader.appendChild(child);
-						break;
-					}
-				}
-			}
 		} else if (!this.isAccountLoading) {
 			const summary = append(contentSection, $('.sessions-account-titlebar-panel-summary'));
 			summary.textContent = this.lastState.ariaLabel;
@@ -760,7 +748,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		return !this.chatEntitlementService.sentiment.hidden && !!this.accountName;
 	}
 
-	private createCopilotHoverContent(): HTMLElement {
+	private createCopilotHoverContent(extraOptions?: Partial<IChatStatusDashboardOptions>): HTMLElement {
 		const store = new DisposableStore();
 		this.copilotDashboardStore.value = store;
 		const dashboardElement = ChatStatusDashboard.instantiateInContents(this.instantiationService, store, {
@@ -769,6 +757,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 			disableProviderOptions: true,
 			disableCompletionsSnooze: true,
 			disableQuickSettingsCollapsible: true,
+			...extraOptions,
 		});
 
 		store.add(disposableWindowInterval(mainWindow, () => {

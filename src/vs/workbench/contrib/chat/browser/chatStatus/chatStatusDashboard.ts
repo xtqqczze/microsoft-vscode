@@ -75,6 +75,13 @@ export interface IChatStatusDashboardOptions {
 	disableCompletionsSnooze?: boolean;
 	/** When true, the Quick Settings region is rendered always-expanded without a collapsible header. */
 	disableQuickSettingsCollapsible?: boolean;
+	/**
+	 * When provided, the title header (plan name + manage / CTA actions) is
+	 * rendered into this caller-owned container instead of inline at the top
+	 * of the dashboard. Use this to embed the title header in a host layout
+	 * without reaching into the dashboard's private DOM.
+	 */
+	titleHeaderContainer?: HTMLElement;
 }
 
 export class ChatStatusDashboard extends DomWidget {
@@ -133,7 +140,8 @@ export class ChatStatusDashboard extends DomWidget {
 		let headerAdditionalSpendButton: Button | undefined;
 		if (hasUsageSection) {
 			const planName = getChatPlanName(this.chatEntitlementService.entitlement);
-			const header = this.renderHeader(this.element, this._store, planName, toAction({
+			const headerHost = this.options?.titleHeaderContainer ?? this.element;
+			const header = this.renderHeader(headerHost, this._store, planName, toAction({
 				id: 'workbench.action.manageCopilot',
 				label: localize('quotaLabel', "Manage Chat"),
 				tooltip: localize('quotaTooltip', "Manage Chat"),
