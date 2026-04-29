@@ -834,9 +834,13 @@ export class CopilotAgentSession extends Disposable {
 			const toolClientId = this._clientToolNames.has(e.data.toolName) ? this._appliedSnapshot.clientId : undefined;
 			const parentToolCallId = e.data.parentToolCallId;
 
-			// A new tool call invalidates the current markdown part so the next
-			// text delta starts a fresh part after the tool call.
+			// A new tool call invalidates the current markdown and reasoning
+			// parts so the next text/reasoning delta after the tool call
+			// starts a fresh part. Without invalidating reasoning here, a
+			// later round of reasoning (after tool_start/tool_complete)
+			// would silently append to the pre-tool-call reasoning block.
 			this._currentMarkdownPartId = undefined;
+			this._currentReasoningPartId = undefined;
 
 			const meta: Record<string, unknown> = { toolKind, language: toolKind === 'terminal' ? getShellLanguage(e.data.toolName) : undefined };
 			if (subagentMeta?.description) {

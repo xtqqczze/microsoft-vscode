@@ -762,6 +762,12 @@ export class ScriptedMockAgent implements IAgent {
 		}
 	}
 
+	/** Per-session translator state for {@link _fireLegacy}. Tracks the
+	 *  active markdown / reasoning response part ids so consecutive `delta`
+	 *  and `reasoning` events coalesce into append actions, mirroring the
+	 *  live emission rules of {@link CopilotAgentSession}. */
+	private readonly _legacyState = new Map<string, ILegacySignalState>();
+
 	/**
 	 * Translates a legacy test-event literal into one or more {@link AgentSignal}
 	 * envelopes and fires them, mirroring the live emission rules of
@@ -769,7 +775,21 @@ export class ScriptedMockAgent implements IAgent {
 	 * SDK-shaped event vocabulary while consumers see protocol actions.
 	 */
 	private _fireLegacy(session: URI, e: LegacyMockEvent): void {
-		const signals = legacyToSignals(e, session, this._activeTurnIds.get(uriKey(session)) ?? 'mock-turn');
+		const key = uriKey(session);
+		let state = this._legacyState.get(key);
+		if (!state) {
+			state = {};
+			this._legacyState.set(key, state);
+		}
+		// Any non-text/reasoning event invalidates the active part ids so
+		// the next text/reasoning chunk allocates a fresh response part.
+		// This mirrors the live agent's behavior on tool_start, idle, etc.
+		// (`legacyToSignals` itself handles the delta↔reasoning toggling.)
+		if (e.type !== 'delta' && e.type !== 'message' && e.type !== 'reasoning') {
+			state.currentMarkdown = undefined;
+			state.currentReasoningPartId = undefined;
+		}
+		const signals = legacyToSignals(e, session, this._activeTurnIds.get(key) ?? 'mock-turn', state);
 		for (const signal of signals) {
 			this._onDidSessionProgress.fire(signal);
 		}
@@ -842,15 +862,34 @@ export type LegacyMockEvent =
 let _mockPartIdCounter = 0;
 
 /**
+ * Per-translator state used by {@link legacyToSignals} to coalesce
+ * consecutive `delta` and `reasoning` events into append actions, mirroring
+ * the live emission rules of {@link CopilotAgentSession}. Any event other
+ * than `delta` / `reasoning` (e.g. `tool_start`, `tool_complete`, `idle`,
+ * `error`) invalidates the active part ids so the next text/reasoning
+ * chunk allocates a fresh response part — same semantics as the live
+ * agent.
+ */
+export interface ILegacySignalState {
+	/** Active markdown part id and the message id it's keyed to. */
+	currentMarkdown?: { messageId: string; partId: string };
+	/** Active reasoning part id. */
+	currentReasoningPartId?: string;
+}
+
+/**
  * Converts a {@link LegacyMockEvent} into one or more {@link AgentSignal}s.
  *
- * Stateless: callers are expected to provide a stable `turnId` per turn,
- * and partIds are generated unique per call so the resulting actions are
- * dispatchable through the state manager. Tests that expect specific
- * partId behaviour should use {@link IAgentActionSignal} envelopes
- * directly via the simpler {@link MockAgent.fireProgress}.
+ * If a {@link state} is provided, consecutive `delta` events with the same
+ * `messageId` and consecutive `reasoning` events coalesce into append
+ * actions ({@link ActionType.SessionDelta} / {@link ActionType.SessionReasoning})
+ * the same way live agents emit them. Without {@link state}, each call is
+ * stateless and every text/reasoning event allocates a fresh response part.
+ *
+ * Tests that expect specific partId behaviour should use
+ * {@link IAgentActionSignal} envelopes directly via {@link MockAgent.fireProgress}.
  */
-export function legacyToSignals(e: LegacyMockEvent, session: URI, turnId: string): AgentSignal[] {
+export function legacyToSignals(e: LegacyMockEvent, session: URI, turnId: string, state?: ILegacySignalState): AgentSignal[] {
 	const sessionStr = session.toString();
 	switch (e.type) {
 		case 'delta':
@@ -862,7 +901,28 @@ export function legacyToSignals(e: LegacyMockEvent, session: URI, turnId: string
 			if (!content) {
 				return [];
 			}
+			const messageId = e.type === 'delta' ? e.messageId : e.messageId;
+			// Reasoning is invalidated by any non-reasoning event so the
+			// next reasoning chunk starts a fresh part.
+			if (state) {
+				state.currentReasoningPartId = undefined;
+			}
+			// Coalesce: same messageId as the current markdown part ⇒ append.
+			if (state?.currentMarkdown && state.currentMarkdown.messageId === messageId) {
+				return [{
+					kind: 'action', session, parentToolCallId: e.parentToolCallId, action: {
+						type: ActionType.SessionDelta,
+						session: sessionStr,
+						turnId,
+						partId: state.currentMarkdown.partId,
+						content,
+					},
+				}];
+			}
 			const partId = `mock-md-${++_mockPartIdCounter}`;
+			if (state) {
+				state.currentMarkdown = { messageId, partId };
+			}
 			const action: SessionAction = {
 				type: ActionType.SessionResponsePart,
 				session: sessionStr,
@@ -872,7 +932,26 @@ export function legacyToSignals(e: LegacyMockEvent, session: URI, turnId: string
 			return [{ kind: 'action', session, action, parentToolCallId: e.parentToolCallId }];
 		}
 		case 'reasoning': {
+			// Markdown is invalidated by any non-markdown event so the next
+			// text chunk starts a fresh part.
+			if (state) {
+				state.currentMarkdown = undefined;
+			}
+			if (state?.currentReasoningPartId) {
+				return [{
+					kind: 'action', session, action: {
+						type: ActionType.SessionReasoning,
+						session: sessionStr,
+						turnId,
+						partId: state.currentReasoningPartId,
+						content: e.content,
+					},
+				}];
+			}
 			const partId = `mock-rs-${++_mockPartIdCounter}`;
+			if (state) {
+				state.currentReasoningPartId = partId;
+			}
 			return [{
 				kind: 'action', session, action: {
 					type: ActionType.SessionResponsePart,

@@ -20,7 +20,8 @@ import { AgentSession, AgentSignal } from '../../common/agentService.js';
 import { signalToLegacyView, type LegacyMockEvent } from './mockAgent.js';
 import { IDiffComputeService } from '../../common/diffComputeService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
-import { AttachmentType, SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, ToolResultContentType } from '../../common/state/sessionState.js';
+import { ActionType } from '../../common/state/sessionActions.js';
+import { AttachmentType, ResponsePartKind, SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, ToolResultContentType } from '../../common/state/sessionState.js';
 import { CopilotAgentSession, IActiveClientSnapshot, SessionWrapperFactory } from '../../node/copilot/copilotAgentSession.js';
 import { CopilotSessionWrapper } from '../../node/copilot/copilotSessionWrapper.js';
 import { createSessionDataService, createZeroDiffComputeService } from '../common/sessionTestHelpers.js';
@@ -116,10 +117,12 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 	session: CopilotAgentSession;
 	mockSession: MockCopilotSession;
 	progressEvents: LegacyMockEvent[];
+	signals: AgentSignal[];
 	waitForProgress: (predicate: (event: LegacyMockEvent) => boolean) => Promise<LegacyMockEvent>;
 }> {
 	const progressEmitter = disposables.add(new Emitter<AgentSignal>());
 	const progressEvents: LegacyMockEvent[] = [];
+	const signals: AgentSignal[] = [];
 	const waiters: { predicate: (event: LegacyMockEvent) => boolean; deferred: DeferredPromise<LegacyMockEvent> }[] = [];
 
 	const notify = (view: LegacyMockEvent): void => {
@@ -134,6 +137,7 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 	};
 
 	disposables.add(progressEmitter.event(signal => {
+		signals.push(signal);
 		const view = signalToLegacyView(signal);
 		if (!view) {
 			return;
@@ -205,7 +209,7 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 
 	await session.initializeSession();
 
-	return { session, mockSession, progressEvents, waitForProgress };
+	return { session, mockSession, progressEvents, signals, waitForProgress };
 }
 
 // ---- Tests ------------------------------------------------------------------
@@ -740,6 +744,53 @@ suite('CopilotAgentSession', () => {
 			if (progressEvents[0].type === 'delta') {
 				assert.strictEqual(progressEvents[0].content, 'Let me help you.');
 			}
+		});
+
+		test('reasoning delta after tool_start starts a new reasoning response part', async () => {
+			const { mockSession, signals } = await createAgentSession(disposables);
+
+			// First reasoning delta — allocates a fresh reasoning response part.
+			mockSession.fire('assistant.reasoning_delta', {
+				deltaContent: 'thinking step 1',
+			} as SessionEventPayload<'assistant.reasoning_delta'>['data']);
+
+			// A tool call interleaves between reasoning rounds.
+			mockSession.fire('tool.execution_start', {
+				toolCallId: 'tc-r-1',
+				toolName: 'bash',
+				arguments: { command: 'echo hi' },
+			} as SessionEventPayload<'tool.execution_start'>['data']);
+			mockSession.fire('tool.execution_complete', {
+				toolCallId: 'tc-r-1',
+				success: true,
+				result: { content: 'hi' },
+			} as SessionEventPayload<'tool.execution_complete'>['data']);
+
+			// Second round of reasoning, after the tool call. This must
+			// land in a NEW reasoning response part — otherwise the
+			// renderer / state-tree would merge it into the pre-tool-call
+			// block and the visual ordering would be wrong on restore.
+			mockSession.fire('assistant.reasoning_delta', {
+				deltaContent: 'thinking step 2',
+			} as SessionEventPayload<'assistant.reasoning_delta'>['data']);
+
+			// Pull the protocol-level reasoning response parts. Both
+			// `SessionResponsePart{Reasoning}` (allocates a new part) and
+			// `SessionReasoning` (appends to an existing part) translate to
+			// the legacy `'reasoning'` view, so we have to inspect raw
+			// signals to tell them apart.
+			const reasoningResponseParts = signals.flatMap(s => {
+				if (s.kind !== 'action' || s.action.type !== ActionType.SessionResponsePart) {
+					return [];
+				}
+				return s.action.part.kind === ResponsePartKind.Reasoning ? [s.action.part] : [];
+			});
+			assert.strictEqual(reasoningResponseParts.length, 2,
+				'reasoning after a tool call should allocate a new response part, not append to the part from before the tool call');
+			assert.notStrictEqual(reasoningResponseParts[0].id, reasoningResponseParts[1].id,
+				'second reasoning round should have a distinct part id');
+			assert.strictEqual(reasoningResponseParts[0].content, 'thinking step 1');
+			assert.strictEqual(reasoningResponseParts[1].content, 'thinking step 2');
 		});
 	});
 
