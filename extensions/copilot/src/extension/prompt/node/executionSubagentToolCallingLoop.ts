@@ -124,10 +124,6 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 		const endpoint = await this.getEndpoint();
 		const maxExecutionTurns = this._configurationService.getExperimentBasedConfig(ConfigKey.Advanced.ExecutionSubagentToolCallLimit, this._experimentationService);
 
-		// If a previous render observed any timed-out terminal commands, tell the
-		// prompt to nudge the model to stop issuing tool calls and produce its
-		// <final_answer>. The natural "no tool calls" exit then ends the loop.
-		const hadTimeoutsBefore = this._timedOutCommands.length > 0;
 		const render = (hasTimedOutCommand: boolean) => PromptRenderer.create(
 			this.instantiationService,
 			endpoint,
@@ -139,6 +135,12 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 			}
 		).render(progress, token);
 
+		// If a previous render observed any timed-out terminal commands, tell the
+		// prompt to nudge the model to stop issuing tool calls and produce its
+		// <final_answer>. Even with `getAvailableTools` returning [], the model
+		// may still attempt a (failed) tool call and trigger another iteration,
+		// so the nudge needs to persist across iterations.
+		const hadTimeoutsBefore = this._timedOutCommands.length > 0;
 		let result = await render(hadTimeoutsBefore);
 
 		// After rendering, scan the rendered tool results for timeouts. Every tool
@@ -239,6 +241,12 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 	}
 
 	protected async getAvailableTools(): Promise<LanguageModelToolInformation[]> {
+		// If any previous terminal call timed out, expose no tools so the model
+		// cannot make further calls and is forced to produce its <final_answer>.
+		if (this._timedOutCommands.length > 0) {
+			return [];
+		}
+
 		const endpoint = await this.getEndpoint();
 		const allTools = this.toolsService.getEnabledTools(this.options.request, endpoint);
 
