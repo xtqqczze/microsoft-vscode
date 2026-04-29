@@ -136,6 +136,7 @@
 }
 
 .sessions-account-titlebar-panel-content .chat-status-bar-entry-tooltip .collapsible-header {
+	margin-top: 0;
 	padding: 8px 10px 8px 8px;
 }
 
