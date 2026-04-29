@@ -5,7 +5,7 @@
 
 import * as vscode from 'vscode';
 import type { IDebugLogEntry } from '../../../platform/chat/common/chatDebugFileLoggerService';
-import { CopilotChatAttr, GenAiAttr, GenAiOperationName } from '../../../platform/otel/common/index';
+import { CopilotChatAttr, CopilotCliSdkAttr, GenAiAttr, GenAiOperationName } from '../../../platform/otel/common/index';
 import type { ICompletedSpanData, ISpanEventData, SpanStatusCode } from '../../../platform/otel/common/otelService';
 
 // ── Event ID conventions ──
@@ -55,7 +55,7 @@ export function completedSpanToDebugEvent(span: ICompletedSpanData): vscode.Chat
 			return spanToGenericEvent(span);
 		default:
 			// SDK native hook spans use 'github.copilot.hook.type' instead of gen_ai.operation.name
-			if (span.name.startsWith('hook ') && asString(span.attributes['github.copilot.hook.type'])) {
+			if (span.name.startsWith('hook ') && asString(span.attributes[CopilotCliSdkAttr.HOOK_TYPE])) {
 				return spanToSdkHookEvent(span);
 			}
 			return undefined;
@@ -386,10 +386,10 @@ function spanToSubagentEvent(span: ICompletedSpanData): vscode.ChatDebugSubagent
 }
 
 function resolveHookExecutionContent(span: ICompletedSpanData): vscode.ChatDebugEventHookContent {
-	const hookType = asString(span.attributes['copilot_chat.hook_type']) ?? 'unknown';
+	const hookType = asString(span.attributes[CopilotChatAttr.HOOK_TYPE]) ?? 'unknown';
 	const content = new vscode.ChatDebugEventHookContent(hookType);
 	content.command = asString(span.attributes['copilot_chat.hook_command']);
-	const resultKind = asString(span.attributes['copilot_chat.hook_result_kind']);
+	const resultKind = asString(span.attributes[CopilotChatAttr.HOOK_RESULT_KIND]);
 	content.result = resultKind === 'success'
 		? vscode.ChatDebugHookResult.Success
 		: resultKind === 'error'
@@ -398,8 +398,8 @@ function resolveHookExecutionContent(span: ICompletedSpanData): vscode.ChatDebug
 				? vscode.ChatDebugHookResult.NonBlockingError
 				: undefined;
 	content.durationInMillis = span.endTime - span.startTime;
-	content.input = asString(span.attributes['copilot_chat.hook_input']);
-	content.output = asString(span.attributes['copilot_chat.hook_output']);
+	content.input = asString(span.attributes[CopilotChatAttr.HOOK_INPUT]);
+	content.output = asString(span.attributes[CopilotChatAttr.HOOK_OUTPUT]);
 	if (span.status.code === 2 /* ERROR */ && span.status.message) {
 		content.errorMessage = span.status.message;
 	}
@@ -408,9 +408,9 @@ function resolveHookExecutionContent(span: ICompletedSpanData): vscode.ChatDebug
 }
 
 function spanToHookExecutionEvent(span: ICompletedSpanData): vscode.ChatDebugGenericEvent {
-	const hookType = asString(span.attributes['copilot_chat.hook_type']) ?? 'unknown';
+	const hookType = asString(span.attributes[CopilotChatAttr.HOOK_TYPE]) ?? 'unknown';
 	const hookCommand = asString(span.attributes['copilot_chat.hook_command']);
-	const resultKind = asString(span.attributes['copilot_chat.hook_result_kind']);
+	const resultKind = asString(span.attributes[CopilotChatAttr.HOOK_RESULT_KIND]);
 	const durationMs = Math.round(span.endTime - span.startTime);
 
 	const name = `Hook: ${hookType}`;
@@ -433,7 +433,7 @@ function spanToHookExecutionEvent(span: ICompletedSpanData): vscode.ChatDebugGen
  * SDK uses span name "hook {type}" and attributes in the github.copilot.hook.* namespace.
  */
 function spanToSdkHookEvent(span: ICompletedSpanData): vscode.ChatDebugGenericEvent {
-	const hookType = asString(span.attributes['github.copilot.hook.type']) ?? 'unknown';
+	const hookType = asString(span.attributes[CopilotCliSdkAttr.HOOK_TYPE]) ?? 'unknown';
 	const durationMs = span.endTime - span.startTime;
 	const isError = span.status.code === 2; /* ERROR */
 	const level = isError ? vscode.ChatDebugLogLevel.Error : vscode.ChatDebugLogLevel.Info;
