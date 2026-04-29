@@ -961,6 +961,63 @@ suite('CopilotAgentSession', () => {
 			assert.strictEqual(result.answer, '');
 			assert.strictEqual(result.wasFreeform, true);
 		});
+
+		test('autopilot auto-answers a free-form question without firing a progress event', async () => {
+			// In autopilot the session should never block on the user — fall
+			// through to a generic "proceed" answer so the SDK can keep
+			// running. The progress event must NOT fire because surfacing
+			// it to the client would defeat the purpose of autopilot.
+			const { session, progressEvents } = await createAgentSession(disposables, {
+				configValues: { [SessionConfigKey.AutoApprove]: 'autopilot' },
+			});
+
+			const result = await session.handleUserInputRequest(
+				{ question: 'What should I do next?' },
+				{ sessionId: 'test-session-1' }
+			);
+
+			assert.strictEqual(result.answer, 'Proceed with the recommended action.');
+			assert.strictEqual(result.wasFreeform, true);
+			assert.strictEqual(progressEvents.length, 0);
+		});
+
+		test('autopilot picks the first choice when the SDK offers a choice list', async () => {
+			const { session, progressEvents } = await createAgentSession(disposables, {
+				configValues: { [SessionConfigKey.AutoApprove]: 'autopilot' },
+			});
+
+			const result = await session.handleUserInputRequest(
+				{ question: 'Pick a color', choices: ['red', 'blue', 'green'] },
+				{ sessionId: 'test-session-1' }
+			);
+
+			// `wasFreeform: false` because we picked one of the SDK's
+			// offered choices — the SDK uses this hint to record whether
+			// the user typed something custom.
+			assert.strictEqual(result.answer, 'red');
+			assert.strictEqual(result.wasFreeform, false);
+			assert.strictEqual(progressEvents.length, 0);
+		});
+
+		test('autopilot does not auto-answer when autoApprove is not "autopilot"', async () => {
+			// Sanity check: with autoApprove=default the question must
+			// still be surfaced as a progress event (the existing behavior).
+			const { session, progressEvents } = await createAgentSession(disposables, {
+				configValues: { [SessionConfigKey.AutoApprove]: 'default' },
+			});
+
+			session.handleUserInputRequest(
+				{ question: 'Need user input' },
+				{ sessionId: 'test-session-1' }
+			);
+
+			// Microtask flush so the handler can run far enough to either
+			// short-circuit or emit a progress event.
+			await Promise.resolve();
+			assert.strictEqual(progressEvents.length, 1);
+			const event = progressEvents[0];
+			assertUserInputEvent(event);
+		});
 	});
 
 	suite('SDK callback logging', () => {
@@ -1341,7 +1398,7 @@ suite('CopilotAgentSession', () => {
 		});
 
 		test('handleExitPlanModeRequest produces a single-select input request with options and recommended', async () => {
-			const { session, mockSession, waitForProgress } = await createAgentSession(disposables);
+			const { session, mockSession, progressEvents, waitForProgress } = await createAgentSession(disposables);
 
 			mockSession.planReadResult = { exists: true, content: '## Plan', path: '/sessions/abc/plan.md' };
 
@@ -1349,8 +1406,13 @@ suite('CopilotAgentSession', () => {
 
 			const event = await waitForProgress(e => e.type === 'user_input_request');
 			const request = event.request;
-			assert.ok(request.message?.includes('Plan summary'));
-			assert.ok(request.message?.includes('plan.md'), 'message should include a link to the plan file');
+
+			// The plan summary and "View full plan" link are emitted as a
+			// markdown response part before the input request, so the
+			// client renders them inline above the question.
+			const deltaContent = progressEvents.flatMap(e => e.type === 'delta' ? [e.content] : []).join('');
+			assert.ok(deltaContent.includes('Plan summary'), `expected delta to include plan summary; got: ${deltaContent}`);
+			assert.ok(deltaContent.includes('plan.md'), 'delta should include a link to the plan file');
 
 			const question = request.questions?.[0];
 			assert.strictEqual(question?.kind, SessionInputQuestionKind.SingleSelect);
@@ -1429,6 +1491,123 @@ suite('CopilotAgentSession', () => {
 			});
 
 			assert.deepStrictEqual(await responsePromise, { approved: true, selectedAction: 'exit_only' });
+		});
+
+		test('freeform feedback alongside a selected action becomes a revision request', async () => {
+			const { session, waitForProgress } = await createAgentSession(disposables);
+
+			const responsePromise = session.handleExitPlanModeRequest(planRequestParams({ actions: ['autopilot', 'interactive'], recommendedAction: 'interactive' }));
+			const event = await waitForProgress(e => e.type === 'user_input_request');
+			const requestId = event.request.id;
+			const questionId = event.request.questions![0].id;
+
+			session.respondToUserInputRequest(requestId, SessionInputResponseKind.Accept, {
+				[questionId]: {
+					state: SessionInputAnswerState.Submitted,
+					value: {
+						kind: SessionInputAnswerValueKind.Selected,
+						value: 'interactive',
+						freeformValues: ['Please use Python instead of Node.js'],
+					},
+				},
+			});
+
+			assert.deepStrictEqual(await responsePromise, {
+				approved: false,
+				feedback: 'Please use Python instead of Node.js',
+				selectedAction: 'interactive',
+			});
+		});
+
+		test('selectedAction not in offered actions falls back to recommendedAction', async () => {
+			const { session, waitForProgress } = await createAgentSession(disposables);
+
+			const responsePromise = session.handleExitPlanModeRequest(planRequestParams({ actions: ['interactive', 'exit_only'], recommendedAction: 'interactive' }));
+			const event = await waitForProgress(e => e.type === 'user_input_request');
+			const requestId = event.request.id;
+			const questionId = event.request.questions![0].id;
+
+			// SDK only offered `interactive` and `exit_only`; the client
+			// somehow sent `autopilot` (e.g. stale UI state). The agent
+			// host clamps to `recommendedAction` so the SDK never sees a
+			// value it didn't offer.
+			session.respondToUserInputRequest(requestId, SessionInputResponseKind.Accept, {
+				[questionId]: {
+					state: SessionInputAnswerState.Submitted,
+					value: { kind: SessionInputAnswerValueKind.Selected, value: 'autopilot' },
+				},
+			});
+
+			assert.deepStrictEqual(await responsePromise, { approved: true, selectedAction: 'interactive' });
+		});
+
+		test('selectedAction not in offered actions and no fallback resolves to approved=false', async () => {
+			const { session, waitForProgress } = await createAgentSession(disposables);
+
+			// SDK offered `exit_only` only and recommended a value not in
+			// the offered set. The client picked something invalid. With
+			// no usable selectedAction and no feedback, decline.
+			const responsePromise = session.handleExitPlanModeRequest(planRequestParams({ actions: ['exit_only'], recommendedAction: 'autopilot' }));
+			const event = await waitForProgress(e => e.type === 'user_input_request');
+			const requestId = event.request.id;
+			const questionId = event.request.questions![0].id;
+
+			session.respondToUserInputRequest(requestId, SessionInputResponseKind.Accept, {
+				[questionId]: {
+					state: SessionInputAnswerState.Submitted,
+					value: { kind: SessionInputAnswerValueKind.Selected, value: 'interactive' },
+				},
+			});
+
+			assert.deepStrictEqual(await responsePromise, { approved: false });
+		});
+
+		test('text answer with feedback becomes a revision request without selectedAction', async () => {
+			const { session, waitForProgress } = await createAgentSession(disposables);
+
+			const responsePromise = session.handleExitPlanModeRequest(planRequestParams({ actions: ['autopilot', 'interactive'], recommendedAction: 'interactive' }));
+			const event = await waitForProgress(e => e.type === 'user_input_request');
+			const requestId = event.request.id;
+			const questionId = event.request.questions![0].id;
+
+			// The single-select question normally produces a Selected
+			// value, but a defensive Text response should still be
+			// translated to a revision request when the answer is
+			// non-empty (selectedAction falls back to recommendedAction).
+			session.respondToUserInputRequest(requestId, SessionInputResponseKind.Accept, {
+				[questionId]: {
+					state: SessionInputAnswerState.Submitted,
+					value: { kind: SessionInputAnswerValueKind.Text, value: 'Add tests for edge cases' },
+				},
+			});
+
+			assert.deepStrictEqual(await responsePromise, {
+				approved: false,
+				feedback: 'Add tests for edge cases',
+				selectedAction: 'interactive',
+			});
+		});
+
+		test('whitespace-only freeform feedback is ignored', async () => {
+			const { session, waitForProgress } = await createAgentSession(disposables);
+
+			const responsePromise = session.handleExitPlanModeRequest(planRequestParams({ actions: ['autopilot', 'interactive'], recommendedAction: 'interactive' }));
+			const event = await waitForProgress(e => e.type === 'user_input_request');
+			const requestId = event.request.id;
+			const questionId = event.request.questions![0].id;
+
+			session.respondToUserInputRequest(requestId, SessionInputResponseKind.Accept, {
+				[questionId]: {
+					state: SessionInputAnswerState.Submitted,
+					value: {
+						kind: SessionInputAnswerValueKind.Selected,
+						value: 'interactive',
+						freeformValues: ['   ', ''],
+					},
+				},
+			});
+
+			assert.deepStrictEqual(await responsePromise, { approved: true, selectedAction: 'interactive' });
 		});
 
 		test('session.mode_changed → plan updates the AHP session config', async () => {

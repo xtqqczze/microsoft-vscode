@@ -38,17 +38,3 @@ export const enum SessionConfigKey {
  * are optional (an agent may choose to advertise a subset).
  */
 export const KNOWN_AUTO_APPROVE_VALUES: ReadonlySet<string> = new Set(['default', 'autoApprove', 'autopilot']);
-
-/**
- * The set of agent execution modes the platform exposes via the
- * {@link SessionConfigKey.Mode} property. Agents that opt into plan mode
- * SHOULD advertise this exact set of enum values.
- *
- * Note: deliberately does NOT include `'autopilot'`. Autopilot is modeled
- * as an auto-approval level on {@link SessionConfigKey.AutoApprove}, not
- * as a mode — keeping the two axes orthogonal lets a user pick
- * "plan + autopilot" or "interactive + autopilot" without conflating them.
- * Agents that map AHP modes onto an SDK that has its own "autopilot" mode
- * should derive the SDK mode from `(mode, autoApprove)` at send time.
- */
-export const KNOWN_MODE_VALUES: ReadonlySet<string> = new Set(['interactive', 'plan']);

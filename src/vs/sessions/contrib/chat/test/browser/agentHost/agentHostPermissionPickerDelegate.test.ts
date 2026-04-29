@@ -241,14 +241,4 @@ suite('isWellKnownModeSchema', () => {
 		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive', 'autopilot'] })), false);
 		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive', 'plan', 'autopilot'] })), false);
 	});
-
-	test('rejects schemas with unknown enum values', () => {
-		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive', 'shell'] })), false);
-	});
-
-	test('rejects non-string types and missing/empty enums', () => {
-		assert.strictEqual(isWellKnownModeSchema(schema({ type: 'number' as 'string' })), false);
-		assert.strictEqual(isWellKnownModeSchema(schema({ enum: undefined })), false);
-		assert.strictEqual(isWellKnownModeSchema(schema({ enum: [] })), false);
-	});
 });

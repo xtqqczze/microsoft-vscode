@@ -51,12 +51,6 @@ const SESSION_STATE_DIRECTORY = join(COPILOT_HOME_DIRECTORY, 'session-state');
 /**
  * Display labels and descriptions for the SDK's `exit_plan_mode` action ids.
  * Keys not present here fall back to the raw action id.
- *
- * `autopilot_fleet` is deliberately omitted: {@link CopilotSdkMode} only
- * models `interactive` / `plan` / `autopilot`, and the SDK's fleet-start
- * side effect isn't wired through the agent host yet. Sessions that
- * advertise it will see the raw `autopilot_fleet` label and the action
- * will be mapped to `autopilot` mode for now.
  */
 function getPlanActionDescription(actionId: string): { label: string; description: string } | undefined {
 	switch (actionId) {
@@ -64,6 +58,11 @@ function getPlanActionDescription(actionId: string): { label: string; descriptio
 			return {
 				label: localize('agentHost.planReview.autopilot.label', "Implement with Autopilot"),
 				description: localize('agentHost.planReview.autopilot.description', "Auto-approve all tool calls and continue until done."),
+			};
+		case 'autopilot_fleet':
+			return {
+				label: localize('agentHost.planReview.autopilotFleet.label', "Implement with Autopilot Fleet"),
+				description: localize('agentHost.planReview.autopilotFleet.description', "Auto-approve all tool calls, including fleet management actions, and continue until done."),
 			};
 		case 'interactive':
 			return {
@@ -745,6 +744,14 @@ export class CopilotAgentSession extends Disposable {
 		request: UserInputRequest,
 		_invocation: { sessionId: string },
 	): Promise<UserInputResponse> {
+		const isAutopilot = this._configurationService.getEffectiveValue(this.sessionUri.toString(), platformSessionSchema, SessionConfigKey.AutoApprove) === 'autopilot';
+		if (isAutopilot) {
+			return {
+				answer: request.choices?.[0] || 'Proceed with the recommended action.',
+				wasFreeform: !request.choices?.length,
+			};
+		}
+
 		const questionPreview = request.question.substring(0, 100);
 		try {
 			const requestId = generateUuid();
@@ -833,12 +840,15 @@ export class CopilotAgentSession extends Disposable {
 	 *
 	 *  - Decline / Cancel / no answer → `{ approved: false }` (model gets a
 	 *    rejection result and stays in plan mode).
+	 *  - Accept + freeform feedback → `{ approved: false, feedback, selectedAction? }`
+	 *    (the SDK treats this as a revision request and re-emits
+	 *    `exit_plan_mode.requested` after revising the plan).
 	 *  - Accept + selected option → `{ approved: true, selectedAction, autoApproveEdits }`
 	 *    where `autoApproveEdits` is set for the autopilot variants.
 	 *
-	 * Freeform feedback (revision request) is currently not surfaced to the
-	 * SDK because the public API has no feedback channel; the user must send
-	 * a follow-up turn instead.
+	 * `selectedAction` is validated against the SDK's offered `actions`; an
+	 * unknown value is treated as a decline so the SDK isn't fed a value it
+	 * cannot handle.
 	 */
 	private _resolveExitPlanMode(
 		pending: { actions: readonly string[]; recommendedAction: string; questionId: string },
@@ -853,9 +863,48 @@ export class CopilotAgentSession extends Disposable {
 			return { approved: false };
 		}
 		const value = answer.value;
-		const selectedAction = value.kind === SessionInputAnswerValueKind.Selected
-			? value.value
-			: pending.recommendedAction;
+
+		// Determine the selected action and any freeform feedback. The
+		// `single-select` question may carry both (when the user picks an
+		// option AND types feedback), or just freeform text (when the
+		// user types instead of picking). Normalize to one shape.
+		let candidateAction: string | undefined;
+		let feedback: string | undefined;
+		if (value.kind === SessionInputAnswerValueKind.Selected) {
+			candidateAction = value.value;
+			const freeform = value.freeformValues?.find(s => s.trim().length > 0)?.trim();
+			feedback = freeform;
+		} else if (value.kind === SessionInputAnswerValueKind.Text) {
+			feedback = value.value.trim() || undefined;
+		} else {
+			return { approved: false };
+		}
+
+		// Clamp `selectedAction` to the SDK's offered set. Anything else
+		// (including freeform text smuggled into the `value` field) falls
+		// back to the recommended action so we never feed the SDK a value
+		// it can't act on.
+		const selectedAction = candidateAction && pending.actions.includes(candidateAction)
+			? candidateAction
+			: pending.actions.includes(pending.recommendedAction)
+				? pending.recommendedAction
+				: undefined;
+
+		// Freeform feedback => revision request. The SDK semantics are
+		// `approved: false` with a non-empty `feedback`; it will revise
+		// the plan and re-emit `exit_plan_mode.requested`.
+		if (feedback) {
+			return {
+				approved: false,
+				feedback,
+				...(selectedAction ? { selectedAction } : {}),
+			};
+		}
+
+		// No selectable action and no feedback — nothing actionable.
+		if (!selectedAction) {
+			return { approved: false };
+		}
 
 		const isAutopilot = selectedAction === 'autopilot' || selectedAction === 'autopilot_fleet';
 		return {
@@ -1253,6 +1302,8 @@ export class CopilotAgentSession extends Disposable {
 			message += `\n\n[${localize('agentHost.planReview.viewPlanLink', "View full plan")}](${planUri.toString()})`;
 		}
 
+		this._emitMarkdownDelta(message);
+
 		const options = data.actions.map(actionId => {
 			const desc = getPlanActionDescription(actionId);
 			return {
@@ -1265,7 +1316,6 @@ export class CopilotAgentSession extends Disposable {
 
 		const inputRequest: SessionInputRequest = {
 			id: requestId,
-			message,
 			questions: [{
 				kind: SessionInputQuestionKind.SingleSelect,
 				id: questionId,

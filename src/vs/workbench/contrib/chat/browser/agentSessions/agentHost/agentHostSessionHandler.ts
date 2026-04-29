@@ -1681,7 +1681,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// state echo (handled above) updates the carousel with the server's
 		// authoritative answer afterwards.
 		carousel.completion.p.then(result => {
-			if (carousel.isUsed) {
+			if (store.isDisposed) {
 				return;
 			}
 			if (!result.answers) {
