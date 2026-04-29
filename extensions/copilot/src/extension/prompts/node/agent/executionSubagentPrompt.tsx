@@ -11,17 +11,23 @@ import { SafetyRules } from '../base/safetyRules';
 import { TerminalStatePromptElement } from '../base/terminalState';
 import { ChatToolCalls } from '../panel/toolCalling';
 
-export interface ITimedOutCommand {
+/** A terminal command that is no longer being awaited by the subagent — either
+ * it timed out and was moved to the background, or the model invoked it in
+ * async/background mode from the start. */
+export interface IBackgroundCommand {
 	readonly command: string;
 	readonly termId: string;
+	readonly reason: 'timeout' | 'async';
+	/** Only set when `reason === 'timeout'`. */
 	readonly timeoutMs?: number;
 }
 
 export interface ExecutionSubagentPromptProps extends GenericBasePromptElementProps {
 	readonly maxExecutionTurns: number;
-	/** True if a previous {@link ToolName.CoreRunInTerminal} call timed out; the
-	 * model is told to stop calling tools and emit its `<final_answer>`. */
-	readonly hasTimedOutCommand?: boolean;
+	/** True if a previous {@link ToolName.CoreRunInTerminal} call timed out or was
+	 * invoked in async/background mode; the model is told to stop calling tools
+	 * and emit its `<final_answer>`. */
+	readonly hasBackgroundCommand?: boolean;
 }
 
 /**
@@ -87,7 +93,7 @@ export class ExecutionSubagentPrompt extends PromptElement<ExecutionSubagentProm
 					toolCallResults={toolCallResults}
 					toolCallMode={CopilotToolMode.FullContext}
 				/>
-				{(isLastTurn || this.props.hasTimedOutCommand) && (
+				{(isLastTurn || this.props.hasBackgroundCommand) && (
 					<UserMessage priority={900}>
 						OK, your allotted iterations are finished. Show the &lt;final_answer&gt;.
 					</UserMessage>

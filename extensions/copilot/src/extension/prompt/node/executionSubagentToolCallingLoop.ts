@@ -22,7 +22,7 @@ import { ITelemetryService } from '../../../platform/telemetry/common/telemetry'
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 import { ChatResponseProgressPart, ChatResponseReferencePart, LanguageModelToolResult2 } from '../../../vscodeTypes';
 import { IToolCallingLoopOptions, ToolCallingLoop, ToolCallingLoopFetchOptions } from '../../intents/node/toolCallingLoop';
-import { ExecutionSubagentPrompt, ITimedOutCommand } from '../../prompts/node/agent/executionSubagentPrompt';
+import { ExecutionSubagentPrompt, IBackgroundCommand } from '../../prompts/node/agent/executionSubagentPrompt';
 import { PromptRenderer } from '../../prompts/node/base/promptRenderer';
 import { ToolResultMetadata } from '../../prompts/node/panel/toolCalling';
 import { ToolName } from '../../tools/common/toolNames';
@@ -44,12 +44,14 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 
 	public static readonly ID = 'executionSubagentTool';
 
-	/** Terminal calls from previous rounds that timed out, deduped by toolCallId. */
-	private readonly _timedOutCommands: ITimedOutCommand[] = [];
-	private readonly _seenTimedOutCallIds = new Set<string>();
+	/** Terminal calls from previous rounds that the subagent is no longer
+	 * awaiting (timeout-moved-to-background or async-from-start), deduped by
+	 * toolCallId. */
+	private readonly _backgroundCommands: IBackgroundCommand[] = [];
+	private readonly _seenBackgroundCallIds = new Set<string>();
 
-	public get timedOutCommands(): readonly ITimedOutCommand[] {
-		return this._timedOutCommands;
+	public get backgroundCommands(): readonly IBackgroundCommand[] {
+		return this._backgroundCommands;
 	}
 
 	constructor(
@@ -124,34 +126,35 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 		const endpoint = await this.getEndpoint();
 		const maxExecutionTurns = this._configurationService.getExperimentBasedConfig(ConfigKey.Advanced.ExecutionSubagentToolCallLimit, this._experimentationService);
 
-		const render = (hasTimedOutCommand: boolean) => PromptRenderer.create(
+		const render = (hasBackgroundCommand: boolean) => PromptRenderer.create(
 			this.instantiationService,
 			endpoint,
 			ExecutionSubagentPrompt,
 			{
 				promptContext: buildpromptContext,
 				maxExecutionTurns,
-				hasTimedOutCommand,
+				hasBackgroundCommand,
 			}
 		).render(progress, token);
 
-		// If a previous render observed any timed-out terminal commands, tell the
+		// If a previous render observed any background terminal commands, tell the
 		// prompt to nudge the model to stop issuing tool calls and produce its
 		// <final_answer>. Even with `getAvailableTools` returning [], the model
 		// may still attempt a (failed) tool call and trigger another iteration,
 		// so the nudge needs to persist across iterations.
-		const hadTimeoutsBefore = this._timedOutCommands.length > 0;
-		let result = await render(hadTimeoutsBefore);
+		const hadBackgroundBefore = this._backgroundCommands.length > 0;
+		let result = await render(hadBackgroundBefore);
 
-		// After rendering, scan the rendered tool results for timeouts. Every tool
-		// call rendered into the prompt (including those executed just now during
-		// this render) emits a ToolResultMetadata entry on `result.metadata`.
-		this.collectTimedOutCommands(buildpromptContext, result);
+		// After rendering, scan the rendered tool results for background commands.
+		// Every tool call rendered into the prompt (including those executed just
+		// now during this render) emits a ToolResultMetadata entry on
+		// `result.metadata`.
+		this.collectBackgroundCommands(buildpromptContext, result);
 
-		// If a timeout was first detected during this render, the nudge wasn't in
-		// the prompt we just built. Re-render with the nudge so the LLM in this
-		// same iteration sees the instruction to produce <final_answer>.
-		if (!hadTimeoutsBefore && this._timedOutCommands.length > 0) {
+		// If a background command was first detected during this render, the nudge
+		// wasn't in the prompt we just built. Re-render with the nudge so the LLM
+		// in this same iteration sees the instruction to produce <final_answer>.
+		if (!hadBackgroundBefore && this._backgroundCommands.length > 0) {
 			const cache = buildpromptContext.toolCallResults;
 			// Write to the tool result cache so that the second render doesn't
 			// re-run all tool calls that happened during the first render
@@ -166,7 +169,7 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 		return result;
 	}
 
-	private collectTimedOutCommands(buildpromptContext: IBuildPromptContext, result: IBuildPromptResult): void {
+	private collectBackgroundCommands(buildpromptContext: IBuildPromptContext, result: IBuildPromptResult): void {
 		const lastRound = buildpromptContext.toolCallRounds?.at(-1);
 		if (!lastRound) {
 			return;
@@ -174,55 +177,72 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 
 		// Index only this round's terminal calls. Calls from earlier rounds were
 		// already evaluated on prior iterations.
-		const terminalCallsById = new Map<string, string>();
+		interface ITerminalCall {
+			readonly command: string;
+			/** True if the model called the tool with mode="async" or
+			 *  isBackground=true, regardless of how it actually ran. */
+			readonly invokedAsAsync: boolean;
+		}
+		const terminalCallsById = new Map<string, ITerminalCall>();
 		for (const tc of lastRound.toolCalls) {
-			if (tc.name !== ToolName.CoreRunInTerminal || this._seenTimedOutCallIds.has(tc.id)) {
+			if (tc.name !== ToolName.CoreRunInTerminal || this._seenBackgroundCallIds.has(tc.id)) {
 				continue;
 			}
 			let command = '';
+			let invokedAsAsync = false;
 			try {
-				const args = JSON.parse(tc.arguments) as { command?: unknown };
+				const args = JSON.parse(tc.arguments) as { command?: unknown; mode?: unknown; isBackground?: unknown };
 				if (typeof args?.command === 'string') {
 					command = args.command;
 				}
+				invokedAsAsync = args?.mode === 'async' || args?.isBackground === true;
 			} catch {
-				// arguments may not be valid JSON on partial rounds; skip command extraction
+				// arguments may not be valid JSON on partial rounds; skip extraction
 			}
-			terminalCallsById.set(tc.id, command);
+			terminalCallsById.set(tc.id, { command, invokedAsAsync });
 		}
 		if (terminalCallsById.size === 0) {
 			return;
 		}
 
 		for (const meta of result.metadata.getAll(ToolResultMetadata)) {
-			const command = terminalCallsById.get(meta.toolCallId);
-			if (command === undefined) {
+			const call = terminalCallsById.get(meta.toolCallId);
+			if (!call) {
 				continue;
 			}
-			const timeoutInfo = this.getTerminalTimeoutInfo(meta.result);
-			if (!timeoutInfo) {
+			const termId = this.getTerminalId(meta.result);
+			if (!termId) {
+				// No termId means the call didn't produce a terminal (e.g., errored
+				// before execution). Nothing to track or note about.
 				continue;
 			}
-			this._seenTimedOutCallIds.add(meta.toolCallId);
-			this._timedOutCommands.push({
-				command,
-				termId: timeoutInfo.termId,
-				timeoutMs: timeoutInfo.timeoutMs,
-			});
+			const timeoutMs = this.getTimeoutMsIfTimedOut(meta.result);
+			if (timeoutMs !== undefined) {
+				this._seenBackgroundCallIds.add(meta.toolCallId);
+				this._backgroundCommands.push({
+					command: call.command,
+					termId,
+					reason: 'timeout',
+					timeoutMs,
+				});
+			} else if (call.invokedAsAsync) {
+				this._seenBackgroundCallIds.add(meta.toolCallId);
+				this._backgroundCommands.push({
+					command: call.command,
+					termId,
+					reason: 'async',
+				});
+			}
 		}
 	}
 
 	/**
-	 * Returns timeout details if `toolResult` is a `run_in_terminal` result that
-	 * timed out and was moved to the background, otherwise `undefined`.
-	 *
-	 * `run_in_terminal` sets a structured `timedOut: true` flag on `toolMetadata`
-	 * (along with `id` and `timeoutMs`) when a sync command exceeds its timeout.
-	 * See vscode core: runInTerminalTool.ts. `toolMetadata` is exposed on tool
-	 * results via the chatParticipantPrivate proposed API and is not on the public
+	 * Reads the `id` (terminal ID) field from a `run_in_terminal` tool result's
+	 * `toolMetadata`, if present. `toolMetadata` is exposed on tool results via
+	 * the chatParticipantPrivate proposed API and is not on the public
 	 * LanguageModelToolResult2 type, so we narrow with an `in` check.
 	 */
-	private getTerminalTimeoutInfo(toolResult: LanguageModelToolResult2): { termId: string; timeoutMs?: number } | undefined {
+	private getTerminalId(toolResult: LanguageModelToolResult2): string | undefined {
 		if (!('toolMetadata' in toolResult)) {
 			return undefined;
 		}
@@ -230,20 +250,36 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 		if (!metadata || typeof metadata !== 'object') {
 			return undefined;
 		}
-		const m = metadata as { timedOut?: unknown; id?: unknown; timeoutMs?: unknown };
-		if (m.timedOut !== true || typeof m.id !== 'string') {
+		const m = metadata as { id?: unknown };
+		return typeof m.id === 'string' ? m.id : undefined;
+	}
+
+	/**
+	 * Returns the configured timeout (ms) if the result indicates a sync
+	 * `run_in_terminal` call timed out and was moved to the background; returns
+	 * `undefined` otherwise. See vscode core: runInTerminalTool.ts which sets
+	 * `timedOut: true` and `timeoutMs` on `toolMetadata` for that case.
+	 */
+	private getTimeoutMsIfTimedOut(toolResult: LanguageModelToolResult2): number | undefined {
+		if (!('toolMetadata' in toolResult)) {
 			return undefined;
 		}
-		return {
-			termId: m.id,
-			timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
-		};
+		const metadata = (toolResult as { toolMetadata?: unknown }).toolMetadata;
+		if (!metadata || typeof metadata !== 'object') {
+			return undefined;
+		}
+		const m = metadata as { timedOut?: unknown; timeoutMs?: unknown };
+		if (m.timedOut !== true) {
+			return undefined;
+		}
+		return typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined;
 	}
 
 	protected async getAvailableTools(): Promise<LanguageModelToolInformation[]> {
-		// If any previous terminal call timed out, expose no tools so the model
-		// cannot make further calls and is forced to produce its <final_answer>.
-		if (this._timedOutCommands.length > 0) {
+		// If any previous terminal call has moved to the background (timeout or
+		// async), expose no tools so the model cannot make further calls and is
+		// forced to produce its <final_answer>.
+		if (this._backgroundCommands.length > 0) {
 			return [];
 		}
 

@@ -106,9 +106,10 @@ class ExecutionSubagentTool implements ICopilotTool<IExecutionSubagentParams> {
 			subagentResponse = `The execution subagent request failed with this message:\n${loopResult.response.type}: ${loopResult.response.reason}`;
 		}
 
-		// If any terminal commands timed out during the subagent's run, append a
-		// Note line for each on the line(s) immediately after the final </final_answer>.
-		subagentResponse = appendTimeoutNotesToFinalAnswer(subagentResponse, loop.timedOutCommands);
+		// If any terminal commands moved to the background (timeout or async) during
+		// the subagent's run, append a Note line for each on the line(s) immediately
+		// after the final </final_answer>.
+		subagentResponse = appendBackgroundCommandNotesToFinalAnswer(subagentResponse, loop.backgroundCommands);
 
 		// toolMetadata will be automatically included in exportAllPromptLogsAsJsonCommand
 		const result = new ExtendedLanguageModelToolResult([new LanguageModelTextPart(subagentResponse)]);
@@ -132,18 +133,25 @@ class ExecutionSubagentTool implements ICopilotTool<IExecutionSubagentParams> {
 ToolRegistry.registerTool(ExecutionSubagentTool);
 
 /**
- * Appends a `Note: ...` line for each timed-out terminal command on the line(s)
- * immediately after the final `</final_answer>` of the subagent's response. If
- * no `<final_answer>` block is present, appends the notes to the end of the response.
+ * Appends a `Note: ...` line for each stopped terminal command (timed out or
+ * invoked in async/background mode) on the line(s) immediately after the final
+ * `</final_answer>` of the subagent's response. If no `<final_answer>` block is
+ * present, appends the notes to the end of the response.
  */
-function appendTimeoutNotesToFinalAnswer(response: string, timedOutCommands: ReadonlyArray<{ command: string; termId: string; timeoutMs?: number }>): string {
-	if (timedOutCommands.length === 0) {
+function appendBackgroundCommandNotesToFinalAnswer(
+	response: string,
+	backgroundCommands: ReadonlyArray<{ command: string; termId: string; reason: 'timeout' | 'async'; timeoutMs?: number }>,
+): string {
+	if (backgroundCommands.length === 0) {
 		return response;
 	}
 
-	const notes = timedOutCommands.map(c => {
-		const timeoutText = c.timeoutMs !== undefined ? ` after ${c.timeoutMs} ms` : '';
-		return `Note: The command \`${c.command}\` timed out${timeoutText}. It may still be running in terminal ID ${c.termId}.`;
+	const notes = backgroundCommands.map(c => {
+		if (c.reason === 'timeout') {
+			const timeoutText = c.timeoutMs !== undefined ? ` after ${c.timeoutMs} ms` : '';
+			return `Note: The command \`${c.command}\` timed out${timeoutText}. It may still be running in terminal ID ${c.termId}.`;
+		}
+		return `Note: The command \`${c.command}\` was started in the background. It may still be running in terminal ID ${c.termId}.`;
 	}).join('\n');
 
 	const closingTag = '</final_answer>';
