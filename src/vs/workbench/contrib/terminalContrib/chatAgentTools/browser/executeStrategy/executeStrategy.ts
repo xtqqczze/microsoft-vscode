@@ -243,6 +243,23 @@ export async function trackIdleOnPrompt(
 			scheduler.schedule();
 		}
 	}, 30_000));
+	// Hard wall-clock safety net for the case where shell integration never
+	// engages at all — no OSC `C`/`D` is ever parsed so state never advances
+	// to Executing, and yet the existing data-idle fallbacks somehow fail to
+	// fire (e.g. because data arrives in a single event before listeners are
+	// active, or because `onData` throttling masks idle periods). Without
+	// this, trackIdleOnPrompt can block the rich strategy for the lifetime
+	// of the chat request. Genuinely long-running commands with working
+	// shell integration reach Executing/PromptAfterExecuting before this
+	// fires, so this is purely a fallback for the broken-handshake path.
+	const hardCapScheduler = store.add(new RunOnceScheduler(() => {
+		if (state === TerminalState.Initial || state === TerminalState.Prompt) {
+			log?.(`Hard cap fired after 60s in state ${stateNames[state]} (dataEvents=${dataEventCount})`);
+			setState(TerminalState.PromptAfterExecuting, 'hardCap');
+			scheduler.schedule();
+		}
+	}, 60_000));
+	hardCapScheduler.schedule();
 	// Only schedule when a prompt sequence (A) is seen after an execute sequence (C). This prevents
 	// cases where the command is executed before the prompt is written. While not perfect, sitting
 	// on an A without a C following shortly after is a very good indicator that the command is done
