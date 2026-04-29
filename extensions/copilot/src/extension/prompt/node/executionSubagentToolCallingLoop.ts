@@ -124,25 +124,42 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 		const endpoint = await this.getEndpoint();
 		const maxExecutionTurns = this._configurationService.getExperimentBasedConfig(ConfigKey.Advanced.ExecutionSubagentToolCallLimit, this._experimentationService);
 
-		// If the previous render observed any timed-out terminal commands, tell the
+		// If a previous render observed any timed-out terminal commands, tell the
 		// prompt to nudge the model to stop issuing tool calls and produce its
 		// <final_answer>. The natural "no tool calls" exit then ends the loop.
-		const renderer = PromptRenderer.create(
+		const hadTimeoutsBefore = this._timedOutCommands.length > 0;
+		const render = (hasTimedOutCommand: boolean) => PromptRenderer.create(
 			this.instantiationService,
 			endpoint,
 			ExecutionSubagentPrompt,
 			{
 				promptContext: buildpromptContext,
 				maxExecutionTurns,
-				hasTimedOutCommand: this._timedOutCommands.length > 0,
+				hasTimedOutCommand,
 			}
-		);
-		const result = await renderer.render(progress, token);
+		).render(progress, token);
+
+		let result = await render(hadTimeoutsBefore);
 
 		// After rendering, scan the rendered tool results for timeouts. Every tool
 		// call rendered into the prompt (including those executed just now during
 		// this render) emits a ToolResultMetadata entry on `result.metadata`.
 		this.collectTimedOutCommands(buildpromptContext, result);
+
+		// If a timeout was first detected during this render, the nudge wasn't in
+		// the prompt we just built. Re-render with the nudge so the LLM in this
+		// same iteration sees the instruction to produce <final_answer>.
+		if (!hadTimeoutsBefore && this._timedOutCommands.length > 0) {
+			const cache = buildpromptContext.toolCallResults;
+			// Write to the tool result cache so that the second render doesn't
+			// re-run all tool calls that happened during the first render
+			if (cache) {
+				for (const meta of result.metadata.getAll(ToolResultMetadata)) {
+					cache[meta.toolCallId] = meta.result;
+				}
+			}
+			result = await render(true);
+		}
 
 		return result;
 	}
@@ -212,11 +229,11 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 			return undefined;
 		}
 		const m = metadata as { timedOut?: unknown; id?: unknown; timeoutMs?: unknown };
-		if (m.timedOut !== true) {
+		if (m.timedOut !== true || typeof m.id !== 'string') {
 			return undefined;
 		}
 		return {
-			termId: typeof m.id === 'string' ? m.id : '',
+			termId: m.id,
 			timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
 		};
 	}
