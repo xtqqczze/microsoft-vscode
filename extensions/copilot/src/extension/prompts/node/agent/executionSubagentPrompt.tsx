@@ -11,17 +11,6 @@ import { SafetyRules } from '../base/safetyRules';
 import { TerminalStatePromptElement } from '../base/terminalState';
 import { ChatToolCalls } from '../panel/toolCalling';
 
-/** A terminal command that is no longer being awaited by the subagent — either
- * it timed out and was moved to the background, or the model invoked it in
- * async/background mode from the start. */
-export interface IBackgroundCommand {
-	readonly command: string;
-	readonly termId: string;
-	readonly reason: 'timeout' | 'async';
-	/** Only set when `reason === 'timeout'`. */
-	readonly timeoutMs?: number;
-}
-
 export interface ExecutionSubagentPromptProps extends GenericBasePromptElementProps {
 	readonly maxExecutionTurns: number;
 	/** True if a previous {@link ToolName.CoreRunInTerminal} call timed out or was

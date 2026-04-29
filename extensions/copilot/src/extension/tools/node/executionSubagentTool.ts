@@ -16,7 +16,7 @@ import { IInstantiationService } from '../../../util/vs/platform/instantiation/c
 import { ChatResponseNotebookEditPart, ChatResponseTextEditPart, ChatToolInvocationPart, ExtendedLanguageModelToolResult, LanguageModelTextPart, MarkdownString } from '../../../vscodeTypes';
 import { Conversation, Turn } from '../../prompt/common/conversation';
 import { IBuildPromptContext } from '../../prompt/common/intents';
-import { ExecutionSubagentToolCallingLoop } from '../../prompt/node/executionSubagentToolCallingLoop';
+import { ExecutionSubagentToolCallingLoop, IBackgroundCommand } from '../../prompt/node/executionSubagentToolCallingLoop';
 import { ToolName } from '../common/toolNames';
 import { CopilotToolMode, ICopilotTool, ToolRegistry } from '../common/toolsRegistry';
 
@@ -140,7 +140,7 @@ ToolRegistry.registerTool(ExecutionSubagentTool);
  */
 function appendBackgroundCommandNotesToFinalAnswer(
 	response: string,
-	backgroundCommands: ReadonlyArray<{ command: string; termId: string; reason: 'timeout' | 'async'; timeoutMs?: number }>,
+	backgroundCommands: readonly IBackgroundCommand[],
 ): string {
 	if (backgroundCommands.length === 0) {
 		return response;

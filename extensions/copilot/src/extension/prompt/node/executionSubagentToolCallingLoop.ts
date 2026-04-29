@@ -22,7 +22,7 @@ import { ITelemetryService } from '../../../platform/telemetry/common/telemetry'
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 import { ChatResponseProgressPart, ChatResponseReferencePart, LanguageModelToolResult2 } from '../../../vscodeTypes';
 import { IToolCallingLoopOptions, ToolCallingLoop, ToolCallingLoopFetchOptions } from '../../intents/node/toolCallingLoop';
-import { ExecutionSubagentPrompt, IBackgroundCommand } from '../../prompts/node/agent/executionSubagentPrompt';
+import { ExecutionSubagentPrompt } from '../../prompts/node/agent/executionSubagentPrompt';
 import { PromptRenderer } from '../../prompts/node/base/promptRenderer';
 import { ToolResultMetadata } from '../../prompts/node/panel/toolCalling';
 import { ToolName } from '../../tools/common/toolNames';
@@ -38,6 +38,17 @@ export interface IExecutionSubagentToolCallingLoopOptions extends IToolCallingLo
 	subAgentInvocationId?: string;
 	/** The tool_call_id from the parent agent's LLM response that triggered this subagent invocation. */
 	parentToolCallId?: string;
+}
+
+/** A terminal command that is no longer being awaited by the subagent — either
+ * it timed out and was moved to the background, or the model invoked it in
+ * async/background mode from the start. */
+export interface IBackgroundCommand {
+	readonly command: string;
+	readonly termId: string;
+	readonly reason: 'timeout' | 'async';
+	/** Only set when `reason === 'timeout'`. */
+	readonly timeoutMs?: number;
 }
 
 export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecutionSubagentToolCallingLoopOptions> {
