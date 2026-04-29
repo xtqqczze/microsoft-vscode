@@ -10,6 +10,7 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { IActionViewItemService } from '../../../../platform/actions/browser/actionViewItemService.js';
+import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { AICustomizationManagementEditor } from '../../../../workbench/contrib/chat/browser/aiCustomization/aiCustomizationManagementEditor.js';
@@ -39,6 +40,16 @@ export interface ICustomizationItemConfig {
 	readonly modelSection?: ItemsModelSection;
 	readonly isMcp?: boolean;
 	readonly isPlugins?: boolean;
+}
+
+/**
+ * Per-section context key indicating whether the active harness exposes
+ * the section in the sidebar customizations toolbar. Driven by
+ * `IHarnessDescriptor.hiddenSections` and consumed via the menu `when`
+ * clause registered alongside each customization action.
+ */
+function customizationSectionVisibleKey(section: string): string {
+	return `sessionsCustomizationSectionVisible.${section}`;
 }
 
 export const CUSTOMIZATION_ITEMS: ICustomizationItemConfig[] = [
@@ -181,14 +192,37 @@ export class CustomizationsToolbarContribution extends Disposable implements IWo
 	constructor(
 		@IActionViewItemService actionViewItemService: IActionViewItemService,
 		@IInstantiationService instantiationService: IInstantiationService,
+		@ICustomizationHarnessService harnessService: ICustomizationHarnessService,
+		@IContextKeyService contextKeyService: IContextKeyService,
 	) {
 		super();
+
+		// Per-section visibility context keys, kept in sync with the active
+		// harness's `hiddenSections`. Each customization action's menu entry
+		// is gated on its key so that harnesses (e.g. Claude, AHP) which
+		// don't support a customization type don't surface its row.
+		const visibilityKeys = new Map<string, IContextKey<boolean>>();
+		for (const config of CUSTOMIZATION_ITEMS) {
+			const key = new RawContextKey<boolean>(customizationSectionVisibleKey(config.section), true).bindTo(contextKeyService);
+			visibilityKeys.set(config.section, key);
+		}
+		this._register(autorun(reader => {
+			harnessService.activeHarness.read(reader);
+			harnessService.availableHarnesses.read(reader);
+			const descriptor = harnessService.getActiveDescriptor();
+			const hidden = new Set(descriptor.hiddenSections ?? []);
+			for (const config of CUSTOMIZATION_ITEMS) {
+				visibilityKeys.get(config.section)!.set(!hidden.has(config.section));
+			}
+		}));
 
 		for (const [index, config] of CUSTOMIZATION_ITEMS.entries()) {
 			// Register the custom ActionViewItem for this action
 			this._register(actionViewItemService.register(Menus.SidebarCustomizations, config.id, (action, options) => {
 				return instantiationService.createInstance(CustomizationLinkViewItem, action, options, config);
 			}, undefined));
+
+			const sectionVisibleWhen = ContextKeyExpr.has(customizationSectionVisibleKey(config.section));
 
 			// Register the action with menu item
 			this._register(registerAction2(class extends Action2 {
@@ -200,6 +234,7 @@ export class CustomizationsToolbarContribution extends Disposable implements IWo
 							id: Menus.SidebarCustomizations,
 							group: 'navigation',
 							order: index + 1,
+							when: sectionVisibleWhen,
 						}
 					});
 				}

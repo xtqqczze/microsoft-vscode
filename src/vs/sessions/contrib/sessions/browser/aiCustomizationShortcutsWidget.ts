@@ -18,6 +18,7 @@ import { Button } from '../../../../base/browser/ui/button/button.js';
 import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IMcpService } from '../../../../workbench/contrib/mcp/common/mcpTypes.js';
 import { IAICustomizationItemsModel } from '../../../../workbench/contrib/chat/browser/aiCustomization/aiCustomizationItemsModel.js';
+import { ICustomizationHarnessService } from '../../../../workbench/contrib/chat/common/customizationHarnessService.js';
 import { CUSTOMIZATION_ITEMS } from './customizationsToolbar.contribution.js';
 import { Menus } from '../../../browser/menus.js';
 import { IAgentPluginService } from '../../../../workbench/contrib/chat/common/plugins/agentPluginService.js';
@@ -45,6 +46,7 @@ export class AICustomizationShortcutsWidget extends Disposable {
 		@IMcpService private readonly mcpService: IMcpService,
 		@IAgentPluginService private readonly agentPluginService: IAgentPluginService,
 		@IAICustomizationItemsModel private readonly itemsModel: IAICustomizationItemsModel,
+		@ICustomizationHarnessService private readonly harnessService: ICustomizationHarnessService,
 		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super();
@@ -124,10 +126,18 @@ export class AICustomizationShortcutsWidget extends Disposable {
 		// link (CUSTOMIZATION_ITEMS). This guarantees the header value equals
 		// the sum of the per-link badges by construction — and excludes
 		// sections like Prompts that the editor exposes but the sidebar does
-		// not surface.
+		// not surface, plus any sections the active harness hides via
+		// `hiddenSections` (e.g. Claude doesn't show Prompts; AHP doesn't
+		// show MCP Servers).
 		const totalCount = derived(reader => {
+			this.harnessService.activeHarness.read(reader);
+			this.harnessService.availableHarnesses.read(reader);
+			const hidden = new Set(this.harnessService.getActiveDescriptor().hiddenSections ?? []);
 			let total = 0;
 			for (const config of CUSTOMIZATION_ITEMS) {
+				if (hidden.has(config.section)) {
+					continue;
+				}
 				if (config.modelSection) {
 					total += this.itemsModel.getCount(config.modelSection).read(reader);
 				} else if (config.isMcp) {
