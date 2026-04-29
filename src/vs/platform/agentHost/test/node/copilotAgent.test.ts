@@ -159,8 +159,10 @@ class TestableCopilotAgent extends CopilotAgent {
 		@ISessionDataService sessionDataService: ISessionDataService,
 		@IAgentHostGitService gitService: IAgentHostGitService,
 		@IAgentHostTerminalManager terminalManager: IAgentHostTerminalManager,
+		@IAgentConfigurationService configurationService: IAgentConfigurationService,
 	) {
-		super(logService, instantiationService, fileService, sessionDataService, gitService, terminalManager);
+		super(logService, instantiationService, fileService, sessionDataService, gitService, terminalManager, configurationService);
+		this._enablePlanModeOnClient(this._copilotClient);
 	}
 
 	protected override _createCopilotClient(): ICopilotClient {
@@ -331,7 +333,7 @@ suite('CopilotAgent', () => {
 				toolCallId: 'tc-read-plan-agent-composition',
 			});
 
-			assert.strictEqual(result.kind, 'approved');
+			assert.strictEqual(result.kind, 'approve-once');
 		} finally {
 			if (previousXdgStateHome === undefined) {
 				delete process.env['XDG_STATE_HOME'];

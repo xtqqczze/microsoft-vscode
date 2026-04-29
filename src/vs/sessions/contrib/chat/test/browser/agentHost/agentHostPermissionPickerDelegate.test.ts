@@ -12,7 +12,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { ResolveSessionConfigResult, SessionConfigPropertySchema } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
 import { ChatPermissionLevel } from '../../../../../../workbench/contrib/chat/common/constants.js';
-import { AgentHostPermissionPickerDelegate, isWellKnownAutoApproveSchema } from '../../../browser/agentHost/agentHostPermissionPickerDelegate.js';
+import { AgentHostPermissionPickerDelegate, isWellKnownAutoApproveSchema, isWellKnownModeSchema } from '../../../browser/agentHost/agentHostPermissionPickerDelegate.js';
 import { IAgentHostSessionsProvider } from '../../../../../common/agentHostSessionsProvider.js';
 import { ISessionsProvidersChangeEvent, ISessionsProvidersService } from '../../../../../services/sessions/browser/sessionsProvidersService.js';
 import { ISessionsProvider } from '../../../../../services/sessions/common/sessionsProvider.js';
@@ -208,5 +208,47 @@ suite('isWellKnownAutoApproveSchema', () => {
 		assert.strictEqual(isWellKnownAutoApproveSchema(schema({ type: 'number' as 'string' })), false);
 		assert.strictEqual(isWellKnownAutoApproveSchema(schema({ enum: undefined })), false);
 		assert.strictEqual(isWellKnownAutoApproveSchema(schema({ enum: [] })), false);
+	});
+});
+
+suite('isWellKnownModeSchema', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	function schema(overrides: Partial<SessionConfigPropertySchema> = {}): SessionConfigPropertySchema {
+		return {
+			title: 'Agent Mode',
+			description: 'desc',
+			type: 'string',
+			enum: ['interactive', 'plan'],
+			...overrides,
+		} as SessionConfigPropertySchema;
+	}
+
+	test('matches the canonical two-value enum', () => {
+		assert.strictEqual(isWellKnownModeSchema(schema()), true);
+	});
+
+	test('matches a subset that still contains "interactive"', () => {
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive'] })), true);
+	});
+
+	test('rejects schemas missing the required "interactive" value', () => {
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['plan'] })), false);
+	});
+
+	test('rejects schemas with the legacy "autopilot" mode value', () => {
+		// `autopilot` is exposed as an `autoApprove` level, not a mode.
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive', 'autopilot'] })), false);
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive', 'plan', 'autopilot'] })), false);
+	});
+
+	test('rejects schemas with unknown enum values', () => {
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive', 'shell'] })), false);
+	});
+
+	test('rejects non-string types and missing/empty enums', () => {
+		assert.strictEqual(isWellKnownModeSchema(schema({ type: 'number' as 'string' })), false);
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: undefined })), false);
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: [] })), false);
 	});
 });
