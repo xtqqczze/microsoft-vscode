@@ -553,13 +553,12 @@ export class AskQuestionsTool extends Disposable implements IToolImpl {
 	private createAutopilotResult(questions: IQuestion[]): IToolResult {
 		const answers: Record<string, IQuestionAnswer> = {};
 		for (const question of questions) {
-			// Pick the recommended option if available, otherwise pick the first option
-			const recommended = question.options?.find(opt => opt.recommended);
-			const firstOption = question.options?.[0];
-			const selected = recommended?.label ?? firstOption?.label;
+			// In autopilot mode the user is not available to respond. Do not
+			// auto-select any option — instead instruct the model to make its own
+			// decision regardless of the question type.
 			answers[question.header] = {
-				selected: selected ? [selected] : [],
-				freeText: selected ? null : AUTOPILOT_ASK_USER_RESPONSE,
+				selected: [],
+				freeText: AUTOPILOT_ASK_USER_RESPONSE,
 				skipped: false,
 			};
 		}
@@ -591,16 +590,14 @@ export class AskQuestionsTool extends Disposable implements IToolImpl {
 				continue;
 			}
 
-			const recommended = question.options?.find(opt => opt.recommended);
-			const firstOption = question.options?.[0];
-			const selectedLabel = recommended?.label ?? firstOption?.label;
-
-			if (chatQuestion.type === 'text' || !selectedLabel) {
-				data[internalId] = AUTOPILOT_ASK_USER_RESPONSE;
-			} else if (chatQuestion.type === 'multiSelect') {
-				data[internalId] = { selectedValues: [selectedLabel] };
+			// Do not auto-select any option in autopilot mode — show the
+			// "user is not available" response as the answer for all question types.
+			if (chatQuestion.type === 'multiSelect') {
+				data[internalId] = { selectedValues: [], freeformValue: AUTOPILOT_ASK_USER_RESPONSE };
+			} else if (chatQuestion.type === 'singleSelect') {
+				data[internalId] = { freeformValue: AUTOPILOT_ASK_USER_RESPONSE };
 			} else {
-				data[internalId] = { selectedValue: selectedLabel };
+				data[internalId] = AUTOPILOT_ASK_USER_RESPONSE;
 			}
 		}
 
