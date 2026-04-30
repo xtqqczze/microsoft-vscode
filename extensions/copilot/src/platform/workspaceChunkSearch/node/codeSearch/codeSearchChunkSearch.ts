@@ -655,6 +655,10 @@ export class CodeSearchChunkSearch extends Disposable {
 	private async searchLocalDiff(diffArray: readonly URI[], sizing: StrategySearchSizing, query: WorkspaceChunkQueryWithEmbeddings, options: WorkspaceChunkSearchOptions, telemetryInfo: TelemetryCorrelationId, token: CancellationToken): Promise<DiffSearchResult | undefined> {
 		const innerTelemetryInfo = telemetryInfo.addCaller('CodeSearchChunkSearch::searchLocalDiff');
 
+		if (!this.isExternalIngestEnabled()) {
+			return undefined;
+		}
+
 		// Force it to search the local diff too so we can override stale code-search results.
 		await raceCancellationError(this._externalIngestIndex.value.updateForceIncludeFiles(diffArray, token), token);
 
