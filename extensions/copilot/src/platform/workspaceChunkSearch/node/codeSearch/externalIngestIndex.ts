@@ -939,7 +939,7 @@ export class ExternalIngestIndex extends Disposable {
 					}
 				}
 			} catch (err) {
-				console.error(`ExternalIngestIndex::reconcileDbFiles() Error processing workspace folder ${folder.toString()}:`, err);
+				this._logService.error(`ExternalIngestIndex::reconcileDbFiles() Error processing workspace folder ${folder.toString()}: ${toErrorMessage(err, true)}`);
 			}
 		}
 
