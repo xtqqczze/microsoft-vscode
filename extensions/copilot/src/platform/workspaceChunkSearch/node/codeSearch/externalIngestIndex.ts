@@ -955,14 +955,23 @@ export class ExternalIngestIndex extends Disposable {
 		}
 
 		const addWatchersFolder = (folder: URI): IDisposable => {
-			const disposables = new DisposableStore();
+			if (this._fileSystemService.isWritableFileSystem(folder.scheme) === false) {
+				return Disposable.None;
+			}
 
-			const watcher = disposables.add(this._fileSystemService.createFileSystemWatcher(new RelativePattern(folder, '**/*')));
-			disposables.add(watcher.onDidCreate(uri => this.onFileAdded(uri)));
-			disposables.add(watcher.onDidChange(uri => this.onFileChanged(uri)));
-			disposables.add(watcher.onDidDelete(uri => this.onFileDeleted(uri)));
+			try {
+				const disposables = new DisposableStore();
 
-			return disposables;
+				const watcher = disposables.add(this._fileSystemService.createFileSystemWatcher(new RelativePattern(folder, '**/*')));
+				disposables.add(watcher.onDidCreate(uri => this.onFileAdded(uri)));
+				disposables.add(watcher.onDidChange(uri => this.onFileChanged(uri)));
+				disposables.add(watcher.onDidDelete(uri => this.onFileDeleted(uri)));
+
+				return disposables;
+			} catch (e) {
+				this._logService.warn(`ExternalIngestIndex::registerWatcher() Failed to create watcher for ${folder.toString()}`, e);
+				return Disposable.None;
+			}
 		};
 
 		const watchersForWorkspaceFolders = new ResourceMap<IDisposable>();
