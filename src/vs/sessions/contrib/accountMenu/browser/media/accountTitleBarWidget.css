@@ -308,45 +308,29 @@
 	padding-bottom: 0;
 }
 
-/* Collapsible sub-sections (e.g. "Codebase Semantic Index"): drop the
-	standalone-tooltip divider/bold heading and align with the panel's
-	quota-title style above it. */
-/* Flatten collapsible sub-sections (e.g. "Codebase Semantic Index") into
-	the parent Subscription section: keep the header content (label + status)
-	but style it like the quota-title above, drop the chevron/divider, and
-	force the content open so it reads as a single continuous section. */
-.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-header {
+/* Flatten contributed sub-sections (e.g. "Codebase Semantic Index") into
+	the parent Subscription section. The dashboard renders these non-collapsibly
+	(via `disableContributedSectionsCollapsible`); these rules just align the
+	header typography with the panel's quota-title style above it. */
+.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-header.non-collapsible {
 	margin-top: 4px;
 	padding: 0 28px 0 0;
 	border-top: none;
 	background: none;
-	cursor: default;
-	pointer-events: none;
 	font-size: 12px;
 	line-height: 18px;
 	font-weight: 400;
 	color: var(--vscode-descriptionForeground);
 }
 
-.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-header .collapsible-chevron {
-	display: none;
-}
-
-.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-header .collapsible-label {
+.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-header.non-collapsible .collapsible-label {
 	color: var(--vscode-foreground);
 }
 
-.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-header .collapsible-status {
+.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-header.non-collapsible .collapsible-status {
 	margin-left: auto;
 	font-size: 11px;
 	line-height: 15px;
-}
-
-.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-content,
-.agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-content.collapsed {
-	display: block;
-	grid-template-rows: none;
-	transition: none;
 }
 
 .agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-content > .collapsible-inner {
