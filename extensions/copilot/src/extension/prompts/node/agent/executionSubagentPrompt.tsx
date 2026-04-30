@@ -82,9 +82,14 @@ export class ExecutionSubagentPrompt extends PromptElement<ExecutionSubagentProm
 					toolCallResults={toolCallResults}
 					toolCallMode={CopilotToolMode.FullContext}
 				/>
-				{(isLastTurn || this.props.hasBackgroundCommand) && (
+				{isLastTurn && (
 					<UserMessage priority={900}>
 						OK, your allotted iterations are finished. Show the &lt;final_answer&gt;.
+					</UserMessage>
+				)}
+				{!isLastTurn && this.props.hasBackgroundCommand && (
+					<UserMessage priority={900}>
+						One or more commands are running in the background. You do not have the ability to monitor them. Show the &lt;final_answer&gt;.
 					</UserMessage>
 				)}
 			</>
