@@ -968,8 +968,8 @@ export class ExternalIngestIndex extends Disposable {
 				disposables.add(watcher.onDidDelete(uri => this.onFileDeleted(uri)));
 
 				return disposables;
-			} catch (e) {
-				this._logService.warn(`ExternalIngestIndex::registerWatcher() Failed to create watcher for ${folder.toString()}`, e);
+			} catch (err) {
+				this._logService.warn(`ExternalIngestIndex::registerWatcher() Failed to create watcher for ${folder.toString()}. ${err}`);
 				return Disposable.None;
 			}
 		};
