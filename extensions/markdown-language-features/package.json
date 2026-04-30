@@ -681,7 +681,7 @@
               "type": "string"
             },
             "default": [],
-            "description": "%markdown.styles.dec%",
+            "markdownDescription": "%markdown.styles.dec%",
             "scope": "resource"
           },
           "markdown.preview.breaks": {
