@@ -150,8 +150,9 @@ export class ChatStatusDashboard extends DomWidget {
 			}));
 
 			// Add Additional Spend / Upgrade buttons to the header
-			const canConfigureAdditionalSpend = this.chatEntitlementService.entitlement === ChatEntitlement.EDU || this.chatEntitlementService.entitlement === ChatEntitlement.Pro || this.chatEntitlementService.entitlement === ChatEntitlement.ProPlus;
+			const canConfigureAdditionalSpend = this.chatEntitlementService.entitlement === ChatEntitlement.EDU || this.chatEntitlementService.entitlement === ChatEntitlement.Pro || this.chatEntitlementService.entitlement === ChatEntitlement.ProPlus || this.chatEntitlementService.entitlement === ChatEntitlement.Max;
 			const showUpgrade = this.chatEntitlementService.entitlement !== ChatEntitlement.ProPlus &&
+				this.chatEntitlementService.entitlement !== ChatEntitlement.Max &&
 				this.chatEntitlementService.entitlement !== ChatEntitlement.Business &&
 				this.chatEntitlementService.entitlement !== ChatEntitlement.Enterprise;
 
@@ -224,7 +225,7 @@ export class ChatStatusDashboard extends DomWidget {
 			}
 
 			let chatQuotaIndicator: ((quota: IQuotaSnapshot | string) => void) | undefined;
-			if (chatQuota && !chatQuota.unlimited) {
+			if (chatQuota && !chatQuota.unlimited && !premiumChatQuota?.usageBasedBilling) {
 				chatQuotaIndicator = this.createQuotaIndicator(container, chatQuota, localize('chatsLabel', "Chat messages"), resetLabel);
 			}
 
@@ -238,7 +239,9 @@ export class ChatStatusDashboard extends DomWidget {
 			}
 
 			let completionsQuotaIndicator: ((quota: IQuotaSnapshot | string) => void) | undefined;
-			if (completionsQuota && !completionsQuota.unlimited && completionsQuota.percentRemaining >= 0) {
+			const showCompletions = completionsQuota && !completionsQuota.unlimited && completionsQuota.percentRemaining >= 0
+				&& (!premiumChatQuota?.usageBasedBilling || this.chatEntitlementService.entitlement === ChatEntitlement.Free);
+			if (showCompletions) {
 				completionsQuotaIndicator = this.createQuotaIndicator(container, completionsQuota, localize('completionsLabel', "Inline Suggestions"), resetLabel);
 			}
 
