@@ -4881,6 +4881,15 @@
 						"tags": [
 							"advanced"
 						]
+					},
+					"github.copilot.chat.advanced.workspace.codeSearchExternalIngest.enabled": {
+						"type": "boolean",
+						"default": false,
+						"markdownDescription": "%github.copilot.config.workspace.codeSearchExternalIngest.enabled%",
+						"tags": [
+							"advanced",
+							"onExp"
+						]
 					}
 				}
 			}
