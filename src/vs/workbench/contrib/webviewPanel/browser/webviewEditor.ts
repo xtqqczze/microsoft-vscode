@@ -40,7 +40,6 @@ export class WebviewEditor extends EditorPane {
 	public static readonly ID = 'WebviewEditor';
 
 	private _element?: HTMLElement;
-	private _dimension?: DOM.Dimension;
 	private _visible = false;
 	private _isDisposed = false;
 	private _clippingContainer?: HTMLElement;
@@ -65,15 +64,6 @@ export class WebviewEditor extends EditorPane {
 		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
 	) {
 		super(WebviewEditor.ID, group, telemetryService, themeService, storageService);
-
-		const part = _editorGroupsService.getPart(group);
-		this._register(Event.any(part.onDidScroll, part.onDidAddGroup, part.onDidRemoveGroup, part.onDidMoveGroup)(() => {
-			if (this.webview && this._visible) {
-				this.setWebviewAnchorElement(this.webview);
-			}
-		}));
-
-
 	}
 
 	private get webview(): IOverlayWebview | undefined {
@@ -103,11 +93,6 @@ export class WebviewEditor extends EditorPane {
 	}
 
 	public override layout(dimension: DOM.Dimension): void {
-		this._dimension = dimension;
-		if (this.webview && this._visible) {
-			this.setWebviewAnchorElement(this.webview);
-		}
-
 		this.setEditorVisible(dimension.width > 0 && dimension.height > 0);
 	}
 
@@ -171,9 +156,6 @@ export class WebviewEditor extends EditorPane {
 
 			if (!alreadyOwnsWebview) {
 				this.claimWebview(input);
-			}
-			if (this._dimension) {
-				this.layout(this._dimension);
 			}
 		}
 	}
