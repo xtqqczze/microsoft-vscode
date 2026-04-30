@@ -215,7 +215,6 @@
 	font-size: 12px;
 	font-weight: 500;
 	line-height: 18px;
-	color: var(--vscode-descriptionForeground);
 }
 
 .agent-sessions-workbench .sessions-account-titlebar-panel-header-actions {
