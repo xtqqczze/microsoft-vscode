@@ -166,7 +166,7 @@ const bundleVSCodeTask = task.define('bundle-vscode', task.series(
 gulp.task(bundleVSCodeTask);
 
 // esbuild-based bundle tasks (drop-in replacement for bundle-vscode / minify-vscode)
-function runEsbuildTranspile(outDir: string, excludeTests: boolean): Promise<void> {
+export function runEsbuildTranspile(outDir: string, excludeTests: boolean): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const scriptPath = path.join(root, 'build/next/index.ts');
 		const args = [scriptPath, 'transpile', '--out', outDir];
@@ -258,16 +258,6 @@ gulp.task(task.define('core-ci', task.series(
 		task.define('esbuild-vscode-reh-web-min', () => runEsbuildBundle('out-vscode-reh-web-min', true, true, 'server-web', `${sourceMappingURLBase}/core`)),
 	)
 )));
-
-const coreCIPR = task.define('core-ci-pr', task.series(
-	gulp.task('compile-build-without-mangling') as task.Task,
-	task.parallel(
-		gulp.task('minify-vscode') as task.Task,
-		gulp.task('minify-vscode-reh') as task.Task,
-		gulp.task('minify-vscode-reh-web') as task.Task,
-	)
-));
-gulp.task(coreCIPR);
 
 /**
  * Compute checksums for some files.
