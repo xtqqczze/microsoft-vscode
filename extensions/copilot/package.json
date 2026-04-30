@@ -6416,10 +6416,10 @@
 	},
 	"scripts": {
 		"postinstall": "tsx ./script/postinstall.ts",
-		"build": "node .esbuild.ts --sourcemaps",
-		"compile": "node .esbuild.ts --dev",
+		"build": "node .esbuild.mts --sourcemaps",
+		"compile": "node .esbuild.mts --dev",
 		"watch": "npm-run-all -lp watch:esbuild watch:typecheck",
-		"watch:esbuild": "node .esbuild.ts --watch --dev",
+		"watch:esbuild": "node .esbuild.mts --watch --dev",
 		"watch:typecheck": "npx tsgo --noEmit --watch --preserveWatchOutput --project tsconfig.json",
 		"watch:typecheck-extension": "npx tsgo --noEmit --watch --project tsconfig.json",
 		"watch:typecheck-extension-web": "npx tsgo --noEmit --watch --project tsconfig.worker.json",
