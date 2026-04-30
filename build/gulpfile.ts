@@ -13,8 +13,7 @@ import { compileExtensionMediaTask, compileExtensionsTask, watchExtensionsTask }
 import * as compilation from './lib/compilation.ts';
 import * as task from './lib/task.ts';
 import * as util from './lib/util.ts';
-import { copyCodiconsTask } from './lib/compilation.ts';
-import { runEsbuildTranspile } from './gulpfile.vscode.ts';
+import { runEsbuildTranspile } from './lib/esbuild.ts';
 
 // Extension point names
 gulp.task(compilation.compileExtensionPointNamesTask);
@@ -27,7 +26,7 @@ gulp.task(compilation.watchApiProposalNamesTask);
 
 // Client Transpile
 gulp.task(task.define('transpile-client-esbuild', task.series(
-	copyCodiconsTask,
+	compilation.copyCodiconsTask,
 	task.define('esbuild-out-build', () => runEsbuildTranspile('out', false)),
 )));
 
