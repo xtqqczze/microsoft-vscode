@@ -317,13 +317,13 @@
 	but style it like the quota-title above, drop the chevron/divider, and
 	force the content open so it reads as a single continuous section. */
 .agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-header {
-	margin-top: 0;
+	margin-top: 4px;
 	padding: 0;
 	border-top: none;
 	background: none;
 	cursor: default;
 	pointer-events: none;
-	font-size: 13px;
+	font-size: 12px;
 	line-height: 18px;
 	font-weight: 400;
 	color: var(--vscode-descriptionForeground);
@@ -348,7 +348,7 @@
 
 .agent-sessions-workbench .sessions-account-titlebar-panel-section .chat-status-bar-entry-tooltip .collapsible-content > .collapsible-inner {
 	gap: 6px;
-	margin-top: 4px;
+	margin-top: 0;
 	margin-bottom: 0;
 }
 
@@ -522,14 +522,13 @@
 .agent-sessions-workbench .sessions-account-titlebar-panel-section.subscription .chat-status-bar-entry-tooltip {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
 	padding: 4px 8px 6px;
 }
 
 .agent-sessions-workbench .sessions-account-titlebar-panel-section.subscription .chat-status-bar-entry-tooltip > div.description {
 	margin: 0;
 	padding: 0 2px;
-	font-size: 12px;
+	font-size: 11px;
 	line-height: 16px;
 	color: var(--vscode-descriptionForeground);
 }
