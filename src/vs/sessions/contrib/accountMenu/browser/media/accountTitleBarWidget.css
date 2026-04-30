@@ -206,6 +206,15 @@
 	border-bottom: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-disabledForeground));
 }
 
+.agent-sessions-workbench .sessions-account-titlebar-panel-avatar {
+	flex: 0 0 auto;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	object-fit: cover;
+	border: 1px solid var(--vscode-commandCenter-border, var(--vscode-contrastBorder, transparent));
+}
+
 .agent-sessions-workbench .sessions-account-titlebar-panel-title {
 	flex: 1 1 auto;
 	min-width: 0;
@@ -514,7 +523,7 @@
 .agent-sessions-workbench .sessions-account-titlebar-panel-section.subscription .chat-status-bar-entry-tooltip {
 	display: flex;
 	flex-direction: column;
-	padding: 4px 8px 6px;
+	padding: 4px 8px 8px;
 }
 
 .agent-sessions-workbench .sessions-account-titlebar-panel-section.subscription .chat-status-bar-entry-tooltip > div.description {
