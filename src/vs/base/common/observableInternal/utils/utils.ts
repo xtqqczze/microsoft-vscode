@@ -294,7 +294,7 @@ export function mapObservableArrayCached<TIn, TOut, TKey = TIn>(owner: DebugOwne
 		}
 	}, (reader) => {
 		const i = items.read(reader);
-		m.setItems(i);
+		m.setItems(i ?? []);
 		return m.getItems();
 	});
 	return self;
