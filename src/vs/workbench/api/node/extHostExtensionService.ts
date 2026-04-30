@@ -23,11 +23,22 @@ import nodeModule from 'node:module';
 import { assertType } from '../../../base/common/types.js';
 import { generateUuid } from '../../../base/common/uuid.js';
 import { BidirectionalMap } from '../../../base/common/map.js';
-import { DisposableStore } from '../../../base/common/lifecycle.js';
-
+import { DisposableStore, toDisposable } from '../../../base/common/lifecycle.js';
 const require = nodeModule.createRequire(import.meta.url);
 
 class NodeModuleRequireInterceptor extends RequireInterceptor {
+
+	private static _createDataUri(scriptContent: string): string {
+		return `data:text/javascript;base64,${Buffer.from(scriptContent).toString('base64')}`;
+	}
+
+	private static _vscodeImportFnName = `_VSCODE_IMPORT_VSCODE_API`;
+
+	private readonly _store = new DisposableStore();
+
+	dispose(): void {
+		this._store.dispose();
+	}
 
 	protected _installInterceptor(): void {
 		const that = this;
@@ -72,29 +83,12 @@ class NodeModuleRequireInterceptor extends RequireInterceptor {
 			}
 			return request;
 		};
-	}
-}
 
-class NodeModuleInterceptor extends RequireInterceptor {
-
-	private static _createDataUri(scriptContent: string): string {
-		return `data:text/javascript;base64,${Buffer.from(scriptContent).toString('base64')}`;
-	}
-
-	private static _vscodeImportFnName = `_VSCODE_IMPORT_VSCODE_API`;
-
-	private readonly _store = new DisposableStore();
-
-	dispose(): void {
-		this._store.dispose();
-	}
-
-	protected override _installInterceptor(): void {
 		const apiInstances = new BidirectionalMap<typeof vscode, string>();
 		const apiImportDataUrl = new Map<string, string>();
 
 		// define a global function that can be used to get API instances given a random key
-		Object.defineProperty(globalThis, NodeModuleInterceptor._vscodeImportFnName, {
+		Object.defineProperty(globalThis, NodeModuleRequireInterceptor._vscodeImportFnName, {
 			enumerable: false,
 			configurable: false,
 			writable: false,
@@ -127,18 +121,17 @@ class NodeModuleInterceptor extends RequireInterceptor {
 			// Create and cache a data-url which is the import script for the API instance
 			let scriptDataUrlSrc = apiImportDataUrl.get(key);
 			if (!scriptDataUrlSrc) {
-				const jsCode = `const _vscodeInstance = globalThis.${NodeModuleInterceptor._vscodeImportFnName}('${key}');\n\n${Object.keys(apiInstance).map((name => `export const ${name} = _vscodeInstance['${name}'];`)).join('\n')}`;
-				scriptDataUrlSrc = NodeModuleInterceptor._createDataUri(jsCode);
+				const jsCode = `const _vscodeInstance = globalThis.${NodeModuleRequireInterceptor._vscodeImportFnName}('${key}');\n\n${Object.keys(apiInstance).map((name => `export const ${name} = _vscodeInstance['${name}'];`)).join('\n')}`;
+				scriptDataUrlSrc = NodeModuleRequireInterceptor._createDataUri(jsCode);
 				apiImportDataUrl.set(key, scriptDataUrlSrc);
 			}
 			return scriptDataUrlSrc;
 		};
-		nodeModule.registerHooks({
+		const hooks = nodeModule.registerHooks({
 			resolve: (specifier, context, nextResolve) => {
 				if (specifier !== 'vscode' || !context.parentURL) {
 					return nextResolve(specifier, context);
 				}
-				console.log('ESM resolve', specifier, context);
 				const otherUrl = lookup(context.parentURL);
 				return {
 					url: otherUrl,
@@ -146,6 +139,7 @@ class NodeModuleInterceptor extends RequireInterceptor {
 				};
 			},
 		});
+		this._store.add(toDisposable(() => hooks.deregister()));
 	}
 }
 
@@ -174,15 +168,9 @@ export class ExtHostExtensionService extends AbstractExtHostExtensionService {
 
 		// Module loading tricks based on `module._load`.
 		// `module._load` intercepts `require(...)`.
-		await this._instaService.createInstance(NodeModuleRequireInterceptor, extensionApiFactory, { mine: this._myRegistry, all: this._globalRegistry })
-			.install();
-
 		// Module loading tricks based on `module.registerHooks`.
 		// `module.registerHooks` is a generic interceptor that intercepts `require(...)`, `import ...`, and `import(...)`.
-		// However, at this time, `NodeModuleInterceptor` only intercepts `import 'vscode'` and `import('vscode')`.
-		// This can also intercept `require('vscode')`, but interception by `NodeModuleRequireInterceptor` takes precedence.
-		// In the future, we can consider migrating all interception logic to `NodeModuleInterceptor` and removing `NodeModuleRequireInterceptor`.
-		await this._store.add(this._instaService.createInstance(NodeModuleInterceptor, extensionApiFactory, { mine: this._myRegistry, all: this._globalRegistry }))
+		await this._store.add(this._instaService.createInstance(NodeModuleRequireInterceptor, extensionApiFactory, { mine: this._myRegistry, all: this._globalRegistry }))
 			.install();
 
 		performance.mark('code/extHost/didInitAPI');
