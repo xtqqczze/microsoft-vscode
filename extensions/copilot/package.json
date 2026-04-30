@@ -4145,16 +4145,6 @@
 							"onExp"
 						]
 					},
-					"github.copilot.chat.workspace.maxDiffSizeBeforeUsingExternalIngest": {
-						"type": "number",
-						"default": 100,
-						"markdownDescription": "%github.copilot.config.workspace.maxDiffSizeBeforeUsingExternalIngest%",
-						"tags": [
-							"advanced",
-							"experimental",
-							"onExp"
-						]
-					},
 					"github.copilot.chat.workspace.preferredEmbeddingsModel": {
 						"type": "string",
 						"default": "",
