@@ -20,7 +20,7 @@ import { AgentSession, type AgentSignal, type IAgentActionSignal, type IAgentToo
 import { IDiffComputeService } from '../../common/diffComputeService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import { ActionType, type SessionDeltaAction, type SessionErrorAction, type SessionInputRequestedAction, type SessionResponsePartAction, type SessionToolCallCompleteAction, type SessionToolCallReadyAction, type SessionToolCallStartAction } from '../../common/state/sessionActions.js';
-import { AttachmentType, MarkdownResponsePart, ResponsePartKind, SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, ToolResultContentType } from '../../common/state/sessionState.js';
+import { AttachmentType, ResponsePartKind, SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, ToolResultContentType } from '../../common/state/sessionState.js';
 import { CopilotAgentSession, IActiveClientSnapshot, SessionWrapperFactory } from '../../node/copilot/copilotAgentSession.js';
 import { CopilotSessionWrapper } from '../../node/copilot/copilotSessionWrapper.js';
 import { IAgentConfigurationService } from '../../node/agentConfigurationService.js';
@@ -1396,8 +1396,15 @@ suite('CopilotAgentSession', () => {
 			// markdown response part before the input request, so the
 			// client renders them inline above the question.
 			const deltaContent = signals.flatMap(s => {
-				if (s.kind !== 'action' || s.action.type !== ActionType.SessionResponsePart) { return []; }
-				return [(s.action.part as MarkdownResponsePart).content];
+				if (s.kind !== 'action') { return []; }
+				if (s.action.type === ActionType.SessionResponsePart) {
+					const part = (s.action as SessionResponsePartAction).part;
+					return part.kind === ResponsePartKind.Markdown ? [part.content] : [];
+				}
+				if (s.action.type === ActionType.SessionDelta) {
+					return [(s.action as SessionDeltaAction).content];
+				}
+				return [];
 			}).join('');
 			assert.ok(deltaContent.includes('Plan summary'), `expected delta to include plan summary; got: ${deltaContent}`);
 			assert.ok(deltaContent.includes('plan.md'), 'delta should include a link to the plan file');

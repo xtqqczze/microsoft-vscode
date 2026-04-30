@@ -565,7 +565,7 @@ suite('CopilotAgent', () => {
 						s.action.type === ActionType.SessionDelta
 					)
 				);
-				assert.strictEqual(markdownSignals.length, 1, 'exactly one delta should be emitted for the worktree announcement');
+				assert.strictEqual(markdownSignals.length, 1, 'exactly one markdown announcement signal should be emitted for the worktree announcement');
 				const announcement = markdownSignals[0];
 				const announcementContent = announcement.action.type === ActionType.SessionResponsePart
 					? (announcement.action.part as MarkdownResponsePart).content

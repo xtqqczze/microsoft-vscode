@@ -15,6 +15,7 @@ import { ProtectedResourceMetadata, type ModelSelection } from '../../common/sta
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import { CustomizationStatus, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, parseSubagentSessionUri, type CustomizationRef, type PendingMessage, type SessionCustomization, type StringOrMarkdown, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import { hasKey } from '../../../../base/common/types.js';
 
 /** Well-known auto-generated title used by the 'with-title' prompt. */
 export const MOCK_AUTO_TITLE = 'Automatically generated title';
@@ -471,14 +472,26 @@ export class ScriptedMockAgent implements IAgent {
 				]);
 				break;
 
-			case 'with-reasoning':
+			case 'with-reasoning': {
+				const initialReasoning = _reasoning(session, sessionStr, tid, 'Let me think');
+				const partId = initialReasoning.action.type === ActionType.SessionResponsePart
+					&& hasKey(initialReasoning.action.part, { id: true })
+					? initialReasoning.action.part.id
+					: '';
 				this._fireSequence([
-					_reasoning(session, sessionStr, tid, 'Let me think'),
-					_reasoning(session, sessionStr, tid, ' about this...'),
+					initialReasoning,
+					_action(session, {
+						type: ActionType.SessionReasoning,
+						session: sessionStr,
+						turnId: tid,
+						partId,
+						content: ' about this...',
+					}),
 					_markdown(session, sessionStr, tid, 'Reasoned response.'),
 					_idle(session, sessionStr, tid),
 				]);
 				break;
+			}
 
 			case 'with-title':
 				this._fireSequence([
@@ -832,8 +845,8 @@ function _toolComplete(session: URI, sessionStr: string, turnId: string, toolCal
 function _pendingConfirmation(session: URI, toolCallId: string, invocationMessage: StringOrMarkdown, opts?: {
 	toolInput?: string;
 	confirmationTitle?: StringOrMarkdown;
-	permissionKind?: 'shell' | 'write' | 'mcp' | 'read' | 'url' | 'custom-tool';
-	permissionPath?: string;
+	permissionKind?: IAgentToolPendingConfirmationSignal['permissionKind'];
+	permissionPath?: IAgentToolPendingConfirmationSignal['permissionPath'];
 }): IAgentToolPendingConfirmationSignal {
 	return {
 		kind: 'pending_confirmation',
