@@ -416,13 +416,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 		}));
 
 		const container = creationOptions.codeWindow ? this.layoutService.getContainer(creationOptions.codeWindow) : this.layoutService.mainContainer;
-		this._register(editorGroupsService.getPart(container).onDidScroll(e => {
-			if (!this._shadowElement || !this._isVisible) {
-				return;
-			}
-
-			this.layoutContainerOverShadowElement(this._shadowElement);
-		}));
 
 		this.notebookEditorService.addNotebookEditor(this);
 
