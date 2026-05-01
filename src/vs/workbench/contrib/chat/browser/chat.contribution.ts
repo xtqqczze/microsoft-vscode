@@ -9,7 +9,7 @@ import { Schemas } from '../../../../base/common/network.js';
 import { isMacintosh } from '../../../../base/common/platform.js';
 import { PolicyCategory } from '../../../../base/common/policy.js';
 import { CopilotSessionSearchPolicy } from '../../../../base/common/defaultAccount.js';
-import { AgentHostEnabledSettingId, AgentHostIpcLoggingSettingId } from '../../../../platform/agentHost/common/agentService.js';
+import { AgentHostClaudeAgentEnabledSettingId, AgentHostEnabledSettingId, AgentHostIpcLoggingSettingId } from '../../../../platform/agentHost/common/agentService.js';
 import { AgentNetworkFilterService, IAgentNetworkFilterService } from '../../../../platform/networkFilter/common/networkFilterService.js';
 import { AgentNetworkDomainSettingId } from '../../../../platform/networkFilter/common/settings.js';
 import { AgentSandboxSettingId } from '../../../../platform/sandbox/common/settings.js';
@@ -981,6 +981,13 @@ configurationRegistry.registerConfiguration({
 		[AgentHostEnabledSettingId]: {
 			type: 'boolean',
 			description: nls.localize('chat.agentHost.enabled', "When enabled, some agents run in a separate agent host process."),
+			default: false,
+			tags: ['experimental', 'advanced'],
+			included: product.quality !== 'stable',
+		},
+		[AgentHostClaudeAgentEnabledSettingId]: {
+			type: 'boolean',
+			description: nls.localize('chat.agentHost.claudeAgent.enabled', "When enabled, the Claude agent provider is registered inside the agent host. Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to this setting to take effect."),
 			default: false,
 			tags: ['experimental', 'advanced'],
 			included: product.quality !== 'stable',
