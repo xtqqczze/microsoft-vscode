@@ -1060,7 +1060,7 @@ suite('ChatService', () => {
 
 	test('sendRequest on untitled remote session propagates initialSessionOptions to new model', async () => {
 		const remoteScheme = 'remoteProvider';
-		const untitledResource = URI.from({ scheme: remoteScheme, path: '/untitled-test-session' });
+		const untitledResource = LocalChatSessionUri.getNewContributedSessionUri(remoteScheme);
 		const realResource = URI.from({ scheme: remoteScheme, path: '/real-session-123' });
 
 		// Set up the mock chat sessions service
