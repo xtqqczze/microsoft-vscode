@@ -18,6 +18,24 @@ export interface IBackgroundTodoDelta {
 	readonly history: readonly Turn[];
 	/** Session resource URI string, needed for todo tool invocation. */
 	readonly sessionResource: string | undefined;
+	/** Metadata useful for policy decisions. */
+	readonly metadata: IBackgroundTodoDeltaMetadata;
+}
+
+/**
+ * Lightweight metadata derived from a delta snapshot, consumed by the
+ * invocation policy to decide run / wait / skip without inspecting
+ * round contents.
+ */
+export interface IBackgroundTodoDeltaMetadata {
+	/** Number of new tool-call rounds in this delta. */
+	readonly newRoundCount: number;
+	/** Total number of individual tool calls across new rounds. */
+	readonly newToolCallCount: number;
+	/** True when this is the very first delta for the session (no rounds processed yet). */
+	readonly isInitialDelta: boolean;
+	/** True when the delta contains only a user request and zero new rounds. */
+	readonly isRequestOnly: boolean;
 }
 
 /**
@@ -33,11 +51,14 @@ export class BackgroundTodoDeltaTracker {
 	private readonly _processedRoundIds = new Set<string>();
 
 	/**
-	 * Compute a delta from the current prompt context.
+	 * Build a delta snapshot from the current prompt context without
+	 * advancing the cursor. Call {@link markProcessed} after the pass
+	 * is handled to commit the cursor forward.
 	 *
-	 * Returns `undefined` when there is no new activity since the last call.
+	 * Returns `undefined` when there is no new activity since the last
+	 * committed cursor position.
 	 */
-	getDelta(promptContext: IBuildPromptContext): IBackgroundTodoDelta | undefined {
+	peekDelta(promptContext: IBuildPromptContext): IBackgroundTodoDelta | undefined {
 		const currentRounds = promptContext.toolCallRounds ?? [];
 		const newRounds: IToolCallRound[] = [];
 
@@ -59,12 +80,13 @@ export class BackgroundTodoDeltaTracker {
 		// First invocation (nothing processed yet) with no tool call rounds:
 		// produce a delta with just the user request so the background agent
 		// can set up an initial plan.
-		const isFirstInvocation = this._processedRoundIds.size === 0;
-		if (newRounds.length === 0 && !isFirstInvocation) {
+		const isInitialDelta = this._processedRoundIds.size === 0;
+		if (newRounds.length === 0 && !isInitialDelta) {
 			return undefined;
 		}
 
 		const userRequest = promptContext.query;
+		const newToolCallCount = newRounds.reduce((sum, r) => sum + r.toolCalls.length, 0);
 
 		return {
 			userRequest,
@@ -72,7 +94,21 @@ export class BackgroundTodoDeltaTracker {
 			history: promptContext.history,
 			sessionResource: (promptContext.request as { sessionResource?: string } | undefined)?.sessionResource
 				?? (promptContext.tools?.toolInvocationToken as { sessionResource?: string } | undefined)?.sessionResource,
+			metadata: {
+				newRoundCount: newRounds.length,
+				newToolCallCount,
+				isInitialDelta,
+				isRequestOnly: newRounds.length === 0,
+			},
 		};
+	}
+
+	/**
+	 * Convenience alias that behaves like the old `getDelta` — peeks and
+	 * returns the snapshot without committing.
+	 */
+	getDelta(promptContext: IBuildPromptContext): IBackgroundTodoDelta | undefined {
+		return this.peekDelta(promptContext);
 	}
 
 	/**

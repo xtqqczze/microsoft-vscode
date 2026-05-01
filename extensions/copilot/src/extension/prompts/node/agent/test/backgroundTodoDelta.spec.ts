@@ -117,4 +117,70 @@ describe('BackgroundTodoDeltaTracker', () => {
 		expect(delta).toBeDefined();
 		expect(delta!.newRounds).toHaveLength(1);
 	});
+
+	// ── Metadata tests ──────────────────────────────────────────
+
+	test('metadata.isInitialDelta is true on first peek', () => {
+		const tracker = new BackgroundTodoDeltaTracker();
+		const ctx = makePromptContext({ query: 'plan this' });
+		const delta = tracker.peekDelta(ctx)!;
+		expect(delta.metadata.isInitialDelta).toBe(true);
+		expect(delta.metadata.isRequestOnly).toBe(true);
+		expect(delta.metadata.newRoundCount).toBe(0);
+		expect(delta.metadata.newToolCallCount).toBe(0);
+	});
+
+	test('metadata.isInitialDelta is false after commit', () => {
+		const tracker = new BackgroundTodoDeltaTracker();
+		const ctx = makePromptContext({ toolCallRounds: [makeRound('r1')] });
+		const delta1 = tracker.peekDelta(ctx)!;
+		expect(delta1.metadata.isInitialDelta).toBe(true);
+		tracker.markProcessed(delta1);
+
+		const r2 = makeRound('r2');
+		const ctx2 = makePromptContext({ toolCallRounds: [makeRound('r1'), r2] });
+		const delta2 = tracker.peekDelta(ctx2)!;
+		expect(delta2.metadata.isInitialDelta).toBe(false);
+	});
+
+	test('metadata counts rounds and tool calls', () => {
+		const tracker = new BackgroundTodoDeltaTracker();
+		const r1 = makeRound('r1'); // has 1 tool call
+		const r2: IToolCallRound = {
+			id: 'r2', response: '', toolInputRetry: 0,
+			toolCalls: [
+				{ name: 'read_file', arguments: '{}', id: 'tc-r2a' },
+				{ name: 'edit_file', arguments: '{}', id: 'tc-r2b' },
+			],
+		};
+		const ctx = makePromptContext({ toolCallRounds: [r1, r2] });
+		const delta = tracker.peekDelta(ctx)!;
+		expect(delta.metadata.newRoundCount).toBe(2);
+		expect(delta.metadata.newToolCallCount).toBe(3);
+		expect(delta.metadata.isRequestOnly).toBe(false);
+	});
+
+	// ── Peek / commit semantics ─────────────────────────────────
+
+	test('peekDelta does not advance cursor', () => {
+		const tracker = new BackgroundTodoDeltaTracker();
+		const r1 = makeRound('r1');
+		const ctx = makePromptContext({ toolCallRounds: [r1] });
+
+		const first = tracker.peekDelta(ctx);
+		const second = tracker.peekDelta(ctx);
+		expect(first).toBeDefined();
+		expect(second).toBeDefined();
+		expect(second!.newRounds).toHaveLength(1);
+	});
+
+	test('markProcessed after peekDelta commits the cursor', () => {
+		const tracker = new BackgroundTodoDeltaTracker();
+		const r1 = makeRound('r1');
+		const ctx = makePromptContext({ toolCallRounds: [r1] });
+
+		const delta = tracker.peekDelta(ctx)!;
+		tracker.markProcessed(delta);
+		expect(tracker.peekDelta(ctx)).toBeUndefined();
+	});
 });
