@@ -72,8 +72,7 @@ class Gpt51Prompt extends PromptElement<DefaultAgentPromptProps> {
 					<br />
 					Do not repeat the full contents of the plan after an `{ToolName.CoreManageTodoList}` call — the harness already displays it. Instead, summarize the change made and highlight any important context or next step.<br />
 				</>}
-				{!tools[ToolName.CoreManageTodoList] && <>
-					For complex tasks requiring multiple steps, you should maintain an organized approach. Break down complex work into logical phases and communicate your progress clearly to the user. Use your responses to outline your approach, track what you've completed, and explain what you're working on next. Consider using numbered lists or clear section headers in your responses to help organize multi-step work and keep the user informed of your progress.<br />
+				{!tools[ToolName.CoreManageTodoList] && !this.props.hideTodoPromptInstructions && <>
 				</>}
 				<br />
 				Before running a command, consider whether or not you have completed the previous step, and make sure to mark it as completed before moving on to the next step. It may be the case that you complete all steps in your plan after a single pass of implementation. If this is the case, you can simply mark all the planned steps as completed. Sometimes, you may need to change plans in the middle of a task: call `{ToolName.CoreManageTodoList}` with the updated plan.<br />

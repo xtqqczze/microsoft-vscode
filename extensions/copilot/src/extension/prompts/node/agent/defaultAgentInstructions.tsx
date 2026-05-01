@@ -45,6 +45,8 @@ export interface DefaultAgentPromptProps extends BasePromptElementProps {
 	readonly availableTools: readonly LanguageModelToolInformation[] | undefined;
 	readonly modelFamily: string | undefined;
 	readonly codesearchMode: boolean | undefined;
+	/** When true, suppress all todo-related prompt instructions (both tool guidance and markdown fallback). */
+	readonly hideTodoPromptInstructions?: boolean;
 }
 
 export interface ToolReferencesHintProps extends BasePromptElementProps {
@@ -234,7 +236,7 @@ export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
 				# Workflow<br />
 				1. Understand the problem deeply. Carefully read the issue and think critically about what is required.<br />
 				2. Investigate the codebase. Explore relevant files, search for key functions, and gather context.<br />
-				3. Develop a clear, step-by-step plan. Break down the fix into manageable, incremental steps. Display those steps in a todo list ({tools[ToolName.CoreManageTodoList] ? `using the ${ToolName.CoreManageTodoList} tool` : 'using standard checkbox markdown syntax'}).<br />
+				3. Develop a clear, step-by-step plan. Break down the fix into manageable, incremental steps.{!this.props.hideTodoPromptInstructions && <> Display those steps in a todo list ({tools[ToolName.CoreManageTodoList] ? `using the ${ToolName.CoreManageTodoList} tool` : 'using standard checkbox markdown syntax'}).</>}<br />
 				4. Implement the fix incrementally. Make small, testable code changes.<br />
 				5. Debug as needed. Use debugging techniques to isolate and resolve issues.<br />
 				6. Test frequently. Run tests after each change to verify correctness.<br />

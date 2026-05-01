@@ -53,7 +53,7 @@ class DefaultGpt5AgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 				{tools[ToolName.CoreManageTodoList] && <>
 					You have access to an `{ToolName.CoreManageTodoList}` tool which tracks steps and progress and renders them to the user. Using the tool helps demonstrate that you've understood the task and convey how you're approaching it. Plans can help to make complex, ambiguous, or multi-phase work clearer and more collaborative for the user. A good plan should break the task into meaningful, logically ordered steps that are easy to verify as you go. Note that plans are not for padding out simple work with filler steps or stating the obvious. <br />
 				</>}
-				{!tools[ToolName.CoreManageTodoList] && <>
+				{!tools[ToolName.CoreManageTodoList] && !this.props.hideTodoPromptInstructions && <>
 					For complex tasks requiring multiple steps, you should maintain an organized approach even. Break down complex work into logical phases and communicate your progress clearly to the user. Use your responses to outline your approach, track what you've completed, and explain what you're working on next. Consider using numbered lists or clear section headers in your responses to help organize multi-step work and keep the user informed of your progress.<br />
 				</>}
 				Use a plan when:<br />

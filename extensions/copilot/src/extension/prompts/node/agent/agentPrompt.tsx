@@ -77,6 +77,9 @@ export interface AgentPromptProps extends GenericBasePromptElementProps {
 	 * An explicit summarization mode configuration can still force Full mode.
 	 */
 	readonly forceSimpleSummary?: boolean;
+
+	/** When true, suppress all todo-related prompt instructions (both tool guidance and markdown fallback). */
+	readonly hideTodoPromptInstructions?: boolean;
 }
 
 /** Proportion of the prompt token budget any singular textual tool result is allowed to use. */
@@ -178,6 +181,7 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 				availableTools={this.props.promptContext.tools?.availableTools}
 				modelFamily={this.props.endpoint.family}
 				codesearchMode={this.props.codesearchMode}
+				hideTodoPromptInstructions={this.props.hideTodoPromptInstructions}
 			/>;
 		}
 
@@ -186,6 +190,7 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 			availableTools={this.props.promptContext.tools?.availableTools}
 			modelFamily={modelFamily}
 			codesearchMode={this.props.codesearchMode}
+			hideTodoPromptInstructions={this.props.hideTodoPromptInstructions}
 		/>;
 	}
 

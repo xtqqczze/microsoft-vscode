@@ -187,7 +187,7 @@ class Gpt53CodexPrompt extends PromptElement<DefaultAgentPromptProps> {
 					<br />
 					Do not repeat the full contents of the plan after an `{ToolName.CoreManageTodoList}` call — the harness already displays it. Instead, summarize the change made and highlight any important context or next step.<br />
 				</>}
-				{!tools[ToolName.CoreManageTodoList] && <>
+				{!tools[ToolName.CoreManageTodoList] && !this.props.hideTodoPromptInstructions && <>
 					For complex tasks requiring multiple steps, you should maintain an organized approach. Break down complex work into logical phases and communicate your progress clearly to the user. Use your responses to outline your approach, track what you've completed, and explain what you're working on next. Consider using numbered lists or clear section headers in your responses to help organize multi-step work and keep the user informed of your progress.<br />
 				</>}
 				<br />
