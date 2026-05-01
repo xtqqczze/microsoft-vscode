@@ -48,6 +48,10 @@ import { IDocumentContext } from '../../prompt/node/documentContext';
 import { IBuildPromptResult, IIntent, IIntentInvocation } from '../../prompt/node/intents';
 import { AgentPrompt, AgentPromptProps } from '../../prompts/node/agent/agentPrompt';
 import { BackgroundSummarizationState, BackgroundSummarizer, IBackgroundSummarizationResult, shouldKickOffBackgroundSummarization } from '../../prompts/node/agent/backgroundSummarizer';
+import { BackgroundTodoProcessor, IBackgroundTodoResult } from '../../prompts/node/agent/backgroundTodoProcessor';
+import { IBackgroundTodoDelta } from '../../prompts/node/agent/backgroundTodoDelta';
+import { BackgroundTodoPrompt } from '../../prompts/node/agent/backgroundTodoPrompt';
+import { ITodoListContextProvider } from '../../prompt/node/todoListContextProvider';
 import { AgentPromptCustomizations, PromptRegistry } from '../../prompts/node/agent/promptRegistry';
 import { extractInlineSummary, InlineSummarizationUserMessage, SummarizedConversationHistory, SummarizedConversationHistoryMetadata, SummarizedConversationHistoryPropsBuilder, appendTranscriptHintToSummary, computeSummarizationRoundCounts } from '../../prompts/node/agent/summarizedConversationHistory';
 import { PromptRenderer, renderPromptElement } from '../../prompts/node/base/promptRenderer';
@@ -71,6 +75,26 @@ function isResponsesCompactionContextManagementEnabled(endpoint: IChatEndpoint, 
 	return endpoint.apiType === 'responses'
 		&& configurationService.getExperimentBasedConfig(ConfigKey.ResponsesApiContextManagementEnabled, experimentationService)
 		&& !modelsWithoutResponsesContextManagement.has(endpoint.family);
+}
+
+export function isBackgroundTodoAgentEnabled(configurationService: IConfigurationService, experimentationService: IExperimentationService): boolean {
+	return configurationService.getExperimentBasedConfig(ConfigKey.Advanced.BackgroundTodoAgentEnabled, experimentationService);
+}
+
+/**
+ * Returns true when the user explicitly referenced the todo tool (e.g. typed
+ * `#todo` in their message) or a custom agent configuration includes it as a
+ * tool reference. Checking `request.toolReferences` is a stronger signal than
+ * `request.tools` because core tools always appear as enabled in the default
+ * tool picker state, which would prevent the experiment from taking effect.
+ */
+/** @internal — exported for testing */
+export function isTodoToolExplicitlyEnabled(request: vscode.ChatRequest): boolean {
+	const todoReferenceName = 'todo';
+	return request.toolReferences.some(ref =>
+		ref.name === todoReferenceName
+		|| ref.name === ToolName.CoreManageTodoList
+	);
 }
 
 export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.ChatRequest, model?: IChatEndpoint) => {
@@ -131,6 +155,10 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 		allowTools[ToolName.CoreManageTodoList] = false;
 	}
 
+	if (isBackgroundTodoAgentEnabled(configurationService, experimentationService)) {
+		allowTools[ToolName.CoreManageTodoList] = false;
+	}
+
 	// Enable task_complete in autopilot mode so the model can signal task completion.
 	// The tool is registered in core as a built-in but needs explicit opt-in here.
 	allowTools['task_complete'] = request.permissionLevel === 'autopilot';
@@ -186,6 +214,7 @@ export class AgentIntent extends EditCodeIntent {
 	override readonly id = AgentIntent.ID;
 
 	private readonly _backgroundSummarizers = new Map<string, BackgroundSummarizer>();
+	private readonly _backgroundTodoProcessors = new Map<string, BackgroundTodoProcessor>();
 
 	constructor(
 		@IInstantiationService instantiationService: IInstantiationService,
@@ -204,6 +233,11 @@ export class AgentIntent extends EditCodeIntent {
 				summarizer.cancel();
 				this._backgroundSummarizers.delete(sessionId);
 			}
+			const todoProcessor = this._backgroundTodoProcessors.get(sessionId);
+			if (todoProcessor) {
+				todoProcessor.cancel();
+				this._backgroundTodoProcessors.delete(sessionId);
+			}
 		});
 	}
 
@@ -214,6 +248,15 @@ export class AgentIntent extends EditCodeIntent {
 			this._backgroundSummarizers.set(sessionId, summarizer);
 		}
 		return summarizer;
+	}
+
+	getOrCreateBackgroundTodoProcessor(sessionId: string): BackgroundTodoProcessor {
+		let processor = this._backgroundTodoProcessors.get(sessionId);
+		if (!processor) {
+			processor = new BackgroundTodoProcessor();
+			this._backgroundTodoProcessors.set(sessionId, processor);
+		}
+		return processor;
 	}
 
 	protected override getIntentHandlerOptions(request: vscode.ChatRequest): IDefaultIntentRequestHandlerOptions | undefined {
@@ -466,6 +509,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 			},
 			location: this.location,
 			enableCacheBreakpoints: summarizationEnabled && !useLastTwoMessagesCacheBPs,
+			hideTodoPromptInstructions: isBackgroundTodoAgentEnabled(this.configurationService, this.expService) && !isTodoToolExplicitlyEnabled(this.request),
 			...this.extraPromptProps,
 			customizations: this._resolvedCustomizations
 		};
@@ -729,6 +773,9 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 				this._startBackgroundSummarization(backgroundSummarizer, result.messages, promptContext, props, token, postRenderRatio, useInlineSummarization);
 			}
 		}
+
+		// ── Background todo processing ──────────────────────────────────
+		this._maybeStartBackgroundTodoPass(promptContext, token);
 
 		const lastMessage = result.messages.at(-1);
 		if (lastMessage?.role === Raw.ChatRole.User) {
@@ -1163,6 +1210,225 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 			contextRatio,
 		});
 		GenAiMetrics.incrementAgentSummarizationCount(this.otelService, outcome);
+	}
+
+	// ── Background todo processing ──────────────────────────────────
+
+	/**
+	 * Returns the `BackgroundTodoProcessor` for this session, or `undefined`
+	 * if the intent is not an `AgentIntent`.
+	 */
+	private _getOrCreateBackgroundTodoProcessor(sessionId: string | undefined): BackgroundTodoProcessor | undefined {
+		if (!sessionId || !(this.intent instanceof AgentIntent)) {
+			return undefined;
+		}
+		return this.intent.getOrCreateBackgroundTodoProcessor(sessionId);
+	}
+
+	/**
+	 * Kick off a background todo pass if the experiment is enabled and
+	 * there is new activity since the last pass.
+	 */
+	private _maybeStartBackgroundTodoPass(
+		promptContext: IBuildPromptContext,
+		token: vscode.CancellationToken,
+	): void {
+		if (!isBackgroundTodoAgentEnabled(this.configurationService, this.expService)) {
+			return;
+		}
+		if (isTodoToolExplicitlyEnabled(this.request)) {
+			return;
+		}
+		if (this.prompt !== AgentPrompt) {
+			return;
+		}
+
+		const sessionId = promptContext.conversation?.sessionId;
+		const processor = this._getOrCreateBackgroundTodoProcessor(sessionId);
+		if (!processor) {
+			return;
+		}
+
+		const delta = processor.deltaTracker.getDelta(promptContext);
+		if (!delta) {
+			return;
+		}
+
+		processor.start(delta, async (d, bgToken) => {
+			return this._executeBackgroundTodoPass(d, promptContext, bgToken);
+		}, token);
+	}
+
+	/**
+	 * The actual background work: render the todo prompt against copilot-fast,
+	 * parse tool calls, and invoke the todo tool.
+	 */
+	private async _executeBackgroundTodoPass(
+		delta: IBackgroundTodoDelta,
+		promptContext: IBuildPromptContext,
+		token: vscode.CancellationToken,
+	): Promise<IBackgroundTodoResult> {
+		const startTime = Date.now();
+		const conversationId = promptContext.conversation?.sessionId;
+		const associatedRequestId = promptContext.conversation?.getLatestTurn()?.id;
+
+		let fastEndpoint: IChatEndpoint;
+		try {
+			fastEndpoint = await this.instantiationService.invokeFunction(async (accessor) => {
+				const ep = accessor.get(IEndpointProvider);
+				return ep.getChatEndpoint('copilot-fast');
+			});
+		} catch (err) {
+			this.logService.warn(`[BackgroundTodo] copilot-fast endpoint unavailable, skipping pass: ${err}`);
+			this._sendBackgroundTodoTelemetry('skipped', conversationId, associatedRequestId, Date.now() - startTime);
+			return { outcome: 'noop' };
+		}
+
+		// Read current todo state
+		const todoContext = delta.sessionResource
+			? await this.instantiationService.invokeFunction(async (accessor) => {
+				const todoProvider = accessor.get<ITodoListContextProvider>(ITodoListContextProvider);
+				return todoProvider.getCurrentTodoContext(delta.sessionResource!);
+			})
+			: undefined;
+
+		// Render the prompt
+		const { messages } = await renderPromptElement(
+			this.instantiationService,
+			fastEndpoint,
+			BackgroundTodoPrompt,
+			{ currentTodos: todoContext, delta },
+			undefined,
+			token,
+		);
+
+		// Build the single-tool schema for manage_todo_list
+		const todoToolSchema = [{
+			function: {
+				name: ToolName.CoreManageTodoList,
+				description: 'Update the todo list with current progress.',
+				parameters: {
+					type: 'object',
+					properties: {
+						todoList: {
+							type: 'array',
+							items: {
+								type: 'object',
+								properties: {
+									id: { type: 'number' },
+									title: { type: 'string' },
+									status: { type: 'string', enum: ['not-started', 'in-progress', 'completed'] },
+								},
+								required: ['id', 'title', 'status'],
+							},
+						},
+					},
+					required: ['todoList'],
+				},
+			},
+			type: 'function' as const,
+		}];
+
+		const normalizedTools = normalizeToolSchema(
+			fastEndpoint.family,
+			todoToolSchema,
+			(tool, rule) => {
+				this.logService.warn(`[BackgroundTodo] Tool ${tool} failed validation: ${rule}`);
+			},
+		);
+
+		// Make the request
+		const toolCalls: { name: string; arguments: string; id: string }[] = [];
+		const response: ChatResponse = await fastEndpoint.makeChatRequest2({
+			debugName: 'backgroundTodoAgent',
+			messages: ToolCallingLoop.stripInternalToolCallIds(messages),
+			finishedCb: async (_text, _index, fetchDelta) => {
+				if (fetchDelta.copilotToolCalls) {
+					toolCalls.push(...fetchDelta.copilotToolCalls);
+				}
+				return undefined;
+			},
+			location: ChatLocation.Other,
+			requestOptions: {
+				temperature: 0,
+				stream: false,
+				tools: normalizedTools,
+			},
+			userInitiatedRequest: false,
+			requestKindOptions: { kind: 'background' },
+			telemetryProperties: associatedRequestId ? { associatedRequestId } : undefined,
+		}, token);
+
+		const durationMs = Date.now() - startTime;
+		const usage = response.type === ChatFetchResponseType.Success ? response.usage : undefined;
+
+		// Process tool calls — only accept manage_todo_list
+		const todoCall = toolCalls.find(tc => tc.name === ToolName.CoreManageTodoList);
+		if (!todoCall) {
+			this.logService.debug('[BackgroundTodo] model returned no todo tool call (no-op)');
+			this._sendBackgroundTodoTelemetry('noop', conversationId, associatedRequestId, durationMs, usage?.prompt_tokens, usage?.completion_tokens, fastEndpoint.model);
+			return { outcome: 'noop', promptTokens: usage?.prompt_tokens, completionTokens: usage?.completion_tokens, durationMs, model: fastEndpoint.model };
+		}
+
+		// Validate and invoke the tool
+		let parsedInput: unknown;
+		try {
+			parsedInput = JSON.parse(todoCall.arguments);
+		} catch {
+			this.logService.warn('[BackgroundTodo] failed to parse tool call arguments');
+			this._sendBackgroundTodoTelemetry('toolInvokeError', conversationId, associatedRequestId, durationMs, usage?.prompt_tokens, usage?.completion_tokens, fastEndpoint.model);
+			return { outcome: 'noop', durationMs, model: fastEndpoint.model };
+		}
+
+		try {
+			const toolInvocationToken = (promptContext.tools?.toolInvocationToken) ?? undefined;
+			await this.toolsService.invokeTool(ToolName.CoreManageTodoList, {
+				input: parsedInput,
+				toolInvocationToken: toolInvocationToken!,
+			}, token);
+		} catch (err) {
+			this.logService.warn(`[BackgroundTodo] tool invocation failed: ${err}`);
+			this._sendBackgroundTodoTelemetry('toolInvokeError', conversationId, associatedRequestId, durationMs, usage?.prompt_tokens, usage?.completion_tokens, fastEndpoint.model);
+			return { outcome: 'noop', durationMs, model: fastEndpoint.model };
+		}
+
+		this.logService.debug(`[BackgroundTodo] todo list updated successfully (${durationMs}ms)`);
+		this._sendBackgroundTodoTelemetry('success', conversationId, associatedRequestId, durationMs, usage?.prompt_tokens, usage?.completion_tokens, fastEndpoint.model);
+		return { outcome: 'success', promptTokens: usage?.prompt_tokens, completionTokens: usage?.completion_tokens, durationMs, model: fastEndpoint.model };
+	}
+
+	private _sendBackgroundTodoTelemetry(
+		outcome: string,
+		conversationId: string | undefined,
+		chatRequestId: string | undefined,
+		durationMs: number,
+		promptTokens?: number,
+		completionTokens?: number,
+		model?: string,
+	): void {
+		/* __GDPR__
+			"backgroundTodoAgent" : {
+				"owner": "vritant24",
+				"comment": "Tracks background todo agent pass outcomes.",
+				"outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The outcome of the background todo pass." },
+				"conversationId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Id for the current chat conversation." },
+				"chatRequestId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The chat request ID." },
+				"model": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The model ID used." },
+				"duration": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "comment": "Duration in ms." },
+				"promptTokenCount": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "comment": "Prompt token count." },
+				"completionTokenCount": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "comment": "Completion token count." }
+			}
+		*/
+		this.telemetryService.sendMSFTTelemetryEvent('backgroundTodoAgent', {
+			outcome,
+			conversationId,
+			chatRequestId,
+			model,
+		}, {
+			duration: durationMs,
+			promptTokenCount: promptTokens,
+			completionTokenCount: completionTokens,
+		});
 	}
 
 	override processResponse = undefined;
