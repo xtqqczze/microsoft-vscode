@@ -6,15 +6,18 @@
 import type { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { IPlaywrightService } from '../../../../../platform/browserView/common/playwrightService.js';
 import { ToolDataSource, type CountTokensCallback, type IPreparedToolInvocation, type IToolData, type IToolImpl, type IToolInvocation, type IToolInvocationPreparationContext, type IToolResult, type ToolProgress } from '../../../chat/common/tools/languageModelToolsService.js';
+import { IAgentNetworkFilterService } from '../../../../../platform/networkFilter/common/networkFilterService.js';
 import { createBrowserPageLink, errorResult, playwrightInvoke } from './browserToolHelpers.js';
+import { BrowserChatToolReferenceName } from '../../common/browserChatToolReferenceNames.js';
 import { OpenPageToolId } from './openBrowserTool.js';
 
 export const NavigateBrowserToolData: IToolData = {
 	id: 'navigate_page',
-	toolReferenceName: 'navigatePage',
+	toolReferenceName: BrowserChatToolReferenceName.NavigatePage,
 	displayName: localize('navigateBrowserTool.displayName', 'Navigate Page'),
 	userDescription: localize('navigateBrowserTool.userDescription', 'Navigate or reload a browser page'),
 	modelDescription: 'Navigate a browser page by URL, history, or reload.',
@@ -50,6 +53,7 @@ interface INavigateBrowserToolParams {
 export class NavigateBrowserTool implements IToolImpl {
 	constructor(
 		@IPlaywrightService private readonly playwrightService: IPlaywrightService,
+		@IAgentNetworkFilterService private readonly agentNetworkFilterService: IAgentNetworkFilterService,
 	) { }
 
 	async prepareToolInvocation(context: IToolInvocationPreparationContext, _token: CancellationToken): Promise<IPreparedToolInvocation | undefined> {
@@ -81,6 +85,11 @@ export class NavigateBrowserTool implements IToolImpl {
 				const parsed = URL.parse(params.url);
 				if (!parsed) {
 					throw new Error('You must provide a complete, valid URL.');
+				}
+
+				const uri = URI.parse(params.url);
+				if (!this.agentNetworkFilterService.isUriAllowed(uri)) {
+					throw new Error(this.agentNetworkFilterService.formatError(uri));
 				}
 
 				return {

@@ -8,7 +8,7 @@ import { derived, derivedOpts, IObservable } from '../../../../base/common/obser
 import { URI } from '../../../../base/common/uri.js';
 import { IGitHubService } from '../../github/browser/githubService.js';
 import { GitHubPullRequestCIModel } from '../../github/browser/models/githubPullRequestCIModel.js';
-import { ISessionsManagementService } from '../../sessions/browser/sessionsManagementService.js';
+import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { structuralEquals } from '../../../../base/common/equals.js';
 
 export class ChecksViewModel extends Disposable {
@@ -26,7 +26,7 @@ export class ChecksViewModel extends Disposable {
 			return session?.resource;
 		});
 
-		const pullRequestInfoObs = derivedOpts<{ owner: string; repo: string; headRef: string } | undefined>({
+		const pullRequestInfoObs = derivedOpts<{ owner: string; repo: string; prNumber: number; headSha: string } | undefined>({
 			equalsFn: structuralEquals
 		}, reader => {
 			const session = sessionManagementService.activeSession.read(reader);
@@ -48,7 +48,8 @@ export class ChecksViewModel extends Disposable {
 			return {
 				owner: gitHubInfo.owner,
 				repo: gitHubInfo.repo,
-				headRef: pr.headSha
+				prNumber: gitHubInfo.pullRequest.number,
+				headSha: pr.headSha
 			};
 		});
 
@@ -61,10 +62,9 @@ export class ChecksViewModel extends Disposable {
 			// Use the PR's headSha (commit SHA) rather than the branch
 			// name so CI checks can still be fetched after branch deletion
 			// (e.g. after the PR is merged).
-			const ciModel = gitHubService.getPullRequestCI(pullRequestInfo.owner, pullRequestInfo.repo, pullRequestInfo.headRef);
+			const ciModel = gitHubService.getPullRequestCI(pullRequestInfo.owner, pullRequestInfo.repo, pullRequestInfo.prNumber, pullRequestInfo.headSha);
 			ciModel.refresh();
-			ciModel.startPolling();
-			reader.store.add({ dispose: () => ciModel.stopPolling() });
+			reader.store.add(ciModel.startPolling());
 
 			return ciModel;
 		});

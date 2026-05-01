@@ -247,6 +247,10 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 		});
 	}
 
+	public get isScrolling(): boolean {
+		return this.#isScrolling;
+	}
+
 	async #updatePreview(forceUpdate?: boolean): Promise<void> {
 		clearTimeout(this.#throttleTimer);
 		this.#throttleTimer = undefined;
@@ -502,6 +506,8 @@ export class StaticMarkdownPreview extends Disposable implements IManagedMarkdow
 		opener: MdLinkOpener,
 		scrollLine?: number,
 	): StaticMarkdownPreview {
+		webview.iconPath = contentProvider.iconPath;
+
 		return new StaticMarkdownPreview(webview, resource, contentProvider, previewConfigurations, topmostLineMonitor, logger, contributionProvider, opener, scrollLine);
 	}
 
@@ -550,7 +556,9 @@ export class StaticMarkdownPreview extends Disposable implements IManagedMarkdow
 
 		this._register(topmostLineMonitor.onDidChanged(event => {
 			if (this.#preview.isPreviewOf(event.resource)) {
-				this.#preview.scrollTo(event.line);
+				if (!this.#preview.isScrolling) {
+					this.#preview.scrollTo(event.line);
+				}
 			}
 		}));
 	}
@@ -697,7 +705,9 @@ export class DynamicMarkdownPreview extends Disposable implements IManagedMarkdo
 
 		this._register(this.#topmostLineMonitor.onDidChanged(event => {
 			if (this.#preview.isPreviewOf(event.resource)) {
-				this.#preview.scrollTo(event.line);
+				if (!this.#preview.isScrolling) {
+					this.#preview.scrollTo(event.line);
+				}
 			}
 		}));
 

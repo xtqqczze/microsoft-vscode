@@ -39,6 +39,7 @@ export namespace ChatEntitlementContextKeys {
 		hidden: new RawContextKey<boolean>('chatSetupHidden', false, true), 		// True when chat setup is explicitly hidden.
 		installed: new RawContextKey<boolean>('chatSetupInstalled', false, true),  	// True when the chat extension is installed and enabled.
 		disabled: new RawContextKey<boolean>('chatSetupDisabled', false, true),  	// True when the chat extension is disabled due to any other reason than workspace trust.
+		disabledInWorkspace: new RawContextKey<boolean>('chatSetupDisabledInWorkspace', false, true),	// True when chat is disabled at the workspace level via settings.
 		untrusted: new RawContextKey<boolean>('chatSetupUntrusted', false, true),  	// True when the chat extension is disabled due to workspace trust.
 		later: new RawContextKey<boolean>('chatSetupLater', false, true),  			// True when the user wants to finish setup later.
 		registered: new RawContextKey<boolean>('chatSetupRegistered', false, true), // True when the user has registered as Free or Pro user.
@@ -53,6 +54,7 @@ export namespace ChatEntitlementContextKeys {
 		planPro: new RawContextKey<boolean>('chatPlanPro', false, true),								// True when user is a chat pro user.
 		planEdu: new RawContextKey<boolean>('chatPlanEdu', false, true),								// True when user is a chat edu user.
 		planProPlus: new RawContextKey<boolean>('chatPlanProPlus', false, true), 						// True when user is a chat pro plus user.
+		planMax: new RawContextKey<boolean>('chatPlanMax', false, true), 								// True when user is a chat max user.
 		planBusiness: new RawContextKey<boolean>('chatPlanBusiness', false, true), 						// True when user is a chat business user.
 		planEnterprise: new RawContextKey<boolean>('chatPlanEnterprise', false, true), 					// True when user is a chat enterprise user.
 
@@ -90,6 +92,8 @@ export enum ChatEntitlement {
 	Business = 8,
 	/** Signed-up to Enterprise */
 	Enterprise = 9,
+	/** Signed-up to Max */
+	Max = 11,
 }
 
 export interface IChatSentiment {
@@ -121,6 +125,15 @@ export interface IChatSentiment {
 	disabled?: boolean;
 
 	/**
+	 * Chat is disabled at the workspace level
+	 *
+	 * Note: in contrast to `hidden` (which hides all UI globally),
+	 * this only disables Chat in the current workspace while
+	 * keeping its UI visible so the user can re-enable it.
+	 */
+	disabledInWorkspace?: boolean;
+
+	/**
 	 * Chat is disabled due to missing workspace trust.
 	 *
 	 * Note: even though this disables Chat, we want to treat it
@@ -150,6 +163,7 @@ export interface IChatEntitlementService {
 	readonly entitlementObs: IObservable<ChatEntitlement>;
 
 	readonly previewFeaturesDisabled: boolean;
+	readonly clientByokEnabled: boolean;
 
 	readonly organisations: string[] | undefined;
 	readonly isInternal: boolean;
@@ -175,6 +189,13 @@ export interface IChatEntitlementService {
 
 	markAnonymousRateLimited(): void;
 
+	/**
+	 * Force the hidden state on or off, overriding the normal entitlement logic.
+	 * Used by the account policy gate to hide all AI features when the gate is
+	 * active and unsatisfied.
+	 */
+	setForceHidden(hidden: boolean): void;
+
 	update(token: CancellationToken): Promise<void>;
 }
 
@@ -189,6 +210,7 @@ export function isProUser(chatEntitlement: ChatEntitlement): boolean {
 	return chatEntitlement === ChatEntitlement.EDU ||
 		chatEntitlement === ChatEntitlement.Pro ||
 		chatEntitlement === ChatEntitlement.ProPlus ||
+		chatEntitlement === ChatEntitlement.Max ||
 		chatEntitlement === ChatEntitlement.Business ||
 		chatEntitlement === ChatEntitlement.Enterprise;
 }
@@ -206,6 +228,8 @@ export function getChatPlanName(chatEntitlement: ChatEntitlement): string {
 			return localize('plan.proName', 'Copilot Pro');
 		case ChatEntitlement.ProPlus:
 			return localize('plan.proPlusName', 'Copilot Pro+');
+		case ChatEntitlement.Max:
+			return localize('plan.maxName', 'Copilot Max');
 		case ChatEntitlement.Business:
 			return localize('plan.businessName', 'Copilot Business');
 		case ChatEntitlement.Enterprise:
@@ -241,7 +265,7 @@ function isAnonymous(configurationService: IConfigurationService, entitlement: C
 		return false; // only consider signed out users
 	}
 
-	if (sentiment.hidden || sentiment.disabled) {
+	if (sentiment.hidden || sentiment.disabledInWorkspace) {
 		return false; // only consider enabled scenarios
 	}
 
@@ -275,6 +299,28 @@ function logChatEntitlements(state: IChatEntitlementContextState, configurationS
 	});
 }
 
+type ChatAdditionalSpendConfigurationClassification = {
+	owner: 'pwang347';
+	comment: 'Tracks when a user enables or disables additional spend.';
+	enabled: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Whether additional spend is now enabled or disabled.' };
+	entitlement: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The current chat entitlement of the user.' };
+};
+type ChatAdditionalSpendConfigurationEvent = {
+	enabled: boolean;
+	entitlement: ChatEntitlement;
+};
+
+type ChatAdditionalSpendActiveClassification = {
+	owner: 'pwang347';
+	comment: 'Tracks when a user enters additional spend (included quota exhausted while additional spend is enabled).';
+	entitlement: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The current chat entitlement of the user.' };
+	additionalUsageCount: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; isMeasurement: true; comment: 'The number of additional spend interactions used so far.' };
+};
+type ChatAdditionalSpendActiveEvent = {
+	entitlement: ChatEntitlement;
+	additionalUsageCount: number;
+};
+
 export class ChatEntitlementService extends Disposable implements IChatEntitlementService {
 
 	declare _serviceBrand: undefined;
@@ -306,6 +352,7 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
 					ChatEntitlementContextKeys.Entitlement.planBusiness.key,
 					ChatEntitlementContextKeys.Entitlement.planEnterprise.key,
 					ChatEntitlementContextKeys.Entitlement.planProPlus.key,
+					ChatEntitlementContextKeys.Entitlement.planMax.key,
 					ChatEntitlementContextKeys.Entitlement.planFree.key,
 					ChatEntitlementContextKeys.Entitlement.canSignUp.key,
 					ChatEntitlementContextKeys.Entitlement.signedOut.key,
@@ -332,7 +379,7 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
 		);
 		this.sentimentObs = observableFromEvent(this.onDidChangeSentiment, () => this.sentiment);
 
-		if ((isWeb && !environmentService.remoteAuthority)) {
+		if ((isWeb && !environmentService.remoteAuthority && !environmentService.isSessionsWindow)) {
 			ChatEntitlementContextKeys.Setup.hidden.bindTo(this.contextKeyService).set(true); // hide copilot UI on web if unsupported
 			return;
 		}
@@ -366,6 +413,8 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
 			return ChatEntitlement.Enterprise;
 		} else if (this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Entitlement.planProPlus.key) === true) {
 			return ChatEntitlement.ProPlus;
+		} else if (this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Entitlement.planMax.key) === true) {
+			return ChatEntitlement.Max;
 		} else if (this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Entitlement.planFree.key) === true) {
 			return ChatEntitlement.Free;
 		} else if (this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Entitlement.canSignUp.key) === true) {
@@ -395,6 +444,10 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
 
 	get previewFeaturesDisabled(): boolean {
 		return this.contextKeyService.getContextKeyValue<boolean>('github.copilot.previewFeaturesDisabled') === true;
+	}
+
+	get clientByokEnabled(): boolean {
+		return this.contextKeyService.getContextKeyValue<boolean>('github.copilot.clientByokEnabled') === true;
 	}
 
 	//#endregion
@@ -474,6 +527,23 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
 		if (chatChanged.remaining || completionsChanged.remaining || premiumChatChanged.remaining) {
 			this._onDidChangeQuotaRemaining.fire();
 		}
+
+		// Track additional spend configuration changes (only when both values come from server snapshots)
+		if (oldQuota.additionalUsageEnabled !== undefined && quotas.additionalUsageEnabled !== undefined && oldQuota.additionalUsageEnabled !== quotas.additionalUsageEnabled) {
+			this.telemetryService.publicLog2<ChatAdditionalSpendConfigurationEvent, ChatAdditionalSpendConfigurationClassification>('chatAdditionalSpendConfiguration', {
+				enabled: quotas.additionalUsageEnabled ?? false,
+				entitlement: this.entitlement,
+			});
+		}
+
+		// Track entering additional spend: included quota just exhausted while additional spend is enabled
+		if (quotas.additionalUsageEnabled && quotas.premiumChat?.percentRemaining === 0
+			&& oldQuota.premiumChat?.percentRemaining !== undefined && oldQuota.premiumChat.percentRemaining > 0) {
+			this.telemetryService.publicLog2<ChatAdditionalSpendActiveEvent, ChatAdditionalSpendActiveClassification>('chatAdditionalSpendActive', {
+				entitlement: this.entitlement,
+				additionalUsageCount: quotas.additionalUsageCount ?? 0,
+			});
+		}
 	}
 
 	private compareQuotas(oldQuota: IQuotaSnapshot | undefined, newQuota: IQuotaSnapshot | undefined): { changed: { exceeded: boolean; remaining: boolean } } {
@@ -506,6 +576,7 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
 			completed: this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Setup.completed.key) === true,
 			installed: this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Setup.installed.key) === true,
 			hidden: this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Setup.hidden.key) === true,
+			disabledInWorkspace: this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Setup.disabledInWorkspace.key) === true,
 			disabled: this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Setup.disabled.key) === true,
 			untrusted: this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Setup.untrusted.key) === true,
 			later: this.contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.Setup.later.key) === true,
@@ -539,6 +610,16 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
 		this._onDidChangeQuotaExceeded.fire();
 	}
 
+	setForceHidden(hidden: boolean): void {
+		if (this.context) {
+			this.context.value.setForceHidden(hidden);
+		} else {
+			// No ChatEntitlementContext (e.g. no defaultChatAgent in product.json).
+			// Set the context key directly as a fallback.
+			ChatEntitlementContextKeys.Setup.hidden.bindTo(this.contextKeyService).set(hidden);
+		}
+	}
+
 	async update(token: CancellationToken): Promise<void> {
 		await this.requests?.value.forceResolveEntitlement(token);
 	}
@@ -556,6 +637,9 @@ type EntitlementClassification = {
 	quotaPremiumChat: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The number of premium chat requests available to the user' };
 	quotaCompletions: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The number of inline suggestions available to the user' };
 	quotaResetDate: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The date the quota will reset' };
+	usageBasedBilling: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Whether the user is on usage-based billing' };
+	additionalUsageEnabled: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Whether overage / additional spend is enabled' };
+	additionalUsageCount: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; isMeasurement: true; comment: 'The number of overage interactions used' };
 	owner: 'bpasero';
 	comment: 'Reporting chat entitlements';
 };
@@ -568,6 +652,9 @@ type EntitlementEvent = {
 	quotaPremiumChat: number | undefined;
 	quotaCompletions: number | undefined;
 	quotaResetDate: string | undefined;
+	usageBasedBilling: boolean | undefined;
+	additionalUsageEnabled: boolean | undefined;
+	additionalUsageCount: number | undefined;
 };
 
 interface IEntitlements {
@@ -579,15 +666,11 @@ interface IEntitlements {
 }
 
 export interface IQuotaSnapshot {
-	readonly total: number;
-
-	readonly remaining: number;
 	readonly percentRemaining: number;
-
-	readonly overageEnabled: boolean;
-	readonly overageCount: number;
-
 	readonly unlimited: boolean;
+	readonly resetAt?: number;
+	readonly usageBasedBilling?: boolean;
+	readonly entitlement?: number;
 }
 
 interface IQuotas {
@@ -597,6 +680,8 @@ interface IQuotas {
 	readonly chat?: IQuotaSnapshot;
 	readonly completions?: IQuotaSnapshot;
 	readonly premiumChat?: IQuotaSnapshot;
+	readonly additionalUsageEnabled?: boolean;
+	readonly additionalUsageCount?: number;
 }
 
 export class ChatEntitlementRequests extends Disposable {
@@ -699,6 +784,8 @@ export class ChatEntitlementRequests extends Disposable {
 			entitlement = ChatEntitlement.Pro;
 		} else if (entitlementsData.copilot_plan === 'individual_pro') {
 			entitlement = ChatEntitlement.ProPlus;
+		} else if (entitlementsData.copilot_plan === 'individual_max') {
+			entitlement = ChatEntitlement.Max;
 		} else if (entitlementsData.copilot_plan === 'business') {
 			entitlement = ChatEntitlement.Business;
 		} else if (entitlementsData.copilot_plan === 'enterprise') {
@@ -720,10 +807,13 @@ export class ChatEntitlementRequests extends Disposable {
 			entitlement: entitlements.entitlement,
 			tid: entitlementsData.analytics_tracking_id,
 			sku: entitlements.sku,
-			quotaChat: entitlements.quotas?.chat?.remaining,
-			quotaPremiumChat: entitlements.quotas?.premiumChat?.remaining,
-			quotaCompletions: entitlements.quotas?.completions?.remaining,
-			quotaResetDate: entitlements.quotas?.resetDate
+			quotaChat: entitlements.quotas?.chat?.percentRemaining,
+			quotaPremiumChat: entitlements.quotas?.premiumChat?.percentRemaining,
+			quotaCompletions: entitlements.quotas?.completions?.percentRemaining,
+			quotaResetDate: entitlements.quotas?.resetDate,
+			usageBasedBilling: entitlements.quotas?.premiumChat?.usageBasedBilling,
+			additionalUsageEnabled: entitlements.quotas?.additionalUsageEnabled,
+			additionalUsageCount: entitlements.quotas?.additionalUsageCount
 		});
 
 		return entitlements;
@@ -738,22 +828,14 @@ export class ChatEntitlementRequests extends Disposable {
 		// Legacy Free SKU Quota
 		if (entitlementsData.monthly_quotas?.chat && typeof entitlementsData.limited_user_quotas?.chat === 'number') {
 			quotas.chat = {
-				total: entitlementsData.monthly_quotas.chat,
-				remaining: entitlementsData.limited_user_quotas.chat,
 				percentRemaining: Math.min(100, Math.max(0, (entitlementsData.limited_user_quotas.chat / entitlementsData.monthly_quotas.chat) * 100)),
-				overageEnabled: false,
-				overageCount: 0,
 				unlimited: false
 			};
 		}
 
 		if (entitlementsData.monthly_quotas?.completions && typeof entitlementsData.limited_user_quotas?.completions === 'number') {
 			quotas.completions = {
-				total: entitlementsData.monthly_quotas.completions,
-				remaining: entitlementsData.limited_user_quotas.completions,
 				percentRemaining: Math.min(100, Math.max(0, (entitlementsData.limited_user_quotas.completions / entitlementsData.monthly_quotas.completions) * 100)),
-				overageEnabled: false,
-				overageCount: 0,
 				unlimited: false
 			};
 		}
@@ -765,13 +847,13 @@ export class ChatEntitlementRequests extends Disposable {
 				if (!rawQuotaSnapshot) {
 					continue;
 				}
+				const parsedEntitlement = rawQuotaSnapshot.entitlement !== undefined ? Number(rawQuotaSnapshot.entitlement) : undefined;
 				const quotaSnapshot: IQuotaSnapshot = {
-					total: rawQuotaSnapshot.entitlement,
-					remaining: rawQuotaSnapshot.remaining,
 					percentRemaining: Math.min(100, Math.max(0, rawQuotaSnapshot.percent_remaining)),
-					overageEnabled: rawQuotaSnapshot.overage_permitted,
-					overageCount: rawQuotaSnapshot.overage_count,
-					unlimited: rawQuotaSnapshot.unlimited
+					unlimited: rawQuotaSnapshot.unlimited,
+					usageBasedBilling: rawQuotaSnapshot.token_based_billing,
+					resetAt: rawQuotaSnapshot.quota_reset_at || undefined,
+					entitlement: parsedEntitlement !== undefined && Number.isSafeInteger(parsedEntitlement) && parsedEntitlement >= 0 ? parsedEntitlement : undefined,
 				};
 
 				switch (quotaType) {
@@ -786,8 +868,11 @@ export class ChatEntitlementRequests extends Disposable {
 						break;
 				}
 			}
-		}
 
+			const overageSource = entitlementsData.quota_snapshots['premium_interactions'];
+			quotas.additionalUsageEnabled = overageSource?.overage_permitted ?? false;
+			quotas.additionalUsageCount = overageSource?.overage_count ?? 0;
+		}
 		return quotas;
 	}
 
@@ -841,7 +926,7 @@ export class ChatEntitlementRequests extends Disposable {
 	}
 
 	async forceResolveEntitlement(token = CancellationToken.None): Promise<IEntitlements | undefined> {
-		const defaultAccount = await this.defaultAccountService.refresh();
+		const defaultAccount = await this.defaultAccountService.refresh({ forceRefresh: true });
 		if (!defaultAccount) {
 			return undefined;
 		}
@@ -1029,6 +1114,7 @@ export class ChatEntitlementContext extends Disposable {
 	private readonly eduContextKey: IContextKey<boolean>;
 	private readonly proContextKey: IContextKey<boolean>;
 	private readonly proPlusContextKey: IContextKey<boolean>;
+	private readonly maxContextKey: IContextKey<boolean>;
 	private readonly businessContextKey: IContextKey<boolean>;
 	private readonly enterpriseContextKey: IContextKey<boolean>;
 
@@ -1038,6 +1124,7 @@ export class ChatEntitlementContext extends Disposable {
 
 	private readonly completedContext: IContextKey<boolean>;
 	private readonly hiddenContext: IContextKey<boolean>;
+	private readonly disabledInWorkspaceContext: IContextKey<boolean>;
 	private readonly laterContext: IContextKey<boolean>;
 	private readonly installedContext: IContextKey<boolean>;
 	private readonly disabledContext: IContextKey<boolean>;
@@ -1069,6 +1156,7 @@ export class ChatEntitlementContext extends Disposable {
 		this.eduContextKey = ChatEntitlementContextKeys.Entitlement.planEdu.bindTo(contextKeyService);
 		this.proContextKey = ChatEntitlementContextKeys.Entitlement.planPro.bindTo(contextKeyService);
 		this.proPlusContextKey = ChatEntitlementContextKeys.Entitlement.planProPlus.bindTo(contextKeyService);
+		this.maxContextKey = ChatEntitlementContextKeys.Entitlement.planMax.bindTo(contextKeyService);
 		this.businessContextKey = ChatEntitlementContextKeys.Entitlement.planBusiness.bindTo(contextKeyService);
 		this.enterpriseContextKey = ChatEntitlementContextKeys.Entitlement.planEnterprise.bindTo(contextKeyService);
 
@@ -1078,6 +1166,7 @@ export class ChatEntitlementContext extends Disposable {
 
 		this.completedContext = ChatEntitlementContextKeys.Setup.completed.bindTo(contextKeyService);
 		this.hiddenContext = ChatEntitlementContextKeys.Setup.hidden.bindTo(contextKeyService);
+		this.disabledInWorkspaceContext = ChatEntitlementContextKeys.Setup.disabledInWorkspace.bindTo(contextKeyService);
 		this.laterContext = ChatEntitlementContextKeys.Setup.later.bindTo(contextKeyService);
 		this.installedContext = ChatEntitlementContextKeys.Setup.installed.bindTo(contextKeyService);
 		this.disabledContext = ChatEntitlementContextKeys.Setup.disabled.bindTo(contextKeyService);
@@ -1113,23 +1202,32 @@ export class ChatEntitlementContext extends Disposable {
 		}));
 	}
 
+	private _forceHidden = false;
+
 	private withConfiguration(state: IChatEntitlementContextState): IChatEntitlementContextState {
-		if (this.configurationService.getValue(ChatEntitlementContext.CHAT_DISABLED_CONFIGURATION_KEY) === true) {
+		if (this._forceHidden || this.configurationService.getValue(ChatEntitlementContext.CHAT_DISABLED_CONFIGURATION_KEY) === true) {
 			return {
 				...state,
-				hidden: true // Setting always wins: if AI is disabled, set `hidden: true`
+				hidden: true
 			};
 		}
 
 		return state;
 	}
 
-	update(context: { installed: boolean; disabled: boolean; untrusted: boolean }): Promise<void>;
+	setForceHidden(hidden: boolean): void {
+		if (this._forceHidden !== hidden) {
+			this._forceHidden = hidden;
+			this.updateContext();
+		}
+	}
+
+	update(context: { installed: boolean; disabled: boolean; untrusted: boolean; disabledInWorkspace: boolean }): Promise<void>;
 	update(context: { completed: true }): Promise<void>;
 	update(context: { hidden: false }): Promise<void>; // legacy UI state from before we had a setting to hide, keep around to still support users who used this
 	update(context: { later: boolean }): Promise<void>;
 	update(context: { entitlement: ChatEntitlement; organisations: string[] | undefined; sku: string | undefined; copilotTrackingId: string | undefined }): Promise<void>;
-	async update(context: { completed?: boolean; installed?: boolean; disabled?: boolean; untrusted?: boolean; hidden?: false; later?: boolean; entitlement?: ChatEntitlement; organisations?: string[]; sku?: string; copilotTrackingId?: string }): Promise<void> {
+	async update(context: { completed?: boolean; installed?: boolean; disabled?: boolean; untrusted?: boolean; disabledInWorkspace?: boolean; hidden?: false; later?: boolean; entitlement?: ChatEntitlement; organisations?: string[]; sku?: string; copilotTrackingId?: string }): Promise<void> {
 		this.logService.trace(`[chat entitlement context] update(): ${JSON.stringify(context)}`);
 
 		const oldState = JSON.stringify(this._state);
@@ -1138,6 +1236,7 @@ export class ChatEntitlementContext extends Disposable {
 			this._state.installed = context.installed;
 			this._state.disabled = context.disabled;
 			this._state.untrusted = context.untrusted;
+			this._state.disabledInWorkspace = context.disabledInWorkspace;
 
 			if (context.installed && !context.disabled) {
 				context.hidden = false; // treat this as a sign to make Chat visible again in case it is hidden
@@ -1201,6 +1300,7 @@ export class ChatEntitlementContext extends Disposable {
 		this.eduContextKey.set(state.entitlement === ChatEntitlement.EDU);
 		this.proContextKey.set(state.entitlement === ChatEntitlement.Pro);
 		this.proPlusContextKey.set(state.entitlement === ChatEntitlement.ProPlus);
+		this.maxContextKey.set(state.entitlement === ChatEntitlement.Max);
 		this.businessContextKey.set(state.entitlement === ChatEntitlement.Business);
 		this.enterpriseContextKey.set(state.entitlement === ChatEntitlement.Enterprise);
 
@@ -1210,6 +1310,7 @@ export class ChatEntitlementContext extends Disposable {
 
 		this.completedContext.set(!!state.completed);
 		this.hiddenContext.set(!!state.hidden);
+		this.disabledInWorkspaceContext.set(!!state.disabledInWorkspace);
 		this.laterContext.set(!!state.later);
 		this.installedContext.set(!!state.installed);
 		this.disabledContext.set(!!state.disabled);

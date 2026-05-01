@@ -25,12 +25,18 @@ Registry.as<IConfigurationRegistry>(Extensions.Configuration).registerDefaultCon
 		'chat.tools.terminal.enableAutoApprove': true,
 
 		'diffEditor.hideUnchangedRegions.enabled': true,
+		'diffEditor.renderGutterMenu': false,
+		'diffEditor.renderIndicators': false,
+		'diffEditor.renderMarginRevertIcon': false,
+		'diffEditor.renderSideBySide': true,
+		'diffEditor.useInlineViewWhenSpaceIsLimited': true,
 
 		'extensions.ignoreRecommendations': true,
 
 		'files.autoSave': 'afterDelay',
 
 		'git.autofetch': true,
+		'git.autorefresh': true,
 		'git.branchRandomName.enable': true,
 		'git.detectWorktrees': false,
 		'git.showProgress': false,
@@ -43,12 +49,15 @@ Registry.as<IConfigurationRegistry>(Extensions.Configuration).registerDefaultCon
 		'github.copilot.chat.cli.autoCommit.enabled': false,
 		'github.copilot.chat.cli.branchSupport.enabled': true,
 		'github.copilot.chat.cli.isolationOption.enabled': true,
+		'github.copilot.chat.cli.sessionController.enabled': false,
+		'github.copilot.chat.cli.lazyLoadSessionItem.enabled': false,
 		'github.copilot.chat.cli.mcp.enabled': true,
+		'github.copilot.chat.cli.remote.enabled': false,
 		'github.copilot.chat.githubMcpServer.enabled': true,
 		'github.copilot.chat.languageContext.typescript.enabled': true,
+		'github.copilot.chat.cli.showExternalSessions': false,
 
 		'inlineChat.affordance': 'editor',
-		'inlineChat.renderMode': 'hover',
 
 		'search.quickOpen.includeHistory': false,
 
@@ -56,8 +65,13 @@ Registry.as<IConfigurationRegistry>(Extensions.Configuration).registerDefaultCon
 
 		'terminal.integrated.initialHint': false,
 
+		'workbench.browser.openLocalhostLinks': true,
+		'workbench.browser.enableChatTools': true,
+
 		'workbench.editor.doubleClickTabToToggleEditorGroupSizes': 'maximize',
 		'workbench.editor.restoreEditors': false,
+		'update.showReleaseNotes': false,
+		'workbench.notifications.position': 'bottom-right',
 		'workbench.startupEditor': 'none',
 		'workbench.tips.enabled': false,
 		'workbench.layoutControl.type': 'toggles',

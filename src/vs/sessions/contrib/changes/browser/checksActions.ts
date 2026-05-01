@@ -19,7 +19,7 @@ import { ChatContextKeys } from '../../../../workbench/contrib/chat/common/actio
 import { CHAT_CATEGORY } from '../../../../workbench/contrib/chat/browser/actions/chatActions.js';
 import { IGitHubService } from '../../github/browser/githubService.js';
 import { GitHubCheckConclusion, GitHubCheckStatus, IGitHubCICheck } from '../../github/common/types.js';
-import { ISessionsManagementService } from '../../sessions/browser/sessionsManagementService.js';
+import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 
 export const hasActiveSessionFailedCIChecks = new RawContextKey<boolean>('sessions.hasActiveSessionFailedCIChecks', false);
 
@@ -122,7 +122,7 @@ class ActiveSessionFailedCIChecksContextContribution extends Disposable implemen
 			if (!pr) {
 				return undefined;
 			}
-			return gitHubService.getPullRequestCI(gitHubInfo.owner, gitHubInfo.repo, pr.headRef);
+			return gitHubService.getPullRequestCI(gitHubInfo.owner, gitHubInfo.repo, gitHubInfo.pullRequest.number, pr.headSha);
 		});
 
 		this._register(bindContextKey(hasActiveSessionFailedCIChecks, contextKeyService, reader => {
@@ -178,7 +178,7 @@ class FixCIChecksAction extends Action2 {
 			return;
 		}
 
-		const ciModel = gitHubService.getPullRequestCI(gitHubInfo.owner, gitHubInfo.repo, pr.headRef);
+		const ciModel = gitHubService.getPullRequestCI(gitHubInfo.owner, gitHubInfo.repo, gitHubInfo.pullRequest.number, pr.headSha);
 		const checks = ciModel.checks.get();
 		const failedChecks = getFailedChecks(checks);
 		if (failedChecks.length === 0) {
