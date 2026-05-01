@@ -727,6 +727,7 @@ export interface ICopilotCLISession extends IDisposable {
 	addUserMessage(content: string): void;
 	addUserAssistantMessage(content: string): void;
 	getSelectedModelId(): Promise<string | undefined>;
+	getLastResponseModelId(): string | undefined;
 }
 
 export class CopilotCLISession extends DisposableStore implements ICopilotCLISession {
@@ -762,6 +763,7 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 	}
 	private _lastUsedModel: string | undefined;
 	private _permissionLevel: string | undefined;
+	private _lastResponseModelId: string | undefined;
 	private _pendingPrompt: string | undefined;
 	private _bridgeProcessor: CopilotCliBridgeSpanProcessor | undefined;
 	private readonly _todoSqlQuery = new TodoSqlQuery();
@@ -1008,6 +1010,7 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 		this.attachments.push(...attachments);
 		const prompt = getPromptLabel(input);
 		this._pendingPrompt = prompt;
+		this._lastResponseModelId = undefined;
 		this.logService.info(`[CopilotCLISession] Invoking session ${this.sessionId}`);
 		const disposables = new DisposableStore();
 		const logStartTime = Date.now();
@@ -1268,6 +1271,7 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 				sdkRequestId = sdkRequestId ?? event.id;
 			})));
 			disposables.add(toDisposable(this._sdkSession.on('assistant.usage', (event) => {
+				this._lastResponseModelId = event.data.model;
 				if (requestStream && typeof event.data.outputTokens === 'number' && typeof event.data.inputTokens === 'number') {
 					reportUsage(event.data.inputTokens, event.data.outputTokens);
 				}
@@ -2364,6 +2368,10 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 
 	public getSelectedModelId() {
 		return this._sdkSession.getSelectedModel();
+	}
+
+	public getLastResponseModelId(): string | undefined {
+		return this._lastResponseModelId;
 	}
 
 	private _logRequest(userPrompt: string, modelId: string, attachments: Attachment[], startTimeMs: number): void {
