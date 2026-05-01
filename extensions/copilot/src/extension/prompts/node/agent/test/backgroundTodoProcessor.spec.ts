@@ -1,0 +1,141 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { describe, expect, test } from 'vitest';
+import { BackgroundTodoProcessor, BackgroundTodoProcessorState, IBackgroundTodoResult } from '../backgroundTodoProcessor';
+import { IBackgroundTodoDelta } from '../backgroundTodoDelta';
+import { CancellationTokenSource } from '../../../../../util/vs/base/common/cancellation';
+
+function makeDelta(rounds: string[] = []): IBackgroundTodoDelta {
+	return {
+		userRequest: 'fix the bug',
+		newRounds: rounds.map(id => ({
+			id,
+			response: '',
+			toolInputRetry: 0,
+			toolCalls: [],
+		})),
+		history: [],
+		sessionResource: undefined,
+	};
+}
+
+describe('BackgroundTodoProcessor', () => {
+
+	test('initial state is Idle', () => {
+		const processor = new BackgroundTodoProcessor();
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+	});
+
+	test('start transitions to InProgress then Idle on success', async () => {
+		const processor = new BackgroundTodoProcessor();
+		const result: IBackgroundTodoResult = { outcome: 'success' };
+		processor.start(makeDelta(['r1']), async () => result);
+		expect(processor.state).toBe(BackgroundTodoProcessorState.InProgress);
+		await processor.waitForCompletion();
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+	});
+
+	test('failed work transitions to Failed', async () => {
+		const processor = new BackgroundTodoProcessor();
+		processor.start(makeDelta(['r1']), async () => {
+			throw new Error('model error');
+		});
+		await processor.waitForCompletion();
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Failed);
+		expect(processor.lastError).toBeInstanceOf(Error);
+	});
+
+	test('delta cursor advances on success', async () => {
+		const processor = new BackgroundTodoProcessor();
+		processor.start(makeDelta(['r1']), async () => ({ outcome: 'noop' }));
+		await processor.waitForCompletion();
+
+		// The delta tracker should now have r1 marked as processed
+		// So a context with only r1 should produce no new delta
+		expect(processor.deltaTracker.getDelta({
+			query: 'fix',
+			history: [],
+			chatVariables: { hasVariables: () => false } as any,
+			toolCallRounds: [{ id: 'r1', response: '', toolInputRetry: 0, toolCalls: [] }],
+		})).toBeUndefined();
+	});
+
+	test('delta cursor advances on failure too', async () => {
+		const processor = new BackgroundTodoProcessor();
+		processor.start(makeDelta(['r1']), async () => {
+			throw new Error('oops');
+		});
+		await processor.waitForCompletion();
+
+		// r1 should be marked processed even on failure
+		expect(processor.deltaTracker.getDelta({
+			query: 'fix',
+			history: [],
+			chatVariables: { hasVariables: () => false } as any,
+			toolCallRounds: [{ id: 'r1', response: '', toolInputRetry: 0, toolCalls: [] }],
+		})).toBeUndefined();
+	});
+
+	test('coalesces concurrent updates', async () => {
+		const processor = new BackgroundTodoProcessor();
+		let workCallCount = 0;
+
+		// Start a pass that will be slow
+		processor.start(makeDelta(['r1']), async () => {
+			workCallCount++;
+			await new Promise(resolve => setTimeout(resolve, 50));
+			return { outcome: 'success' };
+		});
+
+		// While in-progress, stash two more deltas (only latest should survive)
+		processor.start(makeDelta(['r2']), async () => {
+			workCallCount++;
+			return { outcome: 'success' };
+		});
+		processor.start(makeDelta(['r3']), async () => {
+			workCallCount++;
+			return { outcome: 'success' };
+		});
+
+		// Wait for everything
+		await processor.waitForCompletion();
+		// First pass + latest pending = 2 invocations (r2 delta was replaced by r3)
+		expect(workCallCount).toBe(2);
+	});
+
+	test('cancel stops in-flight work', async () => {
+		const processor = new BackgroundTodoProcessor();
+		let completed = false;
+		processor.start(makeDelta(['r1']), async () => {
+			await new Promise(resolve => setTimeout(resolve, 200));
+			completed = true;
+			return { outcome: 'success' };
+		});
+		processor.cancel();
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+		// Give time for the cancelled work to settle
+		await new Promise(resolve => setTimeout(resolve, 50));
+		expect(completed).toBe(false);
+	});
+
+	test('respects parent cancellation token', async () => {
+		const processor = new BackgroundTodoProcessor();
+		const cts = new CancellationTokenSource();
+		let sawCancellation = false;
+
+		processor.start(makeDelta(['r1']), async (_delta, token) => {
+			// Wait and check cancellation
+			await new Promise(resolve => setTimeout(resolve, 50));
+			sawCancellation = token.isCancellationRequested;
+			return { outcome: 'noop' };
+		}, cts.token);
+
+		cts.cancel();
+		await processor.waitForCompletion();
+		expect(sawCancellation).toBe(true);
+		cts.dispose();
+	});
+});
