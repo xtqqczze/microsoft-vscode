@@ -6,14 +6,19 @@
 import { describe, expect, test } from 'vitest';
 import { BackgroundTodoDecision, BackgroundTodoProcessor, BackgroundTodoProcessorState, IBackgroundTodoPolicyInput } from '../backgroundTodoProcessor';
 import { IBuildPromptContext, IToolCallRound } from '../../../../prompt/common/intents';
+import { ToolName } from '../../../../tools/common/toolNames';
 
-function makeRound(id: string): IToolCallRound {
+function makeRound(id: string, toolName: string = ToolName.ReadFile): IToolCallRound {
 	return {
 		id,
 		response: `response for ${id}`,
 		toolInputRetry: 0,
-		toolCalls: [{ name: 'read_file', arguments: '{}', id: `tc-${id}` }],
+		toolCalls: [{ name: toolName, arguments: '{}', id: `tc-${id}` }],
 	};
+}
+
+function makeMeaningfulRound(id: string): IToolCallRound {
+	return makeRound(id, ToolName.ReplaceString);
 }
 
 function makePromptContext(opts?: {
@@ -33,12 +38,14 @@ function makeInput(overrides?: Partial<IBackgroundTodoPolicyInput>): IBackground
 		experimentEnabled: true,
 		todoToolExplicitlyEnabled: false,
 		isAgentPrompt: true,
-		promptContext: makePromptContext({ toolCallRounds: [makeRound('r1')] }),
+		promptContext: makePromptContext({ toolCallRounds: [makeMeaningfulRound('r1')] }),
 		...overrides,
 	};
 }
 
 describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
+
+	// ── Hard gates ──────────────────────────────────────────────
 
 	test('returns Skip when experiment is disabled', () => {
 		const processor = new BackgroundTodoProcessor();
@@ -64,38 +71,17 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 
 	test('returns Skip when there is no delta', () => {
 		const processor = new BackgroundTodoProcessor();
-		// First, mark some rounds as processed so peekDelta returns undefined
 		processor.deltaTracker.markRoundsProcessed(['r1']);
 		const result = processor.shouldRun(makeInput());
 		expect(result.decision).toBe(BackgroundTodoDecision.Skip);
 		expect(result.reason).toBe('noDelta');
 	});
 
-	test('returns Run when all gates pass and delta exists', () => {
-		const processor = new BackgroundTodoProcessor();
-		const result = processor.shouldRun(makeInput());
-		expect(result.decision).toBe(BackgroundTodoDecision.Run);
-		expect(result.reason).toBe('ready');
-		expect(result.delta).toBeDefined();
-		expect(result.delta!.newRounds).toHaveLength(1);
-	});
-
-	test('returns Run for initial request-only delta', () => {
-		const processor = new BackgroundTodoProcessor();
-		const result = processor.shouldRun(makeInput({
-			promptContext: makePromptContext({ query: 'build an app' }),
-		}));
-		expect(result.decision).toBe(BackgroundTodoDecision.Run);
-		expect(result.reason).toBe('ready');
-		expect(result.delta!.metadata.isInitialDelta).toBe(true);
-		expect(result.delta!.metadata.isRequestOnly).toBe(true);
-	});
-
 	test('returns Wait when processor is already InProgress', async () => {
 		const processor = new BackgroundTodoProcessor();
-		// Start a slow pass to put the processor into InProgress
+		const dummyMeta = { newRoundCount: 1, newToolCallCount: 1, meaningfulToolCallCount: 1, contextToolCallCount: 0, isInitialDelta: true, isRequestOnly: false };
 		processor.start(
-			{ userRequest: 'old', newRounds: [makeRound('r0')], history: [], sessionResource: undefined, metadata: { newRoundCount: 1, newToolCallCount: 1, isInitialDelta: true, isRequestOnly: false } },
+			{ userRequest: 'old', newRounds: [makeMeaningfulRound('r0')], history: [], sessionResource: undefined, metadata: dummyMeta },
 			async () => {
 				await new Promise(resolve => setTimeout(resolve, 200));
 				return { outcome: 'success' };
@@ -103,9 +89,8 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 		);
 		expect(processor.state).toBe(BackgroundTodoProcessorState.InProgress);
 
-		// Now ask the policy with new activity
 		const result = processor.shouldRun(makeInput({
-			promptContext: makePromptContext({ toolCallRounds: [makeRound('r1')] }),
+			promptContext: makePromptContext({ toolCallRounds: [makeMeaningfulRound('r1')] }),
 		}));
 		expect(result.decision).toBe(BackgroundTodoDecision.Wait);
 		expect(result.reason).toBe('processorInProgress');
@@ -114,16 +99,125 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 		processor.cancel();
 	});
 
-	test('delta from shouldRun contains metadata', () => {
+	// ── Initial request ─────────────────────────────────────────
+
+	test('initial request-only delta runs to create plan when no todos exist', () => {
 		const processor = new BackgroundTodoProcessor();
+		const result = processor.shouldRun(makeInput({
+			promptContext: makePromptContext({ query: 'build an app' }),
+		}));
+		expect(result.decision).toBe(BackgroundTodoDecision.Run);
+		expect(result.reason).toBe('initialPlanNeeded');
+		expect(result.delta!.metadata.isInitialDelta).toBe(true);
+		expect(result.delta!.metadata.isRequestOnly).toBe(true);
+	});
+
+	test('initial request-only delta skips when todoListExists is true', () => {
+		const processor = new BackgroundTodoProcessor();
+		const result = processor.shouldRun(makeInput({
+			promptContext: makePromptContext({ query: 'build an app' }),
+			todoListExists: true,
+		}));
+		expect(result.decision).toBe(BackgroundTodoDecision.Skip);
+		expect(result.reason).toBe('todoListExistsNoNewActivity');
+	});
+
+	test('skips when processor has already created todos and no new activity', async () => {
+		const processor = new BackgroundTodoProcessor();
+		const dummyMeta = { newRoundCount: 1, newToolCallCount: 1, meaningfulToolCallCount: 1, contextToolCallCount: 0, isInitialDelta: true, isRequestOnly: false };
+		// Simulate a successful pass
+		processor.start(
+			{ userRequest: 'old', newRounds: [makeMeaningfulRound('r0')], history: [], sessionResource: undefined, metadata: dummyMeta },
+			async () => ({ outcome: 'success' })
+		);
+		await processor.waitForCompletion();
+		expect(processor.hasCreatedTodos).toBe(true);
+
+		// No new rounds → delta tracker returns undefined → noDelta
+		const result = processor.shouldRun(makeInput({
+			promptContext: makePromptContext({ query: 'build an app' }),
+		}));
+		expect(result.decision).toBe(BackgroundTodoDecision.Skip);
+		expect(result.reason).toBe('noDelta');
+	});
+
+	// ── Meaningful activity ─────────────────────────────────────
+
+	test('runs immediately after one meaningful tool call', () => {
+		const processor = new BackgroundTodoProcessor();
+		const result = processor.shouldRun(makeInput({
+			promptContext: makePromptContext({ toolCallRounds: [makeMeaningfulRound('r1')] }),
+		}));
+		expect(result.decision).toBe(BackgroundTodoDecision.Run);
+		expect(result.reason).toBe('meaningfulActivity');
+	});
+
+	test('runs for meaningful activity even if context calls are below threshold', () => {
+		const processor = new BackgroundTodoProcessor();
+		const round: IToolCallRound = {
+			id: 'r1', response: '', toolInputRetry: 0,
+			toolCalls: [
+				{ name: ToolName.ReadFile, arguments: '{}', id: 'tc-1' },
+				{ name: ToolName.ReplaceString, arguments: '{}', id: 'tc-2' },
+			],
+		};
+		const result = processor.shouldRun(makeInput({
+			promptContext: makePromptContext({ toolCallRounds: [round] }),
+		}));
+		expect(result.decision).toBe(BackgroundTodoDecision.Run);
+		expect(result.reason).toBe('meaningfulActivity');
+	});
+
+	// ── Context-only activity ───────────────────────────────────
+
+	test('waits when only context tools and below threshold', () => {
+		const processor = new BackgroundTodoProcessor();
+		// 2 context-only calls < threshold of 5
 		const result = processor.shouldRun(makeInput({
 			promptContext: makePromptContext({ toolCallRounds: [makeRound('r1'), makeRound('r2')] }),
 		}));
+		expect(result.decision).toBe(BackgroundTodoDecision.Wait);
+		expect(result.reason).toBe('contextOnlyWaiting');
+	});
+
+	test('runs when context-only tools reach threshold', () => {
+		const processor = new BackgroundTodoProcessor();
+		const rounds = Array.from({ length: 5 }, (_, i) => makeRound(`r${i}`));
+		const result = processor.shouldRun(makeInput({
+			promptContext: makePromptContext({ toolCallRounds: rounds }),
+		}));
 		expect(result.decision).toBe(BackgroundTodoDecision.Run);
-		expect(result.delta!.metadata.newRoundCount).toBe(2);
-		expect(result.delta!.metadata.newToolCallCount).toBe(2);
-		expect(result.delta!.metadata.isInitialDelta).toBe(true);
-		expect(result.delta!.metadata.isRequestOnly).toBe(false);
+		expect(result.reason).toBe('contextThresholdReached');
+	});
+
+	test('waits when context-only tools are just below threshold', () => {
+		const processor = new BackgroundTodoProcessor();
+		const rounds = Array.from({ length: 4 }, (_, i) => makeRound(`r${i}`));
+		const result = processor.shouldRun(makeInput({
+			promptContext: makePromptContext({ toolCallRounds: rounds }),
+		}));
+		expect(result.decision).toBe(BackgroundTodoDecision.Wait);
+		expect(result.reason).toBe('contextOnlyWaiting');
+	});
+
+	// ── Metadata ────────────────────────────────────────────────
+
+	test('delta from shouldRun contains meaningful/context counts', () => {
+		const processor = new BackgroundTodoProcessor();
+		const round: IToolCallRound = {
+			id: 'r1', response: '', toolInputRetry: 0,
+			toolCalls: [
+				{ name: ToolName.ReadFile, arguments: '{}', id: 'tc-1' },
+				{ name: ToolName.ReplaceString, arguments: '{}', id: 'tc-2' },
+				{ name: ToolName.CoreManageTodoList, arguments: '{}', id: 'tc-3' }, // excluded
+			],
+		};
+		const result = processor.shouldRun(makeInput({
+			promptContext: makePromptContext({ toolCallRounds: [round] }),
+		}));
+		expect(result.delta!.metadata.meaningfulToolCallCount).toBe(1);
+		expect(result.delta!.metadata.contextToolCallCount).toBe(1);
+		expect(result.delta!.metadata.newToolCallCount).toBe(2); // excluded not counted
 	});
 
 	test('shouldRun does not advance the delta cursor', () => {
@@ -134,5 +228,34 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 		expect(result1.decision).toBe(BackgroundTodoDecision.Run);
 		expect(result2.decision).toBe(BackgroundTodoDecision.Run);
 		expect(result2.delta!.newRounds).toHaveLength(1);
+	});
+
+	// ── hasCreatedTodos tracking ────────────────────────────────
+
+	test('hasCreatedTodos is false initially', () => {
+		const processor = new BackgroundTodoProcessor();
+		expect(processor.hasCreatedTodos).toBe(false);
+	});
+
+	test('hasCreatedTodos becomes true after successful pass', async () => {
+		const processor = new BackgroundTodoProcessor();
+		const dummyMeta = { newRoundCount: 1, newToolCallCount: 1, meaningfulToolCallCount: 1, contextToolCallCount: 0, isInitialDelta: true, isRequestOnly: false };
+		processor.start(
+			{ userRequest: 'test', newRounds: [makeMeaningfulRound('r1')], history: [], sessionResource: undefined, metadata: dummyMeta },
+			async () => ({ outcome: 'success' })
+		);
+		await processor.waitForCompletion();
+		expect(processor.hasCreatedTodos).toBe(true);
+	});
+
+	test('hasCreatedTodos stays false after noop pass', async () => {
+		const processor = new BackgroundTodoProcessor();
+		const dummyMeta = { newRoundCount: 1, newToolCallCount: 1, meaningfulToolCallCount: 1, contextToolCallCount: 0, isInitialDelta: true, isRequestOnly: false };
+		processor.start(
+			{ userRequest: 'test', newRounds: [makeMeaningfulRound('r1')], history: [], sessionResource: undefined, metadata: dummyMeta },
+			async () => ({ outcome: 'noop' })
+		);
+		await processor.waitForCompletion();
+		expect(processor.hasCreatedTodos).toBe(false);
 	});
 });

@@ -5,6 +5,7 @@
 
 import { Turn } from '../../../prompt/common/conversation';
 import { IBuildPromptContext, IToolCallRound } from '../../../prompt/common/intents';
+import { classifyTool } from './backgroundTodoProcessor';
 
 /**
  * Snapshot of new activity since the last background todo pass.
@@ -32,6 +33,10 @@ export interface IBackgroundTodoDeltaMetadata {
 	readonly newRoundCount: number;
 	/** Total number of individual tool calls across new rounds. */
 	readonly newToolCallCount: number;
+	/** Number of meaningful (mutating/executing) tool calls in new rounds. */
+	readonly meaningfulToolCallCount: number;
+	/** Number of context (read-only) tool calls in new rounds. */
+	readonly contextToolCallCount: number;
 	/** True when this is the very first delta for the session (no rounds processed yet). */
 	readonly isInitialDelta: boolean;
 	/** True when the delta contains only a user request and zero new rounds. */
@@ -86,7 +91,22 @@ export class BackgroundTodoDeltaTracker {
 		}
 
 		const userRequest = promptContext.query;
-		const newToolCallCount = newRounds.reduce((sum, r) => sum + r.toolCalls.length, 0);
+		let newToolCallCount = 0;
+		let meaningfulToolCallCount = 0;
+		let contextToolCallCount = 0;
+		for (const round of newRounds) {
+			for (const call of round.toolCalls) {
+				const category = classifyTool(call.name);
+				if (category === 'meaningful') {
+					meaningfulToolCallCount++;
+					newToolCallCount++;
+				} else if (category === 'context') {
+					contextToolCallCount++;
+					newToolCallCount++;
+				}
+				// excluded tools are not counted
+			}
+		}
 
 		return {
 			userRequest,
@@ -97,6 +117,8 @@ export class BackgroundTodoDeltaTracker {
 			metadata: {
 				newRoundCount: newRounds.length,
 				newToolCallCount,
+				meaningfulToolCallCount,
+				contextToolCallCount,
 				isInitialDelta,
 				isRequestOnly: newRounds.length === 0,
 			},
