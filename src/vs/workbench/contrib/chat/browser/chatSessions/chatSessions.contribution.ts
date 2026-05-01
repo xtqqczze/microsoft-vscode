@@ -52,6 +52,7 @@ import { OffsetRange } from '../../../../../editor/common/core/ranges/offsetRang
 import { ILanguageModelToolsService } from '../../common/tools/languageModelToolsService.js';
 import { IChatModel } from '../../common/model/chatModel.js';
 import { ICustomizationHarnessService } from '../../common/customizationHarnessService.js';
+import { generateUuid } from '../../../../../base/common/uuid.js';
 
 const extensionPoint = ExtensionsRegistry.registerExtensionPoint<IChatSessionsExtensionPoint[]>({
 	extensionPoint: 'chatSessions',
