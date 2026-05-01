@@ -10,7 +10,7 @@ declare module 'vscode' {
 		readonly modified: T;
 	}
 
-	export interface CustomEditorSideBySideDiffWebviewPanels {
+	export interface CustomEditorDiffWebviewPanels {
 		readonly original: WebviewPanel;
 		readonly modified: WebviewPanel;
 	}
@@ -37,7 +37,7 @@ declare module 'vscode' {
 		 *
 		 * @returns Thenable indicating that the custom diff editor has been resolved.
 		 */
-		resolveCustomEditorSideBySideDiff?(documents: CustomEditorDiffDocuments<T>, webviewPanels: CustomEditorSideBySideDiffWebviewPanels, token: CancellationToken): Thenable<void> | void;
+		resolveCustomEditorSideBySideDiff?(documents: CustomEditorDiffDocuments<T>, webviewPanels: CustomEditorDiffWebviewPanels, token: CancellationToken): Thenable<void> | void;
 	}
 
 	export interface CustomTextEditorProvider {
@@ -62,6 +62,6 @@ declare module 'vscode' {
 		 *
 		 * @returns Thenable indicating that the custom diff editor has been resolved.
 		 */
-		resolveCustomTextEditorSideBySideDiff?(documents: CustomEditorDiffDocuments<TextDocument>, webviewPanels: CustomEditorSideBySideDiffWebviewPanels, token: CancellationToken): Thenable<void> | void;
+		resolveCustomTextEditorSideBySideDiff?(documents: CustomEditorDiffDocuments<TextDocument>, webviewPanels: CustomEditorDiffWebviewPanels, token: CancellationToken): Thenable<void> | void;
 	}
 }

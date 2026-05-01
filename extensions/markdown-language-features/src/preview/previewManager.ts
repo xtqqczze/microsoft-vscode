@@ -263,7 +263,7 @@ export class MarkdownPreviewManager extends Disposable implements vscode.Webview
 
 	public async resolveCustomTextEditorSideBySideDiff(
 		documents: vscode.CustomEditorDiffDocuments<vscode.TextDocument>,
-		webviewPanels: vscode.CustomEditorSideBySideDiffWebviewPanels
+		webviewPanels: vscode.CustomEditorDiffWebviewPanels
 	): Promise<void> {
 		const lineDiffProvider = new MarkdownPreviewLineDiffProvider(documents.original, documents.modified);
 		const originalPreview = this.#resolveCustomTextEditor(documents.original, webviewPanels.original, () => lineDiffProvider.getOriginalLineChanges());
