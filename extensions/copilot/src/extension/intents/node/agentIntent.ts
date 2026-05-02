@@ -222,6 +222,7 @@ export class AgentIntent extends EditCodeIntent {
 		@IWorkspaceService workspaceService: IWorkspaceService,
 		@IChatSessionService chatSessionService: IChatSessionService,
 		@IAutomodeService private readonly _automodeService: IAutomodeService,
+		@ILogService private readonly _logService: ILogService,
 	) {
 		super(instantiationService, endpointProvider, configurationService, expService, codeMapperService, workspaceService, { intentInvocation: AgentIntentInvocation, processCodeblocks: false });
 		chatSessionService.onDidDisposeChatSession(sessionId => {
@@ -250,7 +251,7 @@ export class AgentIntent extends EditCodeIntent {
 	getOrCreateBackgroundTodoProcessor(sessionId: string): BackgroundTodoProcessor {
 		let processor = this._backgroundTodoProcessors.get(sessionId);
 		if (!processor) {
-			processor = new BackgroundTodoProcessor();
+			processor = new BackgroundTodoProcessor(this._logService);
 			this._backgroundTodoProcessors.set(sessionId, processor);
 		}
 		return processor;
@@ -1244,21 +1245,17 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 
 		this.logService.debug(`[BackgroundTodo] policy decision: ${decision} (${reason})`);
 
-		if (decision === BackgroundTodoDecision.Skip) {
+		if (decision !== BackgroundTodoDecision.Run || !delta) {
 			return;
 		}
 
-		// Both Run and Wait pass the delta to processor.executePass().
-		// When InProgress the processor coalesces it automatically.
-		if (delta) {
-			processor.executePass(delta, {
-				instantiationService: this.instantiationService,
-				logService: this.logService,
-				toolsService: this.toolsService,
-				telemetryService: this.telemetryService,
-				promptContext,
-			}, token);
-		}
+		processor.executePass(delta, {
+			instantiationService: this.instantiationService,
+			logService: this.logService,
+			toolsService: this.toolsService,
+			telemetryService: this.telemetryService,
+			promptContext,
+		}, token);
 	}
 
 	override processResponse = undefined;
