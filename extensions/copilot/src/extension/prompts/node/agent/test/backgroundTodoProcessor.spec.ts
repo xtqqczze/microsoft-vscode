@@ -19,6 +19,14 @@ function makeDelta(rounds: string[] = []): IBackgroundTodoDelta {
 		})),
 		history: [],
 		sessionResource: undefined,
+		metadata: {
+			newRoundCount: rounds.length,
+			newToolCallCount: 0,
+			meaningfulToolCallCount: 0,
+			contextToolCallCount: 0,
+			isInitialDelta: true,
+			isRequestOnly: rounds.length === 0,
+		},
 	};
 }
 
@@ -137,5 +145,46 @@ describe('BackgroundTodoProcessor', () => {
 		await processor.waitForCompletion();
 		expect(sawCancellation).toBe(true);
 		cts.dispose();
+	});
+
+	test('executeFinalReview is a no-op when no executePass has run', () => {
+		const processor = new BackgroundTodoProcessor();
+		processor.executeFinalReview();
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+	});
+
+	test('executeFinalReview is a no-op when no todos have been created', async () => {
+		const processor = new BackgroundTodoProcessor();
+		// Simulate a noop pass so a context exists but hasCreatedTodos remains false
+		processor.start(makeDelta(['r1']), async () => ({ outcome: 'noop' }));
+		await processor.waitForCompletion();
+		expect(processor.hasCreatedTodos).toBe(false);
+		processor.executeFinalReview();
+		// Should not transition to InProgress because hasCreatedTodos is false
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+	});
+
+	test('coalesced pending delta runs with its own queued work callback', async () => {
+		const processor = new BackgroundTodoProcessor();
+		const ranWork: string[] = [];
+
+		// Start a slow first pass with workA.
+		processor.start(makeDelta(['r1']), async () => {
+			ranWork.push('A');
+			await new Promise(resolve => setTimeout(resolve, 50));
+			return { outcome: 'success' };
+		});
+		expect(processor.state).toBe(BackgroundTodoProcessorState.InProgress);
+
+		// Queue a second pass with a *different* work callback (workB). This simulates
+		// executeFinalReview queuing a finalize-mode work closure while a regular pass
+		// is still in flight. The drained pass MUST run workB, not workA.
+		processor.start(makeDelta(['r2']), async () => {
+			ranWork.push('B');
+			return { outcome: 'success' };
+		});
+
+		await processor.waitForCompletion();
+		expect(ranWork).toEqual(['A', 'B']);
 	});
 });

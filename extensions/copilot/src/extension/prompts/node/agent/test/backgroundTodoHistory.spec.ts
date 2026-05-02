@@ -101,6 +101,34 @@ describe('extractTarget', () => {
 		expect(extractTarget(makeCall(ToolName.SearchSubagent))).toBe('search subagent');
 		expect(extractTarget(makeCall(ToolName.CoreRunSubagent))).toBe('subagent');
 	});
+
+	test('multi-edit with one replacement returns the file path', () => {
+		const call = makeCall(ToolName.MultiReplaceString, {
+			explanation: 'fix typo',
+			replacements: [{ filePath: 'src/a.ts', oldString: 'a', newString: 'b' }],
+		});
+		expect(extractTarget(call)).toBe('src/a.ts');
+	});
+
+	test('multi-edit with few replacements joins file paths', () => {
+		const call = makeCall(ToolName.MultiReplaceString, {
+			replacements: [
+				{ filePath: 'src/a.ts' },
+				{ filePath: 'src/b.ts' },
+				{ filePath: 'src/a.ts' }, // duplicate, should de-dupe
+			],
+		});
+		expect(extractTarget(call)).toBe('src/a.ts, src/b.ts');
+	});
+
+	test('multi-edit with many replacements collapses to a count', () => {
+		const call = makeCall(ToolName.MultiReplaceString, {
+			replacements: [
+				{ filePath: 'a.ts' }, { filePath: 'b.ts' }, { filePath: 'c.ts' }, { filePath: 'd.ts' },
+			],
+		});
+		expect(extractTarget(call)).toBe('4 files');
+	});
 });
 
 // ── collectAllRounds ────────────────────────────────────────────
@@ -209,6 +237,23 @@ describe('compressHistory', () => {
 		const result = compressHistory([round]);
 		expect(result.latestRound!.toolSummaries).toHaveLength(1);
 		expect(result.latestRound!.toolSummaries[0].name).toBe(ToolName.ReplaceString);
+	});
+
+	test('attaches explanation/description as a per-call note in latestRound', () => {
+		const round = makeRound('r1', [
+			makeCall(ToolName.MultiReplaceString, {
+				explanation: 'Add debug logging to silent catches in convert-cursor.js',
+				replacements: [{ filePath: 'src/a.ts' }],
+			}),
+			makeCall(ToolName.CoreRunSubagent, { description: 'Read converter and remaining files' }),
+			makeCall(ToolName.ReadFile, { filePath: 'src/b.ts' }),
+		]);
+		const result = compressHistory([round]);
+		const summaries = result.latestRound!.toolSummaries;
+		expect(summaries).toHaveLength(3);
+		expect(summaries[0].note).toBe('Add debug logging to silent catches in convert-cursor.js');
+		expect(summaries[1].note).toBe('Read converter and remaining files');
+		expect(summaries[2].note).toBeUndefined();
 	});
 
 	test('does not truncate the latest round response (prompt-tsx handles pruning)', () => {
