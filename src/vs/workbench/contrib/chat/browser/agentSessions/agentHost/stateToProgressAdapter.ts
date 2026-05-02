@@ -10,7 +10,7 @@ import { ToolCallStatus, TurnState, ResponsePartKind, getToolFileEdits, getToolO
 import { getToolKind } from '../../../../../../platform/agentHost/common/state/sessionReducers.js';
 import { AGENT_HOST_SCHEME, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
 import { StringOrMarkdown, type FileEdit } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
-import { type IChatModifiedFilesConfirmationData, type IChatProgress, type IChatTerminalToolInvocationData, type IChatToolInputInvocationData, type IChatToolInvocationSerialized, ToolConfirmKind } from '../../../common/chatService/chatService.js';
+import { type IChatModifiedFilesConfirmationData, type IChatProgress, type IChatSearchToolInvocationData, type IChatTerminalToolInvocationData, type IChatToolInputInvocationData, type IChatToolInvocationSerialized, ToolConfirmKind } from '../../../common/chatService/chatService.js';
 import { type IChatSessionHistoryItem } from '../../../common/chatSessionsService.js';
 import { ChatToolInvocation } from '../../../common/model/chatProgressTypes/chatToolInvocation.js';
 import { type IToolConfirmationMessages, type IToolData, ToolDataSource, ToolInvocationPresentation } from '../../../common/tools/languageModelToolsService.js';
@@ -272,7 +272,7 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 		};
 	}
 
-	let toolSpecificData: IChatTerminalToolInvocationData | undefined;
+	let toolSpecificData: IChatTerminalToolInvocationData | IChatSearchToolInvocationData | undefined;
 	if (isTerminal || getToolKind(tc) === 'terminal') {
 		toolSpecificData = {
 			kind: 'terminal',
@@ -283,6 +283,8 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 			terminalCommandOutput: getTerminalOutput(tc),
 			terminalCommandState: { exitCode: isSuccess ? 0 : 1 },
 		};
+	} else if (getToolKind(tc) === 'search') {
+		toolSpecificData = { kind: 'search' };
 	}
 
 	const pastTenseMsg = isSuccess
@@ -630,6 +632,8 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 			description: getSubagentTaskDescription(tc),
 			agentName: subagentContent?.agentName ?? getSubagentAgentName(tc),
 		};
+	} else if (getToolKind(tc) === 'search') {
+		invocation.toolSpecificData = { kind: 'search' };
 	}
 
 	return invocation;
