@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'vitest';
 import { IToolCall, IToolCallRound } from '../../../../prompt/common/intents';
 import { ToolName } from '../../../../tools/common/toolNames';
+import { LanguageModelTextPart, LanguageModelToolResult } from '../../../../../vscodeTypes';
 import {
 	classifyTool,
 	collectAllRounds,
@@ -13,6 +14,7 @@ import {
 	extractTarget,
 	renderGroupedProgress,
 	renderLatestRound,
+	renderSubagentDigests,
 } from '../backgroundTodoProcessor';
 
 function makeCall(name: string, args: Record<string, unknown> = {}): IToolCall {
@@ -210,10 +212,12 @@ describe('compressHistory', () => {
 	});
 
 	test('truncates long assistant responses', () => {
-		const longResponse = 'x'.repeat(1000);
+		const longResponse = 'x'.repeat(3000);
 		const round = makeRound('r1', [makeCall(ToolName.ReadFile, { filePath: 'a.ts' })], longResponse);
 		const result = compressHistory([round]);
-		expect(result.latestRound!.assistantResponse.length).toBeLessThanOrEqual(401); // 400 + '…'
+		// latest round cap is 1500 + ellipsis
+		expect(result.latestRound!.assistantResponse.length).toBeLessThanOrEqual(1501);
+		expect(result.latestRound!.assistantResponse.length).toBeGreaterThan(400);
 	});
 
 	test('extracts assistant context from latest and first round', () => {
@@ -294,5 +298,46 @@ describe('renderLatestRound', () => {
 		};
 		const text = renderLatestRound(detail);
 		expect(text).not.toContain('Agent said');
+	});
+});
+
+// ── subagent digests ────────────────────────────────────────────
+
+describe('subagent digests', () => {
+	test('compressHistory extracts subagent outputs when toolCallResults provided', () => {
+		const subagentCall: IToolCall = { name: ToolName.ExploreSubagent, arguments: '{}', id: 'tc-sa-1' };
+		const editCall = makeCall(ToolName.ReplaceString, { filePath: 'src/a.ts' });
+		const r1 = makeRound('r1', [subagentCall]);
+		const r2 = makeRound('r2', [editCall], 'done');
+		const results: Record<string, LanguageModelToolResult> = {
+			'tc-sa-1': new LanguageModelToolResult([new LanguageModelTextPart('Found logging gaps in modules A, B, C.')]),
+		};
+
+		const result = compressHistory([r1, r2], results);
+
+		expect(result.subagentDigests).toHaveLength(1);
+		expect(result.subagentDigests[0].target).toBe('search subagent');
+		expect(result.subagentDigests[0].output).toContain('Found logging gaps');
+	});
+
+	test('compressHistory returns empty subagentDigests when no toolCallResults', () => {
+		const r1 = makeRound('r1', [{ name: ToolName.ExploreSubagent, arguments: '{}', id: 'tc-sa-1' }]);
+		const result = compressHistory([r1]);
+		expect(result.subagentDigests).toHaveLength(0);
+	});
+
+	test('renderSubagentDigests formats each digest with index and target', () => {
+		const text = renderSubagentDigests([
+			{ target: 'search subagent', output: 'finding one' },
+			{ target: 'subagent', output: 'finding two' },
+		]);
+		expect(text).toContain('[1] search subagent');
+		expect(text).toContain('finding one');
+		expect(text).toContain('[2] subagent');
+		expect(text).toContain('finding two');
+	});
+
+	test('renderSubagentDigests returns empty string for no digests', () => {
+		expect(renderSubagentDigests([])).toBe('');
 	});
 });

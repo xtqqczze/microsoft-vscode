@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type * as vscode from 'vscode';
+import { LanguageModelTextPart } from '../../../../vscodeTypes';
 import { CancellationToken, CancellationTokenSource } from '../../../../util/vs/base/common/cancellation';
 import { ChatFetchResponseType, ChatLocation, ChatResponse } from '../../../../platform/chat/common/commonTypes';
 import { IEndpointProvider } from '../../../../platform/endpoint/common/endpointProvider';
@@ -121,14 +123,22 @@ export class BackgroundTodoProcessor {
 	/** Minimum number of context-only tool calls before triggering a background pass. */
 	static readonly CONTEXT_TOOL_CALL_THRESHOLD = 5;
 
+	/** Minimum number of meaningful tool calls before triggering a background pass. */
+	static readonly MEANINGFUL_TOOL_CALL_THRESHOLD = 3;
+
 	private _state: BackgroundTodoProcessorState = BackgroundTodoProcessorState.Idle;
 	private _promise: Promise<void> | undefined;
 	private _cts: CancellationTokenSource | undefined;
 	private _lastError: unknown;
 	private _pendingDelta: IBackgroundTodoDelta | undefined;
 	private _hasCreatedTodos: boolean = false;
+	private _passCount: number = 0;
 
 	readonly deltaTracker = new BackgroundTodoDeltaTracker();
+
+	constructor(
+		private readonly _logService?: ILogService,
+	) { }
 
 	get state(): BackgroundTodoProcessorState { return this._state; }
 	get lastError(): unknown { return this._lastError; }
@@ -162,6 +172,7 @@ export class BackgroundTodoProcessor {
 		}
 
 		if (this._state === BackgroundTodoProcessorState.InProgress) {
+			this._logService?.debug(`[BackgroundTodo] policy: Wait (processorInProgress) — meaningful=${delta.metadata.meaningfulToolCallCount}, context=${delta.metadata.contextToolCallCount}, rounds=${delta.metadata.newRoundCount}`);
 			return { decision: BackgroundTodoDecision.Wait, reason: 'processorInProgress', delta };
 		}
 
@@ -169,24 +180,23 @@ export class BackgroundTodoProcessor {
 
 		// ── Initial request (no tool calls yet) ────────────────────
 		if (isRequestOnly && isInitialDelta) {
-			// Create an initial plan only if no todo list has been created yet.
-			if (!this._hasCreatedTodos && (input.todoListExists === false || input.todoListExists === undefined)) {
-				return { decision: BackgroundTodoDecision.Run, reason: 'initialPlanNeeded', delta };
-			}
-			return { decision: BackgroundTodoDecision.Skip, reason: 'todoListExistsNoNewActivity' };
+			// No tool activity yet — wait for meaningful work before creating
+			// a plan. Running here would force the fast model to guess a plan
+			// from the user request alone, which is too early.
+			return { decision: BackgroundTodoDecision.Wait, reason: 'initialPlanNeeded', delta };
 		}
 
-		// ── Meaningful work → run immediately ────────────────────
-		if (meaningfulToolCallCount >= 1) {
+		// ── Meaningful work → run after threshold ────────────────────
+		if (meaningfulToolCallCount >= BackgroundTodoProcessor.MEANINGFUL_TOOL_CALL_THRESHOLD) {
+			this._logService?.debug(`[BackgroundTodo] policy: Run (meaningfulActivity) — meaningful=${meaningfulToolCallCount} >= threshold=${BackgroundTodoProcessor.MEANINGFUL_TOOL_CALL_THRESHOLD}, context=${contextToolCallCount}, rounds=${delta.metadata.newRoundCount}`);
 			return { decision: BackgroundTodoDecision.Run, reason: 'meaningfulActivity', delta };
 		}
 
-		// ── Context-only work → batch by threshold ──────────────
-		if (contextToolCallCount >= BackgroundTodoProcessor.CONTEXT_TOOL_CALL_THRESHOLD) {
-			return { decision: BackgroundTodoDecision.Run, reason: 'contextThresholdReached', delta };
-		}
-
-		// Not enough context activity yet — wait for more.
+		// Context-only activity (read_file, list_dir, search, etc.) is exploration
+		// and never on its own a reason to fire the bg agent — a research-only
+		// request can rack up dozens of read calls without producing any work to
+		// track. Wait until the agent does something mutating.
+		this._logService?.debug(`[BackgroundTodo] policy: Wait (contextOnlyWaiting) — context=${contextToolCallCount}, meaningful=${meaningfulToolCallCount}`);
 		return { decision: BackgroundTodoDecision.Wait, reason: 'contextOnlyWaiting', delta };
 	}
 
@@ -208,6 +218,7 @@ export class BackgroundTodoProcessor {
 	): void {
 		if (this._state === BackgroundTodoProcessorState.InProgress) {
 			// Coalesce: stash the latest delta for when the current pass finishes.
+			this._logService?.debug(`[BackgroundTodo] coalescing delta (pass #${this._passCount} in progress) — newRounds=${delta.metadata.newRoundCount}, meaningful=${delta.metadata.meaningfulToolCallCount}`);
 			this._pendingDelta = delta;
 			return;
 		}
@@ -220,19 +231,25 @@ export class BackgroundTodoProcessor {
 		work: (delta: IBackgroundTodoDelta, token: CancellationToken) => Promise<IBackgroundTodoResult>,
 		parentToken?: CancellationToken,
 	): void {
+		this._passCount++;
+		const passNum = this._passCount;
 		this._state = BackgroundTodoProcessorState.InProgress;
 		this._lastError = undefined;
 		this._cts = new CancellationTokenSource(parentToken);
 		const token = this._cts.token;
 
+		this._logService?.debug(`[BackgroundTodo] starting pass #${passNum} — newRounds=${delta.metadata.newRoundCount}, meaningful=${delta.metadata.meaningfulToolCallCount}, context=${delta.metadata.contextToolCallCount}`);
+
 		this._promise = work(delta, token).then(
 			(result) => {
 				if (this._state !== BackgroundTodoProcessorState.InProgress) {
+					this._logService?.debug(`[BackgroundTodo] pass #${passNum} completed but state was ${this._state} (cancelled?)`);
 					return; // cancelled while in flight
 				}
 				if (result.outcome === 'success') {
 					this._hasCreatedTodos = true;
 				}
+				this._logService?.debug(`[BackgroundTodo] pass #${passNum} completed: outcome=${result.outcome}, durationMs=${result.durationMs ?? '?'}, model=${result.model ?? '?'}, promptTokens=${result.promptTokens ?? '?'}, completionTokens=${result.completionTokens ?? '?'}`);
 				this.deltaTracker.markProcessed(delta);
 				this._state = BackgroundTodoProcessorState.Idle;
 				this._checkPending(work, parentToken);
@@ -243,6 +260,7 @@ export class BackgroundTodoProcessor {
 				}
 				this._lastError = err;
 				this._state = BackgroundTodoProcessorState.Failed;
+				this._logService?.warn(`[BackgroundTodo] pass #${passNum} failed: ${err}`);
 				// Still advance the cursor so we don't retry the exact same delta.
 				this.deltaTracker.markProcessed(delta);
 				this._checkPending(work, parentToken);
@@ -259,6 +277,7 @@ export class BackgroundTodoProcessor {
 	): void {
 		const pending = this._pendingDelta;
 		if (pending) {
+			this._logService?.debug(`[BackgroundTodo] draining pending delta — newRounds=${pending.metadata.newRoundCount}, meaningful=${pending.metadata.meaningfulToolCallCount}`);
 			this._pendingDelta = undefined;
 			this._runPass(pending, work, parentToken);
 		}
@@ -306,6 +325,8 @@ export class BackgroundTodoProcessor {
 		const conversationId = context.promptContext.conversation?.sessionId;
 		const associatedRequestId = context.promptContext.conversation?.getLatestTurn()?.id;
 
+		context.logService.debug(`[BackgroundTodo] executing pass — session=${conversationId}, requestId=${associatedRequestId}, newRounds=${delta.metadata.newRoundCount}, meaningful=${delta.metadata.meaningfulToolCallCount}, context=${delta.metadata.contextToolCallCount}`);
+
 		let fastEndpoint: IChatEndpoint;
 		try {
 			fastEndpoint = await context.instantiationService.invokeFunction(async (accessor) => {
@@ -328,7 +349,8 @@ export class BackgroundTodoProcessor {
 
 		// Compress conversation history into structured groups
 		const allRounds = collectAllRounds(delta.history, delta.newRounds);
-		const compressedHistory = compressHistory(allRounds);
+		const compressedHistory = compressHistory(allRounds, context.promptContext.toolCallResults);
+		context.logService.debug(`[BackgroundTodo] compressed history — groups=${compressedHistory.groupedProgress.length}, latestRoundTools=${compressedHistory.latestRound?.toolSummaries.length ?? 0}, assistantContextSnippets=${compressedHistory.assistantContext.length}, subagentDigests=${compressedHistory.subagentDigests.length}, hasTodos=${todoContext !== undefined}`);
 
 		// Render the prompt
 		const { messages } = await renderPromptElement(
@@ -527,6 +549,7 @@ const EXCLUDED_TOOLS: ReadonlySet<string> = new Set([
 	ToolName.CoreConfirmationToolWithOptions,
 	ToolName.CoreTerminalConfirmationTool,
 	ToolName.ResolveMemoryFileUri,
+	ToolName.Memory,
 	ToolName.Skill,
 	ToolName.SessionStoreSql,
 	ToolName.EditFilesPlaceholder,
@@ -632,6 +655,19 @@ export interface ILatestRoundDetail {
 }
 
 /**
+ * A short digest of a single subagent invocation: the target description plus
+ * the textual output the subagent returned. Used so the background todo agent
+ * can see *what was discovered* by exploration subagents, not just that an
+ * exploration happened.
+ */
+export interface ISubagentDigest {
+	/** Short label for the subagent call (tool name + extracted description). */
+	readonly target: string;
+	/** Concatenated text output from the subagent, truncated. */
+	readonly output: string;
+}
+
+/**
  * Compressed representation of conversation history for the background
  * todo prompt. Produced by {@link compressHistory}.
  */
@@ -642,12 +678,26 @@ export interface IBackgroundTodoHistory {
 	readonly latestRound: ILatestRoundDetail | undefined;
 	/** 1–2 recent assistant response snippets for reasoning context. */
 	readonly assistantContext: readonly string[];
+	/** Digests of subagent outputs (search/explore/execution subagents). */
+	readonly subagentDigests: readonly ISubagentDigest[];
 }
 
 // ── Compression logic ───────────────────────────────────────────
 
-/** Maximum length for assistant response snippets. */
+/** Maximum length for older assistant response snippets. */
 const MAX_RESPONSE_LENGTH = 400;
+
+/** Maximum length for the latest round's assistant response (kept higher because
+ *  it is the most likely place to find a freshly-stated plan). */
+const MAX_LATEST_RESPONSE_LENGTH = 1500;
+
+/** Tools whose output should be surfaced as a subagent digest. */
+const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
+	ToolName.SearchSubagent,
+	ToolName.ExploreSubagent,
+	ToolName.ExecutionSubagent,
+	ToolName.CoreRunSubagent,
+]);
 
 /**
  * Collect all tool-call rounds from history turns and current-turn rounds
@@ -668,12 +718,17 @@ export function collectAllRounds(history: readonly Turn[], currentRounds: readon
  * Compress raw tool-call rounds into a structured history for the
  * background todo prompt. All rounds except the last are collapsed
  * into groups; the last round is kept at full fidelity.
+ *
+ * If `toolCallResults` is provided, subagent outputs are extracted into
+ * {@link IBackgroundTodoHistory.subagentDigests} so the background agent
+ * can see what exploration subagents actually discovered.
  */
 export function compressHistory(
 	allRounds: readonly IToolCallRound[],
+	toolCallResults?: Record<string, vscode.LanguageModelToolResult>,
 ): IBackgroundTodoHistory {
 	if (allRounds.length === 0) {
-		return { groupedProgress: [], latestRound: undefined, assistantContext: [] };
+		return { groupedProgress: [], latestRound: undefined, assistantContext: [], subagentDigests: [] };
 	}
 
 	const latestRoundRaw = allRounds[allRounds.length - 1];
@@ -726,20 +781,26 @@ export function compressHistory(
 
 	const latestRound: ILatestRoundDetail = {
 		toolSummaries,
-		assistantResponse: truncateResponse(latestRoundRaw.response),
+		assistantResponse: truncateResponse(latestRoundRaw.response, MAX_LATEST_RESPONSE_LENGTH),
 	};
 
 	// ── Assistant context ────────────────────────────────────
 	const assistantContext = extractAssistantContext(allRounds);
 
-	return { groupedProgress, latestRound, assistantContext };
+	// ── Subagent digests ─────────────────────────────────────
+	const subagentDigests = toolCallResults
+		? extractSubagentDigests(allRounds, toolCallResults)
+		: [];
+
+	return { groupedProgress, latestRound, assistantContext, subagentDigests };
 }
 
 /**
- * Extract 1–2 recent non-trivial assistant response snippets.
+ * Extract 1–3 recent non-trivial assistant response snippets.
  * - Always includes the latest round's response (if non-empty).
- * - If there are older rounds, includes the earliest new-delta round's
- *   response to show what the agent decided after the last todo update.
+ * - Includes the first round's response (often the original plan statement).
+ * - Includes the longest middle round's response when it is substantially
+ *   larger than the others (likely a freshly-stated multi-step plan).
  */
 function extractAssistantContext(allRounds: readonly IToolCallRound[]): string[] {
 	const result: string[] = [];
@@ -750,25 +811,82 @@ function extractAssistantContext(allRounds: readonly IToolCallRound[]): string[]
 	// Latest round response
 	const latestResponse = allRounds[allRounds.length - 1].response.trim();
 	if (latestResponse.length > 0) {
-		result.push(truncateResponse(latestResponse));
+		result.push(truncateResponse(latestResponse, MAX_RESPONSE_LENGTH));
 	}
 
 	// First round response (if different from latest and non-empty)
 	if (allRounds.length > 1) {
 		const firstResponse = allRounds[0].response.trim();
 		if (firstResponse.length > 0) {
-			result.push(truncateResponse(firstResponse));
+			result.push(truncateResponse(firstResponse, MAX_RESPONSE_LENGTH));
+		}
+	}
+
+	// Longest middle round response — captures planning messages stated mid-trajectory.
+	if (allRounds.length > 2) {
+		let bestIdx = -1;
+		let bestLen = 200; // require at least ~200 chars to count as a planning signal
+		for (let i = 1; i < allRounds.length - 1; i++) {
+			const len = allRounds[i].response.trim().length;
+			if (len > bestLen) {
+				bestLen = len;
+				bestIdx = i;
+			}
+		}
+		if (bestIdx !== -1) {
+			result.push(truncateResponse(allRounds[bestIdx].response.trim(), MAX_RESPONSE_LENGTH));
 		}
 	}
 
 	return result;
 }
 
-function truncateResponse(text: string): string {
-	if (text.length <= MAX_RESPONSE_LENGTH) {
+function truncateResponse(text: string, maxLen: number = MAX_RESPONSE_LENGTH): string {
+	if (text.length <= maxLen) {
 		return text;
 	}
-	return text.slice(0, MAX_RESPONSE_LENGTH) + '…';
+	return text.slice(0, maxLen) + '…';
+}
+
+/**
+ * Extract textual outputs from subagent tool calls in chronological order.
+ * Each digest is individually truncated; the prompt-tsx renderer is responsible
+ * for pruning lower-priority blocks if the overall prompt exceeds the budget.
+ */
+function extractSubagentDigests(
+	allRounds: readonly IToolCallRound[],
+	toolCallResults: Record<string, vscode.LanguageModelToolResult>,
+): ISubagentDigest[] {
+	const digests: ISubagentDigest[] = [];
+
+	for (const round of allRounds) {
+		for (const call of round.toolCalls) {
+			if (!SUBAGENT_TOOL_NAMES.has(call.name)) {
+				continue;
+			}
+			const result = toolCallResults[call.id];
+			if (!result) {
+				continue;
+			}
+			const output = stringifyToolResult(result).trim();
+			if (output.length === 0) {
+				continue;
+			}
+			digests.push({ target: extractTarget(call), output });
+		}
+	}
+
+	return digests;
+}
+
+function stringifyToolResult(result: vscode.LanguageModelToolResult): string {
+	const parts: string[] = [];
+	for (const part of result.content) {
+		if (part instanceof LanguageModelTextPart) {
+			parts.push(part.value);
+		}
+	}
+	return parts.join('\n');
 }
 
 // ── Rendering helpers ───────────────────────────────────────────
@@ -808,4 +926,15 @@ export function renderLatestRound(detail: ILatestRoundDetail): string {
 		parts.push(`\nAgent said: ${detail.assistantResponse}`);
 	}
 	return parts.join('\n');
+}
+
+/**
+ * Render subagent digests into a compact string for the prompt.
+ * Each digest shows the subagent target and its truncated text output.
+ */
+export function renderSubagentDigests(digests: readonly ISubagentDigest[]): string {
+	if (digests.length === 0) {
+		return '';
+	}
+	return digests.map((d, i) => `[${i + 1}] ${d.target}\n${d.output}`).join('\n\n');
 }

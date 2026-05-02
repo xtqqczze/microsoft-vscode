@@ -101,25 +101,25 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 
 	// ── Initial request ─────────────────────────────────────────
 
-	test('initial request-only delta runs to create plan when no todos exist', () => {
+	test('initial request-only delta waits for tool activity before creating plan', () => {
 		const processor = new BackgroundTodoProcessor();
 		const result = processor.shouldRun(makeInput({
 			promptContext: makePromptContext({ query: 'build an app' }),
 		}));
-		expect(result.decision).toBe(BackgroundTodoDecision.Run);
+		expect(result.decision).toBe(BackgroundTodoDecision.Wait);
 		expect(result.reason).toBe('initialPlanNeeded');
 		expect(result.delta!.metadata.isInitialDelta).toBe(true);
 		expect(result.delta!.metadata.isRequestOnly).toBe(true);
 	});
 
-	test('initial request-only delta skips when todoListExists is true', () => {
+	test('initial request-only delta waits even when todoListExists is true', () => {
 		const processor = new BackgroundTodoProcessor();
 		const result = processor.shouldRun(makeInput({
 			promptContext: makePromptContext({ query: 'build an app' }),
 			todoListExists: true,
 		}));
-		expect(result.decision).toBe(BackgroundTodoDecision.Skip);
-		expect(result.reason).toBe('todoListExistsNoNewActivity');
+		expect(result.decision).toBe(BackgroundTodoDecision.Wait);
+		expect(result.reason).toBe('initialPlanNeeded');
 	});
 
 	test('skips when processor has already created todos and no new activity', async () => {
@@ -143,10 +143,10 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 
 	// ── Meaningful activity ─────────────────────────────────────
 
-	test('runs immediately after one meaningful tool call', () => {
+	test('runs once meaningful tool calls reach threshold', () => {
 		const processor = new BackgroundTodoProcessor();
 		const result = processor.shouldRun(makeInput({
-			promptContext: makePromptContext({ toolCallRounds: [makeMeaningfulRound('r1')] }),
+			promptContext: makePromptContext({ toolCallRounds: [makeMeaningfulRound('r1'), makeMeaningfulRound('r2'), makeMeaningfulRound('r3')] }),
 		}));
 		expect(result.decision).toBe(BackgroundTodoDecision.Run);
 		expect(result.reason).toBe('meaningfulActivity');
@@ -159,6 +159,8 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 			toolCalls: [
 				{ name: ToolName.ReadFile, arguments: '{}', id: 'tc-1' },
 				{ name: ToolName.ReplaceString, arguments: '{}', id: 'tc-2' },
+				{ name: ToolName.ReplaceString, arguments: '{}', id: 'tc-3' },
+				{ name: ToolName.ReplaceString, arguments: '{}', id: 'tc-4' },
 			],
 		};
 		const result = processor.shouldRun(makeInput({
@@ -180,14 +182,14 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 		expect(result.reason).toBe('contextOnlyWaiting');
 	});
 
-	test('runs when context-only tools reach threshold', () => {
+	test('waits when only context tools, regardless of count', () => {
 		const processor = new BackgroundTodoProcessor();
-		const rounds = Array.from({ length: 5 }, (_, i) => makeRound(`r${i}`));
+		const rounds = Array.from({ length: 10 }, (_, i) => makeRound(`r${i}`));
 		const result = processor.shouldRun(makeInput({
 			promptContext: makePromptContext({ toolCallRounds: rounds }),
 		}));
-		expect(result.decision).toBe(BackgroundTodoDecision.Run);
-		expect(result.reason).toBe('contextThresholdReached');
+		expect(result.decision).toBe(BackgroundTodoDecision.Wait);
+		expect(result.reason).toBe('contextOnlyWaiting');
 	});
 
 	test('waits when context-only tools are just below threshold', () => {
@@ -222,12 +224,14 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 
 	test('shouldRun does not advance the delta cursor', () => {
 		const processor = new BackgroundTodoProcessor();
-		const input = makeInput();
+		const input = makeInput({
+			promptContext: makePromptContext({ toolCallRounds: [makeMeaningfulRound('r1'), makeMeaningfulRound('r2'), makeMeaningfulRound('r3')] }),
+		});
 		const result1 = processor.shouldRun(input);
 		const result2 = processor.shouldRun(input);
 		expect(result1.decision).toBe(BackgroundTodoDecision.Run);
 		expect(result2.decision).toBe(BackgroundTodoDecision.Run);
-		expect(result2.delta!.newRounds).toHaveLength(1);
+		expect(result2.delta!.newRounds).toHaveLength(3);
 	});
 
 	// ── hasCreatedTodos tracking ────────────────────────────────
