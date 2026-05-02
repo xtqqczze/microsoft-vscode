@@ -281,7 +281,15 @@ export class AgentIntent extends EditCodeIntent {
 			return this.handleSummarizeCommand(conversation, request, stream, token);
 		}
 
-		return super.handleRequest(conversation, request, stream, token, documentContext, agentName, location, chatTelemetry, yieldRequested);
+		try {
+			return await super.handleRequest(conversation, request, stream, token, documentContext, agentName, location, chatTelemetry, yieldRequested);
+		} finally {
+			// Fire one final bg todo review pass once the agent loop has ended for
+			// this turn. The per-round passes never see the very last round, so any
+			// task that just completed otherwise stays stuck as 'in-progress'.
+			const todoProcessor = this._backgroundTodoProcessors.get(conversation.sessionId);
+			todoProcessor?.executeFinalReview(token);
+		}
 	}
 
 	private async handleSummarizeCommand(
