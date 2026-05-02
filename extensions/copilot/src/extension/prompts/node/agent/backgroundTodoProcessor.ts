@@ -684,12 +684,6 @@ export interface IBackgroundTodoHistory {
 
 // ── Compression logic ───────────────────────────────────────────
 
-/** Maximum length for older assistant response snippets. */
-const MAX_RESPONSE_LENGTH = 400;
-
-/** Maximum length for the latest round's assistant response (kept higher because
- *  it is the most likely place to find a freshly-stated plan). */
-const MAX_LATEST_RESPONSE_LENGTH = 1500;
 
 /** Tools whose output should be surfaced as a subagent digest. */
 const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
@@ -781,7 +775,7 @@ export function compressHistory(
 
 	const latestRound: ILatestRoundDetail = {
 		toolSummaries,
-		assistantResponse: truncateResponse(latestRoundRaw.response, MAX_LATEST_RESPONSE_LENGTH),
+		assistantResponse: latestRoundRaw.response,
 	};
 
 	// ── Assistant context ────────────────────────────────────
@@ -796,56 +790,20 @@ export function compressHistory(
 }
 
 /**
- * Extract 1–3 recent non-trivial assistant response snippets.
- * - Always includes the latest round's response (if non-empty).
- * - Includes the first round's response (often the original plan statement).
- * - Includes the longest middle round's response when it is substantially
- *   larger than the others (likely a freshly-stated multi-step plan).
+ * Return all non-empty assistant response snippets in chronological order.
+ * Truncation is deliberately NOT applied here; the prompt renders each snippet
+ * as its own message with a descending priority so prompt-tsx prunes the
+ * oldest snippets first when the budget is tight.
  */
 function extractAssistantContext(allRounds: readonly IToolCallRound[]): string[] {
 	const result: string[] = [];
-	if (allRounds.length === 0) {
-		return result;
-	}
-
-	// Latest round response
-	const latestResponse = allRounds[allRounds.length - 1].response.trim();
-	if (latestResponse.length > 0) {
-		result.push(truncateResponse(latestResponse, MAX_RESPONSE_LENGTH));
-	}
-
-	// First round response (if different from latest and non-empty)
-	if (allRounds.length > 1) {
-		const firstResponse = allRounds[0].response.trim();
-		if (firstResponse.length > 0) {
-			result.push(truncateResponse(firstResponse, MAX_RESPONSE_LENGTH));
+	for (const round of allRounds) {
+		const response = round.response.trim();
+		if (response.length > 0) {
+			result.push(response);
 		}
 	}
-
-	// Longest middle round response — captures planning messages stated mid-trajectory.
-	if (allRounds.length > 2) {
-		let bestIdx = -1;
-		let bestLen = 200; // require at least ~200 chars to count as a planning signal
-		for (let i = 1; i < allRounds.length - 1; i++) {
-			const len = allRounds[i].response.trim().length;
-			if (len > bestLen) {
-				bestLen = len;
-				bestIdx = i;
-			}
-		}
-		if (bestIdx !== -1) {
-			result.push(truncateResponse(allRounds[bestIdx].response.trim(), MAX_RESPONSE_LENGTH));
-		}
-	}
-
 	return result;
-}
-
-function truncateResponse(text: string, maxLen: number = MAX_RESPONSE_LENGTH): string {
-	if (text.length <= maxLen) {
-		return text;
-	}
-	return text.slice(0, maxLen) + '…';
 }
 
 /**

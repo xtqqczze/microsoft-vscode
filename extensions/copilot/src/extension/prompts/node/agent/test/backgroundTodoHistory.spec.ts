@@ -211,23 +211,19 @@ describe('compressHistory', () => {
 		expect(result.latestRound!.toolSummaries[0].name).toBe(ToolName.ReplaceString);
 	});
 
-	test('truncates long assistant responses', () => {
+	test('does not truncate the latest round response (prompt-tsx handles pruning)', () => {
 		const longResponse = 'x'.repeat(3000);
 		const round = makeRound('r1', [makeCall(ToolName.ReadFile, { filePath: 'a.ts' })], longResponse);
 		const result = compressHistory([round]);
-		// latest round cap is 1500 + ellipsis
-		expect(result.latestRound!.assistantResponse.length).toBeLessThanOrEqual(1501);
-		expect(result.latestRound!.assistantResponse.length).toBeGreaterThan(400);
+		expect(result.latestRound!.assistantResponse.length).toBe(3000);
 	});
 
-	test('extracts assistant context from latest and first round', () => {
+	test('returns all assistant responses in chronological order', () => {
 		const r1 = makeRound('r1', [makeCall(ToolName.ReadFile, { filePath: 'a.ts' })], 'First response');
 		const r2 = makeRound('r2', [makeCall(ToolName.ReadFile, { filePath: 'b.ts' })], 'Middle response');
 		const r3 = makeRound('r3', [makeCall(ToolName.ReadFile, { filePath: 'c.ts' })], 'Latest response');
 		const result = compressHistory([r1, r2, r3]);
-		expect(result.assistantContext).toHaveLength(2);
-		expect(result.assistantContext[0]).toBe('Latest response');
-		expect(result.assistantContext[1]).toBe('First response');
+		expect(result.assistantContext).toEqual(['First response', 'Middle response', 'Latest response']);
 	});
 
 	test('skips empty assistant responses in context', () => {

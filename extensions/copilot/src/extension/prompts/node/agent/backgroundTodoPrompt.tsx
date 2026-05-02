@@ -27,10 +27,13 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 
 		const groupedText = renderGroupedProgress(history.groupedProgress);
 		const latestText = history.latestRound ? renderLatestRound(history.latestRound) : undefined;
-		const contextText = history.assistantContext.length > 0
-			? history.assistantContext.map((s, i) => `[${i + 1}] ${s}`).join('\n\n')
-			: undefined;
 		const subagentText = renderSubagentDigests(history.subagentDigests);
+
+		// Assistant responses, oldest first. Rendered as individual messages with
+		// priority decreasing with age so prompt-tsx prunes the oldest first when
+		// the budget is tight, instead of dropping the whole block.
+		const assistantSnippets = history.assistantContext;
+		const assistantCount = assistantSnippets.length;
 
 		return (
 			<>
@@ -99,12 +102,18 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 					</UserMessage>
 				)}
 
-				{contextText && (
-					<UserMessage priority={820}>
-						Agent reasoning:{'\n'}
-						{contextText}
-					</UserMessage>
-				)}
+				{assistantSnippets.map((snippet, i) => {
+					// Newest = highest priority (closer to 850), oldest = lowest (down toward 700).
+					// 30 = step between snippets; capped so we don't go below 700.
+					const age = assistantCount - 1 - i;
+					const priority = Math.max(700, 850 - age * 30);
+					return (
+						<UserMessage priority={priority}>
+							Agent reasoning [{i + 1}/{assistantCount}]:{'\n'}
+							{snippet}
+						</UserMessage>
+					);
+				})}
 
 				{subagentText.length > 0 && (
 					<UserMessage priority={780}>
