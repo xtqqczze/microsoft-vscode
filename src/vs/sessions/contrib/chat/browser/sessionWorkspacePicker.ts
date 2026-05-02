@@ -33,7 +33,7 @@ import { ISessionWorkspace, ISessionWorkspaceBrowseAction, SESSION_WORKSPACE_GRO
 import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
 import { IAgentHostSessionsProvider, isAgentHostProvider } from '../../../common/agentHostSessionsProvider.js';
 import { SessionWorkspacePickerGroupContext } from '../../../common/contextkeys.js';
-import { getStatusHover, getStatusLabel, showRemoteHostOptions } from '../../remoteAgentHost/browser/remoteHostOptions.js';
+import { getStatusHover, getStatusLabel, removeRemoteHost, showRemoteHostOptions } from '../../remoteAgentHost/browser/remoteHostOptions.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { COPILOT_PROVIDER_ID } from '../../copilotChatSessions/browser/copilotChatSessionsProvider.js';
 import { IWorkspacesService, isRecentFolder } from '../../../../platform/workspaces/common/workspaces.js';
@@ -89,6 +89,8 @@ export interface IWorkspacePickerItem {
 	/** Inline action to run when this item is selected. */
 	readonly run?: () => void;
 }
+
+type IWorkspacePickerAction = IAction & { icon?: ThemeIcon; hoverContent?: string; onRemove?: () => void };
 
 /**
  * A unified workspace picker that shows workspaces from all registered session
@@ -681,13 +683,12 @@ export class WorkspacePicker extends Disposable {
 						this._showRemoteHostOptionsDelayed(provider);
 					},
 				});
-				const extended = action as IAction & { icon?: ThemeIcon; hoverContent?: string; onRemove?: () => void };
+				const extended = action as IWorkspacePickerAction;
 				extended.icon = isTunnel ? Codicon.cloud : Codicon.remote;
 				extended.hoverContent = getStatusHover(status, provider.remoteAddress);
-				if (!isTunnel && provider.remoteAddress) {
-					const address = provider.remoteAddress;
+				if (provider.remoteAddress) {
 					extended.onRemove = async () => {
-						await this.remoteAgentHostService.removeRemoteAgentHost(address);
+						await removeRemoteHost(provider, this.remoteAgentHostService);
 					};
 				}
 				manageActions.push(action);
@@ -709,12 +710,14 @@ export class WorkspacePicker extends Disposable {
 				items.push({ kind: ActionListItemKind.Separator, label: '' });
 			}
 			for (const action of manageActions) {
-				const icon = (action as IAction & { icon?: ThemeIcon }).icon;
+				const extended = action as IWorkspacePickerAction;
 				items.push({
 					kind: ActionListItemKind.Action,
 					label: action.label,
-					group: { title: '', icon: icon ?? Codicon.settingsGear },
+					description: extended.onRemove ? action.tooltip || undefined : undefined,
+					group: { title: '', icon: extended.icon ?? Codicon.settingsGear },
 					item: { run: () => action.run(), commandId: action.id },
+					onRemove: extended.onRemove,
 				});
 			}
 		}
