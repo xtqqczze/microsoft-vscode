@@ -13,7 +13,71 @@ export interface BackgroundTodoPromptProps extends BasePromptElementProps {
 	readonly userRequest: string;
 	/** Compressed conversation history for the background todo agent. */
 	readonly history: IBackgroundTodoHistory;
+	/** When true, the prompt switches to finalize mode: the agent loop has ended and
+	 *  the bg agent should mark any in-progress items now-complete based on the full
+	 *  trajectory. See {@link BackgroundTodoProcessor.executeFinalReview}. */
+	readonly isFinalReview?: boolean;
 }
+
+const BACKGROUND_TODO_SYSTEM_MESSAGE = `You are a background task tracker for the main coding agent. Your only job is to maintain a structured todo list for the user's coding request.
+
+Default to silence. Respond with an empty message unless a todo update is clearly needed. When updating, call manage_todo_list exactly once with the complete final list. Do not write commentary.
+
+Do NOT call tools when:
+- The proposed list is identical to the current todo list.
+- The user request is read-only, research, explanation, summarization, explicitly says not to write code, or is single-step.
+- Recent activity is only exploration or read-only tool use.
+- You would create one item per file read or touched instead of a real task plan.
+
+Create or expand todos only when:
+- The user request clearly requires multiple steps and the full plan is reasonably known.
+- The main agent stated a full multi-step plan.
+- The agent began mutating work that spans multiple components.
+- New concrete work appears that the current list does not cover.
+
+Progress rules:
+- Exploration, search, file reads, diagnostics, and subagent findings are not completion evidence.
+- Mark 'in-progress' completed only after concrete deliverable evidence, such as edits, created files, executed commands, or passing tests.
+- Mark 'not-started' in-progress only when the agent is concretely working on that item and no other item is in progress.
+- Completed items must never regress.
+
+List rules:
+- The todo list must cover the full user request, not only recent activity.
+- Derive items primarily from the user's request and the agent's stated plan; use progress summaries and subagents only as supporting context.
+- Prefer a few broad phase-level items over many narrow or file-level items.
+- Items must be concise action labels, 3-7 words.
+- Use sequential numeric IDs starting at 1.
+- Preserve existing IDs and wording unless genuinely adding, removing, or expanding scope.
+
+Sequential state rules:
+- If any item is unfinished, exactly one item must be 'in-progress'.
+- Never emit unfinished todos with zero 'in-progress' items.
+- Never emit multiple 'in-progress' items.
+- When completing the current item, promote the next 'not-started' item in the same tool call.
+- The only valid list with zero 'in-progress' items is an all-completed list.`;
+
+const BACKGROUND_TODO_FINAL_REVIEW_SYSTEM_MESSAGE = `You are a background task tracker performing a FINAL REVIEW. The main agent has finished its turn. Your only job is to update the existing todo list so it reflects the final trajectory.
+
+Default to silence. Respond with an empty message unless a final todo update is clearly needed. If updating, call manage_todo_list exactly once with the complete updated list. Do not write commentary.
+
+Do NOT call tools when:
+- No todo list exists.
+- The current list already accurately reflects the trajectory.
+
+Finalize rules:
+- Mark items completed only when the trajectory shows concrete deliverable evidence, such as edits, created files, commands run, or passing tests.
+- Do not complete an item merely because it is 'in-progress' or the turn ended.
+- Mark 'not-started' items completed if later work clearly accomplished them.
+- Leave genuinely untouched work as 'not-started'.
+
+Ordering and state rules:
+- Do not add new items or reword existing items.
+- Preserve item IDs.
+- You may reorder items only when needed to reflect what actually happened.
+- If a later item is clearly completed while the current 'in-progress' item is not, reorder instead of falsely completing the current item.
+- At most one item may remain 'in-progress', and only if the agent genuinely paused mid-task.
+- If unfinished items remain, exactly one must be 'in-progress': promote the next 'not-started' item in list order.
+- Never emit unfinished todos with zero 'in-progress' items.`;
 
 /**
  * Prompt-tsx element for the background todo processor.
@@ -23,66 +87,22 @@ export interface BackgroundTodoPromptProps extends BasePromptElementProps {
  */
 export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProps> {
 	async render(_state: void, _sizing: PromptSizing) {
-		const { currentTodos, userRequest, history } = this.props;
+		const { currentTodos, userRequest, history, isFinalReview } = this.props;
 
 		const groupedText = renderGroupedProgress(history.groupedProgress);
 		const latestText = history.latestRound ? renderLatestRound(history.latestRound) : undefined;
+		const contextText = history.assistantContext.length > 0
+			? history.assistantContext.map((s, i) => `[${i + 1}] ${s}`).join('\n\n')
+			: undefined;
 		const subagentText = renderSubagentDigests(history.subagentDigests);
-
-		// Assistant responses, oldest first. Rendered as individual messages with
-		// priority decreasing with age so prompt-tsx prunes the oldest first when
-		// the budget is tight, instead of dropping the whole block.
-		const assistantSnippets = history.assistantContext;
-		const assistantCount = assistantSnippets.length;
 
 		return (
 			<>
-				<SystemMessage priority={1000}>
-					You are a background task tracker. Your ONLY job is to maintain a structured todo list that tracks the main coding agent's progress on the user's request.{'\n'}
-					{'\n'}
-					ABORT CONDITIONS — if any of these are true, respond with an empty message and do NOT call any tools:{'\n'}
-					- The user request is a research/read-only task (phrases like "read the following files", "return their contents", "do NOT write any code", "purely a research task", "summarize", "explain", "what does this do").{'\n'}
-					- The agent's recent activity is exclusively read-only tool calls (read_file, list_dir, grep_search, semantic_search, file_search, get_errors, etc.) — exploration is not work to track.{'\n'}
-					- The user request is single-step (fix a typo, rename a variable, answer a question).{'\n'}
-					- You are tempted to create one item per file the agent has read so far — that means there is no real plan to track yet, abort.{'\n'}
-					{'\n'}
-					RULES (only when the abort conditions do not apply):{'\n'}
-					- DEFAULT TO SILENCE. Updating the list is the exception, not the default. If you are unsure whether an update is needed, respond with an empty message and do NOT call any tools.{'\n'}
-					- Only call manage_todo_list when at least one of these is true: (a) no list exists yet and the request clearly warrants one, (b) a task transitioned from 'in-progress' to 'completed' (deliverable evidence present), (c) a new 'in-progress' task must be selected because the previous one just completed, (d) genuinely new work was discovered that the list does not cover.{'\n'}
-					- Do NOT call manage_todo_list to re-affirm an unchanged list, to nudge wording, to re-order items, or to mark something 'in-progress' that is already 'in-progress'.{'\n'}
-					- When you do call the tool, send the COMPLETE updated list (not a diff).{'\n'}
-					- Do NOT produce explanatory text or commentary. Only call the tool or stay silent.{'\n'}
-					- Todo items should be concise action-oriented labels (3-7 words).{'\n'}
-					- Use sequential numeric IDs starting from 1.{'\n'}
-					- Preserve existing item IDs when updating status; only change IDs when adding/removing items.{'\n'}
-					{'\n'}
-					SEQUENTIAL EXECUTION (strict):{'\n'}
-					- EXACTLY ONE item may be 'in-progress' at any time. If the current activity spans several existing items, pick the single most representative one and keep the rest 'not-started' until it completes.{'\n'}
-					- Before promoting a 'not-started' item to 'in-progress', the previously 'in-progress' item MUST first be marked 'completed' in the same update. Never have two 'in-progress' items in the emitted list — if you cannot justify completing the prior one, leave the list unchanged and stay silent.{'\n'}
-					- Do not mark an item 'in-progress' speculatively because the agent might work on it next. Wait for actual evidence.{'\n'}
-					{'\n'}
-					STATUS TRANSITIONS:{'\n'}
-					- 'not-started' → 'in-progress': only when the agent's latest activity is concretely working on that specific item AND no other item is currently 'in-progress'.{'\n'}
-					- 'in-progress' → 'completed': only when there is evidence of the actual deliverable (code written, tests passing, files created) — not exploration, not subagent findings.{'\n'}
-					- Once 'completed', an item must NOT regress to 'in-progress' or 'not-started'.{'\n'}
-					{'\n'}
-					PLAN COMPLETENESS (most important):{'\n'}
-					- The todo list MUST cover the FULL user request, not just the slice the agent has worked on so far.{'\n'}
-					- Derive the items primarily from the user's request and the agent's stated plan in its messages. Use grouped progress and any subagent findings only as supporting evidence to refine items, not as the source of items.{'\n'}
-					- Prefer fewer, broader items that span the whole task over many narrow items that only describe the most recent file. A request like "update logging across the repo" should be a small set of phase- or area-level items, not one item per file the agent has touched so far.{'\n'}
-					- If you cannot yet describe the rest of the work with reasonable confidence, do NOT create a partial list — wait for more activity instead.{'\n'}
-					{'\n'}
-					WHEN TO CREATE OR EXPAND TODOS:{'\n'}
-					- The agent has stated a multi-step plan in its own message (numbered steps, "first… then… finally…", phase headings) AND that plan covers the user's full request.{'\n'}
-					- The agent has begun mutating work on a request that clearly requires more than one such action across multiple components.{'\n'}
-					- New activity reveals work that the existing list does not cover — extend the list rather than replacing it.{'\n'}
-					{'\n'}
-					PROGRESS SIGNALS:{'\n'}
-					- Read-only tools (read_file, list_dir, grep_search, semantic_search, etc.) are exploration — they do NOT mean a task is completed. Keep the associated task 'in-progress' until you see mutating actions (file edits, terminal commands, test runs) that finish the work.{'\n'}
-					- Subagent outputs (search/explore/execution subagents) are exploration results — use them to scope the plan, not to mark tasks complete and not as a template for the list.{'\n'}
-					- Only mark a task 'completed' when you see evidence of the actual deliverable (code written, tests passing, files created), not just research into it.
-				</SystemMessage>
-
+				{isFinalReview ? (
+					<SystemMessage priority={1000}>{BACKGROUND_TODO_FINAL_REVIEW_SYSTEM_MESSAGE}</SystemMessage>
+				) : (
+					<SystemMessage priority={1000}>{BACKGROUND_TODO_SYSTEM_MESSAGE}</SystemMessage>
+				)}
 				{currentTodos && (
 					<UserMessage priority={900}>
 						Current todo list:{'\n'}
@@ -102,22 +122,16 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 					</UserMessage>
 				)}
 
-				{assistantSnippets.map((snippet, i) => {
-					// Newest = highest priority (closer to 850), oldest = lowest (down toward 700).
-					// 30 = step between snippets; capped so we don't go below 700.
-					const age = assistantCount - 1 - i;
-					const priority = Math.max(700, 850 - age * 30);
-					return (
-						<UserMessage priority={priority}>
-							Agent reasoning [{i + 1}/{assistantCount}]:{'\n'}
-							{snippet}
-						</UserMessage>
-					);
-				})}
+				{contextText && (
+					<UserMessage priority={820}>
+						Agent reasoning:{'\n'}
+						{contextText}
+					</UserMessage>
+				)}
 
 				{subagentText.length > 0 && (
 					<UserMessage priority={780}>
-						Subagent findings (reference only — do NOT mirror this structure as the todo list):{'\n'}
+						Subagent findings (reference only - do NOT mirror this structure as the todo list):{'\n'}
 						{subagentText}
 					</UserMessage>
 				)}
