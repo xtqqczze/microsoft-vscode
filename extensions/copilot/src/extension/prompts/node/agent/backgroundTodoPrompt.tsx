@@ -44,16 +44,24 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 					- You are tempted to create one item per file the agent has read so far — that means there is no real plan to track yet, abort.{'\n'}
 					{'\n'}
 					RULES (only when the abort conditions do not apply):{'\n'}
-					- If the todo list needs updating based on the agent's recent activity, call the manage_todo_list tool with the complete updated list.{'\n'}
-					- If no update is needed, respond with an empty message — do NOT call any tools.{'\n'}
+					- DEFAULT TO SILENCE. Updating the list is the exception, not the default. If you are unsure whether an update is needed, respond with an empty message and do NOT call any tools.{'\n'}
+					- Only call manage_todo_list when at least one of these is true: (a) no list exists yet and the request clearly warrants one, (b) a task transitioned from 'in-progress' to 'completed' (deliverable evidence present), (c) a new 'in-progress' task must be selected because the previous one just completed, (d) genuinely new work was discovered that the list does not cover.{'\n'}
+					- Do NOT call manage_todo_list to re-affirm an unchanged list, to nudge wording, to re-order items, or to mark something 'in-progress' that is already 'in-progress'.{'\n'}
+					- When you do call the tool, send the COMPLETE updated list (not a diff).{'\n'}
 					- Do NOT produce explanatory text or commentary. Only call the tool or stay silent.{'\n'}
 					- Todo items should be concise action-oriented labels (3-7 words).{'\n'}
-					- Mark items as 'completed' when the agent's tool calls show the work is done.{'\n'}
-					- Mark items as 'in-progress' when the agent is actively working on them.{'\n'}
-					- Keep items as 'not-started' when they haven't been addressed yet.{'\n'}
-					- At most one item should be 'in-progress' at a time.{'\n'}
 					- Use sequential numeric IDs starting from 1.{'\n'}
 					- Preserve existing item IDs when updating status; only change IDs when adding/removing items.{'\n'}
+					{'\n'}
+					SEQUENTIAL EXECUTION (strict):{'\n'}
+					- EXACTLY ONE item may be 'in-progress' at any time. If the current activity spans several existing items, pick the single most representative one and keep the rest 'not-started' until it completes.{'\n'}
+					- Before promoting a 'not-started' item to 'in-progress', the previously 'in-progress' item MUST first be marked 'completed' in the same update. Never have two 'in-progress' items in the emitted list — if you cannot justify completing the prior one, leave the list unchanged and stay silent.{'\n'}
+					- Do not mark an item 'in-progress' speculatively because the agent might work on it next. Wait for actual evidence.{'\n'}
+					{'\n'}
+					STATUS TRANSITIONS:{'\n'}
+					- 'not-started' → 'in-progress': only when the agent's latest activity is concretely working on that specific item AND no other item is currently 'in-progress'.{'\n'}
+					- 'in-progress' → 'completed': only when there is evidence of the actual deliverable (code written, tests passing, files created) — not exploration, not subagent findings.{'\n'}
+					- Once 'completed', an item must NOT regress to 'in-progress' or 'not-started'.{'\n'}
 					{'\n'}
 					PLAN COMPLETENESS (most important):{'\n'}
 					- The todo list MUST cover the FULL user request, not just the slice the agent has worked on so far.{'\n'}
