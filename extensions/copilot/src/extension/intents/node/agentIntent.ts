@@ -152,7 +152,7 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 		allowTools[ToolName.CoreManageTodoList] = false;
 	}
 
-	if (isBackgroundTodoAgentEnabled(configurationService, experimentationService)) {
+	if (isBackgroundTodoAgentEnabled(configurationService, experimentationService) && !isTodoToolExplicitlyEnabled(request)) {
 		allowTools[ToolName.CoreManageTodoList] = false;
 	}
 
