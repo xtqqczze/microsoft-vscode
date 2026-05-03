@@ -8,6 +8,23 @@ import { IBuildPromptContext, IToolCallRound } from '../../../prompt/common/inte
 import { classifyTool } from './backgroundTodoProcessor';
 
 /**
+ * Extract the session resource as a serialized string from a prompt context.
+ * `request.sessionResource` is a `Uri` at runtime, so we must call `.toString()`
+ * to avoid passing a `Uri` object where a string is expected downstream.
+ */
+export function extractSessionResourceString(promptContext: IBuildPromptContext): string | undefined {
+	const fromRequest = (promptContext.request as { sessionResource?: { toString(): string } } | undefined)?.sessionResource;
+	if (fromRequest) {
+		return typeof fromRequest === 'string' ? fromRequest : fromRequest.toString();
+	}
+	const fromToken = (promptContext.tools?.toolInvocationToken as { sessionResource?: { toString(): string } } | undefined)?.sessionResource;
+	if (fromToken) {
+		return typeof fromToken === 'string' ? fromToken : fromToken.toString();
+	}
+	return undefined;
+}
+
+/**
  * Snapshot of new activity since the last background todo pass.
  */
 export interface IBackgroundTodoDelta {
@@ -112,8 +129,7 @@ export class BackgroundTodoDeltaTracker {
 			userRequest,
 			newRounds,
 			history: promptContext.history,
-			sessionResource: (promptContext.request as { sessionResource?: string } | undefined)?.sessionResource
-				?? (promptContext.tools?.toolInvocationToken as { sessionResource?: string } | undefined)?.sessionResource,
+			sessionResource: extractSessionResourceString(promptContext),
 			metadata: {
 				newRoundCount: newRounds.length,
 				newToolCallCount,

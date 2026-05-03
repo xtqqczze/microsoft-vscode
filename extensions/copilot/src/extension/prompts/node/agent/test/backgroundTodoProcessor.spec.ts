@@ -71,20 +71,20 @@ describe('BackgroundTodoProcessor', () => {
 		})).toBeUndefined();
 	});
 
-	test('delta cursor advances on failure too', async () => {
+	test('delta cursor does NOT advance on failure (retryable)', async () => {
 		const processor = new BackgroundTodoProcessor();
 		processor.start(makeDelta(['r1']), async () => {
 			throw new Error('oops');
 		});
 		await processor.waitForCompletion();
 
-		// r1 should be marked processed even on failure
+		// r1 should NOT be marked processed on failure — a later pass can retry
 		expect(processor.deltaTracker.getDelta({
 			query: 'fix',
 			history: [],
 			chatVariables: { hasVariables: () => false } as any,
 			toolCallRounds: [{ id: 'r1', response: '', toolInputRetry: 0, toolCalls: [] }],
-		})).toBeUndefined();
+		})).toBeDefined();
 	});
 
 	test('coalesces concurrent updates', async () => {

@@ -20,7 +20,7 @@ import { normalizeToolSchema } from '../../../tools/common/toolSchemaNormalizer'
 import { ToolName } from '../../../tools/common/toolNames';
 import { IToolsService } from '../../../tools/common/toolsService';
 import { renderPromptElement } from '../base/promptRenderer';
-import { BackgroundTodoDeltaTracker, IBackgroundTodoDelta } from './backgroundTodoDelta';
+import { BackgroundTodoDeltaTracker, extractSessionResourceString, IBackgroundTodoDelta } from './backgroundTodoDelta';
 import { BackgroundTodoPrompt } from './backgroundTodoPrompt';
 
 /**
@@ -281,8 +281,8 @@ export class BackgroundTodoProcessor {
 				this._lastError = err;
 				this._state = BackgroundTodoProcessorState.Failed;
 				this._logService?.warn(`[BackgroundTodo] pass #${passNum} failed: ${err}`);
-				// Still advance the cursor so we don't retry the exact same delta.
-				this.deltaTracker.markProcessed(delta);
+				// Do NOT advance the cursor — the delta's rounds remain unprocessed
+				// so a subsequent pass can retry with fresh or coalesced activity.
 				this._checkPending(work, parentToken);
 			},
 		);
@@ -310,12 +310,18 @@ export class BackgroundTodoProcessor {
 	}
 
 	/**
-	 * Wait for any in-flight pass to settle (success or failure).
-	 * Returns immediately if idle.
+	 * Wait for any in-flight pass — and any pending coalesced pass that drains
+	 * from it — to settle. Returns immediately if idle.
 	 */
 	async waitForCompletion(): Promise<void> {
-		if (this._promise) {
-			await this._promise;
+		while (this._promise) {
+			const current = this._promise;
+			await current;
+			// If _checkPending started a new pass, _promise has been replaced.
+			// Loop until no new work was queued.
+			if (this._promise === current) {
+				break;
+			}
 		}
 	}
 
@@ -389,8 +395,7 @@ export class BackgroundTodoProcessor {
 			userRequest: ctx.promptContext.query,
 			newRounds: allRounds,
 			history: ctx.promptContext.history,
-			sessionResource: (ctx.promptContext.request as { sessionResource?: string } | undefined)?.sessionResource
-				?? (ctx.promptContext.tools?.toolInvocationToken as { sessionResource?: string } | undefined)?.sessionResource,
+			sessionResource: extractSessionResourceString(ctx.promptContext),
 			metadata: {
 				newRoundCount: allRounds.length,
 				newToolCallCount: meaningful + contextual,
@@ -444,9 +449,11 @@ export class BackgroundTodoProcessor {
 			})
 			: undefined;
 
-		// Compress conversation history into structured groups
-		const allRounds = collectAllRounds(delta.history, delta.newRounds);
-		const compressedHistory = compressHistory(allRounds, context.promptContext.toolCallResults);
+		// Use delta.newRounds directly — they already include unprocessed rounds
+		// from both the current turn and history (collected by peekDelta).
+		// Calling collectAllRounds(delta.history, delta.newRounds) would duplicate
+		// rounds that peekDelta already extracted from history.
+		const compressedHistory = compressHistory(delta.newRounds, context.promptContext.toolCallResults);
 		context.logService.debug(`[BackgroundTodo] compressed history — groups=${compressedHistory.groupedProgress.length}, latestRoundTools=${compressedHistory.latestRound?.toolSummaries.length ?? 0}, assistantContextSnippets=${compressedHistory.assistantContext.length}, subagentDigests=${compressedHistory.subagentDigests.length}, hasTodos=${todoContext !== undefined}`);
 
 		// Render the prompt
@@ -517,7 +524,17 @@ export class BackgroundTodoProcessor {
 		}, token);
 
 		const durationMs = Date.now() - startTime;
-		const usage = response.type === ChatFetchResponseType.Success ? response.usage : undefined;
+
+		// Non-success responses (canceled, rate-limited, filtered, etc.) should
+		// propagate as errors so the delta is NOT marked processed — a later pass
+		// can retry with fresh or coalesced activity.
+		if (response.type !== ChatFetchResponseType.Success) {
+			context.logService.warn(`[BackgroundTodo] copilot-fast returned non-success response: ${response.type}`);
+			BackgroundTodoProcessor._sendTelemetry(context.telemetryService, 'modelError', conversationId, associatedRequestId, durationMs);
+			throw new Error(`Background todo model request failed: ${response.type}`);
+		}
+
+		const usage = response.usage;
 
 		// Process tool calls — only accept manage_todo_list. Pick the LAST matching
 		// call: the model occasionally emits a sequence of manage_todo_list calls
