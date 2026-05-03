@@ -26,23 +26,33 @@ Default to silence. Only call manage_todo_list when the resulting list would dif
 Do NOT call tools when:
 - The proposed list is identical to the current todo list (same items, statuses, and order).
 - The user request is read-only, research, explanation, summarization, explicitly says not to write code, or is single-step.
+- The task is straightforward enough that the agent can complete it in one or two steps without a plan.
 - Recent activity is only exploration or read-only tool use.
 - You would create todos for individual files, utilities, flags, functions, or implementation substeps instead of a high-level task plan.
 
 Create or expand todos only when:
-- The user request clearly requires multiple steps and the full plan is reasonably known.
+- The user request clearly requires three or more distinct steps and the full plan is reasonably known.
 - The main agent stated a full multi-step plan.
 - The agent began mutating work that spans multiple components.
+- The user provides multiple tasks or a numbered list of things to do.
 - New concrete work appears that the current list does not cover.
 - The current list is too granular and can be consolidated into high-level phases without losing progress.
 
 Granularity rules:
+- Never create a single-item todo list. If there is only one step, do not create a list.
 - Prefer 2-4 high-level items; use more than 5 only when the user's request has clearly separate major phases.
 - Each item should describe a user-visible outcome or broad work phase, not an implementation detail.
+- Operational sub-tasks must never appear as todo items. Searching, grepping, reading files, running linters, formatting, type-checking, and gathering context are supporting operations — not work to track.
 - Collapse related file edits, helper utilities, flags, function replacements, and timing/logging tweaks into one broader deliverable.
 - If the agent's plan lists implementation steps, summarize them into phase-level todos instead of copying them.
 - If a current list is too granular, replace it with a shorter high-level list and map existing progress onto the consolidated items.
-- Example: replace "Update index.ts", "Create logger utility", "Add --verbose flag", and "Replace debugLog" with items like "Implement logging support", "Integrate logging controls", and "Validate logging behavior".
+
+Examples:
+- GOOD: User asks "Add user avatar upload to the profile page" → 1. Add file input component, 2. Wire up upload API call, 3. Store and display the avatar, 4. Handle errors and loading state.
+- GOOD: User asks "Add input validation to the signup form, set up rate limiting, and write tests for both" → 1. Add signup form validation, 2. Set up rate limiting on auth endpoints, 3. Write tests for validation, 4. Write tests for rate limiting.
+- BAD single-step list: User asks "Fix the typo in auth.ts" → 1. Fix typo. This is a single edit; no list needed.
+- BAD operational items: 1. Search codebase for relevant files, 2. Run linter after changes, 3. Implement the feature. Only "Implement the feature" is a real todo.
+- BAD too granular: "Update index.ts", "Create logger utility", "Add --verbose flag", "Replace debugLog" → replace with "Implement logging support", "Integrate logging controls", "Validate logging behavior".
 
 Progress rules:
 - Exploration, search, file reads, diagnostics, and subagent findings are not completion evidence.
@@ -110,10 +120,22 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 
 		const groupedText = renderGroupedProgress(history.groupedProgress);
 		const latestText = history.latestRound ? renderLatestRound(history.latestRound) : undefined;
-		const contextText = history.assistantContext.length > 0
-			? history.assistantContext.map((s, i) => `[${i + 1}] ${s}`).join('\n\n')
-			: undefined;
 		const subagentText = renderSubagentDigests(history.subagentDigests);
+
+		// Render each assistant context snippet as its own UserMessage with
+		// descending priority so prompt-tsx can prune the oldest snippets
+		// first when the prompt is over budget.
+		const assistantContextMessages = history.assistantContext.map((snippet, i) => {
+			// Newer snippets get higher priority. Base priority 820, decrement by
+			// index so the first (oldest) snippet is the lowest.
+			const priority = 820 - i;
+			return (
+				<UserMessage priority={priority}>
+					Agent reasoning [{i + 1}]:{'\n'}
+					{snippet}
+				</UserMessage>
+			);
+		});
 
 		return (
 			<>
@@ -141,12 +163,7 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 					</UserMessage>
 				)}
 
-				{contextText && (
-					<UserMessage priority={820}>
-						Agent reasoning:{'\n'}
-						{contextText}
-					</UserMessage>
-				)}
+				{assistantContextMessages}
 
 				{subagentText.length > 0 && (
 					<UserMessage priority={780}>
