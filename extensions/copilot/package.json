@@ -2679,6 +2679,18 @@
 				"enablement": "config.github.copilot.chat.otel.dbSpanExporter.enabled"
 			},
 			{
+				"command": "github.copilot.sessionSync.deleteSessions",
+				"title": "%github.copilot.command.sessionSync.deleteSessions%",
+				"category": "Chat",
+				"enablement": "github.copilot.sessionSearch.enabled && config.chat.sessionSync.enabled"
+			},
+			{
+				"command": "github.copilot.chronicle.reindex",
+				"title": "%github.copilot.command.chronicle.reindex%",
+				"category": "Chat",
+				"enablement": "github.copilot.sessionSearch.enabled"
+			},
+			{
 				"command": "github.copilot.nes.captureExpected.start",
 				"title": "Record Expected Edit (NES)",
 				"category": "Copilot"
@@ -4493,16 +4505,6 @@
 							"experimental"
 						]
 					},
-					"github.copilot.chat.agentHistorySummarizationInline": {
-						"type": "boolean",
-						"default": true,
-						"markdownDescription": "%github.copilot.config.agentHistorySummarizationInline%",
-						"tags": [
-							"advanced",
-							"experimental",
-							"onExp"
-						]
-					},
 					"github.copilot.chat.useResponsesApiTruncation": {
 						"type": "boolean",
 						"default": false,
@@ -4668,6 +4670,14 @@
 						"type": "boolean",
 						"default": true,
 						"markdownDescription": "%github.copilot.config.cli.autoModel.enabled%",
+						"tags": [
+							"advanced"
+						]
+					},
+					"github.copilot.chat.agent.modelDetails.enabled": {
+						"type": "boolean",
+						"default": true,
+						"markdownDescription": "%github.copilot.config.chat.agent.modelDetails.enabled%",
 						"tags": [
 							"advanced"
 						]
@@ -4895,6 +4905,15 @@
 						"type": "boolean",
 						"default": false,
 						"markdownDescription": "Capture input/output messages, system instructions, and tool definitions in OTel telemetry. **Contains potentially sensitive data.** Env var `COPILOT_OTEL_CAPTURE_CONTENT` takes precedence. Requires window reload.",
+						"tags": [
+							"advanced"
+						]
+					},
+					"github.copilot.chat.otel.maxAttributeSizeChars": {
+						"type": "integer",
+						"default": 0,
+						"minimum": 0,
+						"markdownDescription": "Maximum size **in characters** for free-form OTel content attributes (prompts, responses, tool arguments/results, hook input/output). `0` (the default) disables truncation so backends without per-attribute size limits receive full JSON payloads. Set to a positive value when your OTel backend caps attribute size — consult your backend's documentation for its per-attribute limit. Truncated values are suffixed with `...[truncated, original N chars]`. Env var `COPILOT_OTEL_MAX_ATTRIBUTE_SIZE_CHARS` takes precedence. Requires window reload.",
 						"tags": [
 							"advanced"
 						]
