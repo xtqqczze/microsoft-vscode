@@ -1001,6 +1001,11 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 			return false;
 		}
 
+		// In Autopilot/Bypass Approvals modes, follow the picker
+		if (sessionResource && isSessionAutoApproveLevel(sessionResource, this._configurationService, this._chatWidgetService, this._chatService)) {
+			return true;
+		}
+
 		const request = chatModel.getRequests().at(-1);
 		if (!request) {
 			return false;
