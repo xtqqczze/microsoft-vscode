@@ -35,7 +35,7 @@ function makePromptContext(opts?: {
 
 function makeInput(overrides?: Partial<IBackgroundTodoPolicyInput>): IBackgroundTodoPolicyInput {
 	return {
-		experimentEnabled: true,
+		backgroundTodoAgentEnabled: true,
 		todoToolExplicitlyEnabled: false,
 		isAgentPrompt: true,
 		promptContext: makePromptContext({ toolCallRounds: [makeMeaningfulRound('r1')] }),
@@ -49,7 +49,7 @@ describe('BackgroundTodoProcessor.shouldRun (policy)', () => {
 
 	test('returns Skip when experiment is disabled', () => {
 		const processor = new BackgroundTodoProcessor();
-		const result = processor.shouldRun(makeInput({ experimentEnabled: false }));
+		const result = processor.shouldRun(makeInput({ backgroundTodoAgentEnabled: false }));
 		expect(result.decision).toBe(BackgroundTodoDecision.Skip);
 		expect(result.reason).toBe('experimentDisabled');
 		expect(result.delta).toBeUndefined();

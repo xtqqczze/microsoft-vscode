@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { MockEndpoint } from '../../../../platform/endpoint/test/node/mockEndpoint';
 import { IChatEndpoint } from '../../../../platform/networking/common/networking';
+import { IExperimentationService } from '../../../../platform/telemetry/common/nullExperimentationService';
 import { ITestingServicesAccessor } from '../../../../platform/test/node/services';
 import { TestWorkspaceService } from '../../../../platform/test/node/testWorkspaceService';
 import { IWorkspaceService } from '../../../../platform/workspace/common/workspaceService';
@@ -18,7 +19,7 @@ import { IInstantiationService } from '../../../../util/vs/platform/instantiatio
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { TestChatRequest } from '../../../test/node/testHelpers';
 import { ToolName } from '../../../tools/common/toolNames';
-import { getAgentTools, isTodoToolExplicitlyEnabled } from '../agentIntent';
+import { getAgentTools, isBackgroundTodoAgentEnabled, isTodoToolExplicitlyEnabled } from '../agentIntent';
 
 // ─── isTodoToolExplicitlyEnabled unit tests ──────────────────────
 
@@ -68,6 +69,7 @@ describe('getAgentTools background todo enablement', () => {
 	let accessor: ITestingServicesAccessor;
 	let instantiationService: IInstantiationService;
 	let configService: IConfigurationService;
+	let experimentationService: IExperimentationService;
 	let mockEndpoint: IChatEndpoint;
 
 	beforeAll(() => {
@@ -83,6 +85,7 @@ describe('getAgentTools background todo enablement', () => {
 		accessor = services.createTestingAccessor();
 		instantiationService = accessor.get(IInstantiationService);
 		configService = accessor.get(IConfigurationService);
+		experimentationService = accessor.get(IExperimentationService);
 		mockEndpoint = instantiationService.createInstance(MockEndpoint, undefined);
 	});
 
@@ -98,6 +101,18 @@ describe('getAgentTools background todo enablement', () => {
 	function hasTodoTool(tools: readonly { name: string }[]): boolean {
 		return tools.some(t => t.name === ToolName.CoreManageTodoList);
 	}
+
+	test('background todo agent is enabled only when experiment is on and todo is not explicit', () => {
+		const request = new TestChatRequest('fix the bug');
+		configService.setConfig(ConfigKey.Advanced.BackgroundTodoAgentEnabled, false);
+		expect(isBackgroundTodoAgentEnabled(configService, experimentationService, request)).toBe(false);
+
+		configService.setConfig(ConfigKey.Advanced.BackgroundTodoAgentEnabled, true);
+		expect(isBackgroundTodoAgentEnabled(configService, experimentationService, request)).toBe(true);
+
+		(request as any).toolReferences = [{ name: 'todo' }];
+		expect(isBackgroundTodoAgentEnabled(configService, experimentationService, request)).toBe(false);
+	});
 
 	test('todo tool is not in enabled tools when experiment is on', async () => {
 		configService.setConfig(ConfigKey.Advanced.BackgroundTodoAgentEnabled, true);

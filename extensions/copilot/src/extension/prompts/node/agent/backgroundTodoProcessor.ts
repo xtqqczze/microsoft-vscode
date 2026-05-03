@@ -78,9 +78,9 @@ export interface IBackgroundTodoDecisionResult {
  * Callers construct this once and pass it in.
  */
 export interface IBackgroundTodoPolicyInput {
-	/** Whether the experiment gate is enabled. */
-	readonly experimentEnabled: boolean;
-	/** Whether the user explicitly referenced the todo tool (e.g. `#todo`). */
+	/** Whether the combined background todo agent gate is enabled. */
+	readonly backgroundTodoAgentEnabled: boolean;
+	/** Whether the user explicitly referenced the todo tool (e.g. `#todo`), used for diagnostics. */
 	readonly todoToolExplicitlyEnabled: boolean;
 	/** Whether the current prompt is the main agent prompt. */
 	readonly isAgentPrompt: boolean;
@@ -171,11 +171,11 @@ export class BackgroundTodoProcessor {
 	 */
 	shouldRun(input: IBackgroundTodoPolicyInput): IBackgroundTodoDecisionResult {
 		// ── Hard gates ────────────────────────────────────────────
-		if (!input.experimentEnabled) {
-			return { decision: BackgroundTodoDecision.Skip, reason: 'experimentDisabled' };
-		}
 		if (input.todoToolExplicitlyEnabled) {
 			return { decision: BackgroundTodoDecision.Skip, reason: 'todoToolExplicitlyEnabled' };
+		}
+		if (!input.backgroundTodoAgentEnabled) {
+			return { decision: BackgroundTodoDecision.Skip, reason: 'experimentDisabled' };
 		}
 		if (!input.isAgentPrompt) {
 			return { decision: BackgroundTodoDecision.Skip, reason: 'nonAgentPrompt' };

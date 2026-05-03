@@ -74,24 +74,32 @@ function isResponsesCompactionContextManagementEnabled(endpoint: IChatEndpoint, 
 		&& !modelsWithoutResponsesContextManagement.has(endpoint.family);
 }
 
-export function isBackgroundTodoAgentEnabled(configurationService: IConfigurationService, experimentationService: IExperimentationService): boolean {
-	return configurationService.getExperimentBasedConfig(ConfigKey.Advanced.BackgroundTodoAgentEnabled, experimentationService);
-}
-
 /**
  * Returns true when the user explicitly referenced the todo tool (e.g. typed
  * `#todo` in their message) or a custom agent configuration includes it as a
  * tool reference. Checking `request.toolReferences` is a stronger signal than
  * `request.tools` because core tools always appear as enabled in the default
  * tool picker state, which would prevent the experiment from taking effect.
+ *
+ * @internal - exported for testing
  */
-/** @internal — exported for testing */
 export function isTodoToolExplicitlyEnabled(request: vscode.ChatRequest): boolean {
 	const todoReferenceName = 'todo';
 	return request.toolReferences.some(ref =>
 		ref.name === todoReferenceName
 		|| ref.name === ToolName.CoreManageTodoList
 	);
+}
+
+/**
+ * Returns true when the background todo agent should manage todos instead of
+ * exposing the regular todo tool to the main agent.
+ *
+ * @internal - exported for testing
+ */
+export function isBackgroundTodoAgentEnabled(configurationService: IConfigurationService, experimentationService: IExperimentationService, request: vscode.ChatRequest): boolean {
+	return configurationService.getExperimentBasedConfig(ConfigKey.Advanced.BackgroundTodoAgentEnabled, experimentationService)
+		&& !isTodoToolExplicitlyEnabled(request);
 }
 
 export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.ChatRequest, model?: IChatEndpoint) => {
@@ -152,7 +160,7 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 		allowTools[ToolName.CoreManageTodoList] = false;
 	}
 
-	if (isBackgroundTodoAgentEnabled(configurationService, experimentationService) && !isTodoToolExplicitlyEnabled(request)) {
+	if (isBackgroundTodoAgentEnabled(configurationService, experimentationService, request)) {
 		allowTools[ToolName.CoreManageTodoList] = false;
 	}
 
@@ -291,7 +299,7 @@ export class AgentIntent extends EditCodeIntent {
 			// Do NOT pass the request `token` as parentToken — it may be cancelled
 			// by the framework after the turn ends, which would immediately abort
 			// the background pass even on a normal completion.
-			if (!token.isCancellationRequested) {
+			if (!token.isCancellationRequested && isBackgroundTodoAgentEnabled(this.configurationService, this.expService, request)) {
 				const todoProcessor = this._backgroundTodoProcessors.get(conversation.sessionId);
 				todoProcessor?.executeFinalReview();
 			}
@@ -520,7 +528,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 			},
 			location: this.location,
 			enableCacheBreakpoints: summarizationEnabled && !useLastTwoMessagesCacheBPs,
-			hideTodoPromptInstructions: isBackgroundTodoAgentEnabled(this.configurationService, this.expService) && !isTodoToolExplicitlyEnabled(this.request),
+			hideTodoPromptInstructions: isBackgroundTodoAgentEnabled(this.configurationService, this.expService, this.request),
 			...this.extraPromptProps,
 			customizations: this._resolvedCustomizations
 		};
@@ -1206,7 +1214,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 		}
 
 		const { decision, reason, delta } = processor.shouldRun({
-			experimentEnabled: isBackgroundTodoAgentEnabled(this.configurationService, this.expService),
+			backgroundTodoAgentEnabled: isBackgroundTodoAgentEnabled(this.configurationService, this.expService, this.request),
 			todoToolExplicitlyEnabled: isTodoToolExplicitlyEnabled(this.request),
 			isAgentPrompt: this.prompt === AgentPrompt,
 			promptContext,
