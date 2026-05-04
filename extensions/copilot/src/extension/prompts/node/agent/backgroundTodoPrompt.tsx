@@ -64,7 +64,9 @@ List rules:
 - The todo list must cover the full user request, not only recent activity.
 - Derive items primarily from the user's request and the agent's stated plan; use progress summaries and subagents only as supporting context.
 - Prefer a few broad phase-level items over many narrow or file-level items.
-- Items must be concise action labels, 3-7 words.
+- Titles MUST be 3-8 words. Maximum 8 words. Never exceed 8 words.
+  - GOOD: "Add logging support", "Wire CLI flags", "Validate and test"
+  - BAD: "Add shared logger to analyzer package", "Wire logger configuration and CLI support", "Instrument high-value paths for logging"
 - Use sequential numeric IDs starting at 1.
 - Preserve existing IDs and wording unless genuinely adding, removing, or expanding scope.
 
