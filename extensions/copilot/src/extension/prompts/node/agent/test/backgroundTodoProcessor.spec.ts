@@ -30,12 +30,30 @@ function makeDelta(rounds: string[] = []): IBackgroundTodoDelta {
 	};
 }
 
-function makeExecutionContext(rounds: string[] = []): IBackgroundTodoExecutionContext {
+interface IExecutionContextTestOptions {
+	readonly endpointDelayMs?: number;
+	readonly logMessages?: string[];
+	readonly telemetryEvents?: string[];
+}
+
+function makeLogService(logMessages?: string[]) {
 	return {
-		instantiationService: { invokeFunction: () => { throw new Error('no endpoint'); } } as any,
-		logService: { debug: () => undefined, warn: () => undefined } as any,
+		debug: (message: string) => logMessages?.push(message),
+		warn: (message: string) => logMessages?.push(message),
+	} as any;
+}
+
+function makeExecutionContext(rounds: string[] = [], options: IExecutionContextTestOptions = {}): IBackgroundTodoExecutionContext {
+	return {
+		instantiationService: { invokeFunction: async () => {
+			if (options.endpointDelayMs !== undefined) {
+				await new Promise(resolve => setTimeout(resolve, options.endpointDelayMs));
+			}
+			throw new Error('no endpoint');
+		} } as any,
+		logService: makeLogService(options.logMessages),
 		toolsService: { invokeTool: async () => undefined } as any,
-		telemetryService: { sendMSFTTelemetryEvent: () => undefined } as any,
+		telemetryService: { sendMSFTTelemetryEvent: (eventName: string) => options.telemetryEvents?.push(eventName) } as any,
 		promptContext: {
 			query: 'fix the bug',
 			history: [],
@@ -142,6 +160,26 @@ describe('BackgroundTodoProcessor', () => {
 		expect(workCallCount).toBe(2);
 	});
 
+	test('requestRegularPass skips queued work when only in-flight rounds were present', async () => {
+		const telemetryEvents: string[] = [];
+		const context = makeExecutionContext(['r1'], { endpointDelayMs: 20, telemetryEvents });
+		const processor = new BackgroundTodoProcessor();
+
+		processor.requestRegularPass(makeDelta(['r1']), context);
+		processor.requestRegularPass(makeDelta(['r1']), context);
+		await processor.waitForCompletion();
+
+		expect({
+			state: processor.state,
+			telemetryEventCount: telemetryEvents.length,
+			hasRemainingDelta: processor.deltaTracker.getDelta(context.promptContext) !== undefined,
+		}).toEqual({
+			state: BackgroundTodoProcessorState.Idle,
+			telemetryEventCount: 1,
+			hasRemainingDelta: false,
+		});
+	});
+
 	test('cancel stops in-flight work', async () => {
 		const processor = new BackgroundTodoProcessor();
 		let completed = false;
@@ -231,8 +269,14 @@ describe('BackgroundTodoProcessor', () => {
 	});
 
 	test('requestFinalReview drains after a regular pass completes', async () => {
-		const processor = new BackgroundTodoProcessor();
+		const logMessages: string[] = [];
+		const telemetryEvents: string[] = [];
+		const processor = new BackgroundTodoProcessor(makeLogService(logMessages));
 		const ranWork: string[] = [];
+
+		processor.start(makeDelta(['r0']), async () => ({ outcome: 'success' }));
+		await processor.waitForCompletion();
+		logMessages.length = 0;
 
 		// Start a slow regular pass
 		processor.start(makeDelta(['r1']), async () => {
@@ -242,13 +286,30 @@ describe('BackgroundTodoProcessor', () => {
 		});
 
 		// While in progress, record context and request final review
-		processor.requestRegularPass(makeDelta(['r2']), makeExecutionContext(['r1', 'r2']));
+		processor.requestRegularPass(makeDelta(['r2']), makeExecutionContext(['r1', 'r2'], { telemetryEvents }));
 		processor.requestFinalReview('turn-1');
 
 		await processor.waitForCompletion();
-		// Regular pass ran first (from start()), then the coalesced requestRegularPass
-		// drained, then the final review drained.
-		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+
+		const passStartIndexes = logMessages
+			.map((message, index) => message.includes('starting pass #') ? index : -1)
+			.filter(index => index !== -1);
+		const finalReviewIndex = logMessages.findIndex(message => message.includes('draining final review'));
+		expect({
+			state: processor.state,
+			ranWork,
+			telemetryEventCount: telemetryEvents.length,
+			passStartCount: passStartIndexes.length,
+			coalescedRegularBeforeFinalReview: passStartIndexes[1] !== undefined && passStartIndexes[1] < finalReviewIndex,
+			finalReviewBeforeFinalPass: passStartIndexes[2] !== undefined && finalReviewIndex < passStartIndexes[2],
+		}).toEqual({
+			state: BackgroundTodoProcessorState.Idle,
+			ranWork: ['regular'],
+			telemetryEventCount: 2,
+			passStartCount: 3,
+			coalescedRegularBeforeFinalReview: true,
+			finalReviewBeforeFinalPass: true,
+		});
 	});
 
 	test('coalesced pending delta runs with its own queued work callback', async () => {

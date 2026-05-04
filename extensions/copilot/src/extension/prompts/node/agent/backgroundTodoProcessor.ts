@@ -365,16 +365,27 @@ export class BackgroundTodoProcessor {
 			if (stashedWork) {
 				// Coalesced via start() — use the stashed callback directly.
 				this._runPass(regularDelta, stashedWork, token, advanceCursor);
+				return;
 			} else if (ctx) {
-				// Enqueued via requestRegularPass — build the work closure.
-				this._runPass(
-					regularDelta,
-					(d, t) => BackgroundTodoProcessor._doExecute(d, ctx, t),
-					token,
-					true, // regular passes always advance cursor
-				);
+				// Enqueued via requestRegularPass — recompute against the latest cursor.
+				// This avoids replaying the in-flight delta when no new rounds arrived
+				// while the previous pass was running, and retries the full delta if the
+				// previous pass failed and did not advance the cursor.
+				const latestDelta = this.deltaTracker.peekDelta(ctx.promptContext);
+				if (!latestDelta) {
+					this._logService?.debug('[BackgroundTodo] queued regular pass skipped: no new delta remains after in-flight pass');
+				} else {
+					this._runPass(
+						latestDelta,
+						(d, t) => BackgroundTodoProcessor._doExecute(d, ctx, t),
+						token,
+						true, // regular passes always advance cursor
+					);
+					return;
+				}
+			} else {
+				this._logService?.debug('[BackgroundTodo] queued regular pass skipped: missing execution context');
 			}
-			return;
 		}
 
 		// ── Final review ────────────────────────────────────────
