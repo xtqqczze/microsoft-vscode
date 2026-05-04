@@ -41,6 +41,8 @@ interface CustomEditorDiffInputInfo {
 	readonly layout: CustomEditorDiffEditorLayout;
 }
 
+type CustomEditorUndoRedoInput = CustomEditorInput | CustomEditorDiffInput | CustomEditorSideBySideDiffInput;
+
 export class CustomEditorService extends Disposable implements ICustomEditorService {
 	_serviceBrand: any;
 
@@ -135,16 +137,27 @@ export class CustomEditorService extends Disposable implements ICustomEditorServ
 		return [...this._contributedEditors];
 	}
 
-	private withActiveCustomEditor(f: (editor: CustomEditorInput) => void | Promise<void>): boolean | Promise<void> {
-		const activeEditor = this.editorService.activeEditor;
-		if (activeEditor instanceof CustomEditorInput) {
-			const result = f(activeEditor);
+	private withActiveCustomEditor(f: (editor: CustomEditorUndoRedoInput) => void | Promise<void>): boolean | Promise<void> {
+		const editor = this.getActiveCustomEditorUndoRedoInput();
+		if (editor) {
+			const result = f(editor);
 			if (result) {
 				return result;
 			}
 			return true;
 		}
 		return false;
+	}
+
+	private getActiveCustomEditorUndoRedoInput(): CustomEditorUndoRedoInput | undefined {
+		const activeEditor = this.editorService.activeEditor;
+		if (activeEditor instanceof CustomEditorInput || activeEditor instanceof CustomEditorDiffInput || activeEditor instanceof CustomEditorSideBySideDiffInput) {
+			return activeEditor;
+		}
+		if (activeEditor instanceof DiffEditorInput && activeEditor.modified instanceof CustomEditorSideBySideDiffInput) {
+			return activeEditor.modified;
+		}
+		return undefined;
 	}
 
 	private registerContributionPoints(): void {
