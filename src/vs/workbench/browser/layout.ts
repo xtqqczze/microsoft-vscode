@@ -353,7 +353,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 				// Do not unmaximize the auxiliary side bar when the editor was
 				// opened automatically (e.g. by the chat agent applying edits).
 				// Only an explicit user action should disrupt the chosen layout.
-				if (explicitUserAction) {
+				if (explicitUserAction !== false) {
 					this.toggleMaximizedAuxiliaryBar();
 				}
 			} else {
