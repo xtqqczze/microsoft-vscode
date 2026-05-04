@@ -154,6 +154,8 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 	const skillToolEnabled = configurationService.getExperimentBasedConfig(ConfigKey.Advanced.SkillToolEnabled, experimentationService);
 	allowTools[ToolName.Skill] = skillToolEnabled;
 
+	allowTools[ToolName.SessionStoreSql] = true;
+
 	allowTools[CUSTOM_TOOL_SEARCH_NAME] = !!model.supportsToolSearch;
 
 	if (model.family.includes('grok-code')) {
@@ -169,7 +171,6 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 	allowTools['task_complete'] = request.permissionLevel === 'autopilot';
 
 	allowTools[ToolName.EditFilesPlaceholder] = false;
-	allowTools[ToolName.SessionStoreSql] = false; // Only available via /chronicle
 	// todo@connor4312: string check here is for back-compat for 1.109 Insiders
 	if (Iterable.some(request.tools, ([t, enabled]) => (typeof t === 'string' ? t : t.name) === ContributedToolName.EditFilesPlaceholder && enabled === false)) {
 		allowTools[ToolName.ApplyPatch] = false;
