@@ -299,7 +299,7 @@ export class AgentIntent extends EditCodeIntent {
 			// Do NOT pass the request `token` as parentToken — it may be cancelled
 			// by the framework after the turn ends, which would immediately abort
 			// the background pass even on a normal completion.
-			if (!token.isCancellationRequested && isBackgroundTodoAgentEnabled(this.configurationService, this.expService, request)) {
+			if (isBackgroundTodoAgentEnabled(this.configurationService, this.expService, request)) {
 				const todoProcessor = this._backgroundTodoProcessors.get(conversation.sessionId);
 				todoProcessor?.executeFinalReview();
 			}
