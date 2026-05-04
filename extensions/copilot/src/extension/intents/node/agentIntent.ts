@@ -295,13 +295,17 @@ export class AgentIntent extends EditCodeIntent {
 			// Fire one final bg todo review pass once the agent loop has ended for
 			// this turn. The per-round passes never see the very last round, so any
 			// task that just completed otherwise stays stuck as 'in-progress'.
-			// Skip if the user explicitly stopped the request (token cancelled).
+			// Await completion so the tool invocation runs while the request is
+			// still active — the platform rejects tool calls for completed requests.
 			// Do NOT pass the request `token` as parentToken — it may be cancelled
 			// by the framework after the turn ends, which would immediately abort
 			// the background pass even on a normal completion.
 			if (isBackgroundTodoAgentEnabled(this.configurationService, this.expService, request)) {
 				const todoProcessor = this._backgroundTodoProcessors.get(conversation.sessionId);
-				todoProcessor?.executeFinalReview();
+				if (todoProcessor) {
+					todoProcessor.executeFinalReview();
+					await todoProcessor.waitForCompletion();
+				}
 			}
 		}
 	}
