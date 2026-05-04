@@ -4388,7 +4388,7 @@
 					"github.copilot.chat.agent.backgroundTodoAgent.enabled": {
 						"type": "boolean",
 						"default": false,
-						"markdownDescription": "Enable background todo agent that automatically maintains a todo list during agent sessions.\n\n**Note**: This is an advanced experimental setting.",
+						"markdownDescription": "%github.copilot.config.agent.backgroundTodoAgent.enabled%",
 						"tags": [
 							"advanced",
 							"experimental",
