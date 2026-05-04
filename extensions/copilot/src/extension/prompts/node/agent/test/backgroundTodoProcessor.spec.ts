@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, test } from 'vitest';
-import { BackgroundTodoProcessor, BackgroundTodoProcessorState, IBackgroundTodoResult } from '../backgroundTodoProcessor';
+import { BackgroundTodoProcessor, BackgroundTodoProcessorState, IBackgroundTodoExecutionContext, IBackgroundTodoResult } from '../backgroundTodoProcessor';
 import { IBackgroundTodoDelta } from '../backgroundTodoDelta';
 import { CancellationTokenSource } from '../../../../../util/vs/base/common/cancellation';
 
@@ -27,6 +27,21 @@ function makeDelta(rounds: string[] = []): IBackgroundTodoDelta {
 			isInitialDelta: true,
 			isRequestOnly: rounds.length === 0,
 		},
+	};
+}
+
+function makeExecutionContext(rounds: string[] = []): IBackgroundTodoExecutionContext {
+	return {
+		instantiationService: { invokeFunction: () => { throw new Error('no endpoint'); } } as any,
+		logService: { debug: () => undefined, warn: () => undefined } as any,
+		toolsService: { invokeTool: async () => undefined } as any,
+		telemetryService: { sendMSFTTelemetryEvent: () => undefined } as any,
+		promptContext: {
+			query: 'fix the bug',
+			history: [],
+			chatVariables: { hasVariables: () => false } as any,
+			toolCallRounds: rounds.map(id => ({ id, response: '', toolInputRetry: 0, toolCalls: [] })),
+		} as any,
 	};
 }
 
@@ -79,6 +94,19 @@ describe('BackgroundTodoProcessor', () => {
 		await processor.waitForCompletion();
 
 		// r1 should NOT be marked processed on failure — a later pass can retry
+		expect(processor.deltaTracker.getDelta({
+			query: 'fix',
+			history: [],
+			chatVariables: { hasVariables: () => false } as any,
+			toolCallRounds: [{ id: 'r1', response: '', toolInputRetry: 0, toolCalls: [] }],
+		})).toBeDefined();
+	});
+
+	test('delta cursor does NOT advance when advanceCursor is false', async () => {
+		const processor = new BackgroundTodoProcessor();
+		processor.start(makeDelta(['r1']), async () => ({ outcome: 'success' }), undefined, false);
+		await processor.waitForCompletion();
+
 		expect(processor.deltaTracker.getDelta({
 			query: 'fix',
 			history: [],
@@ -147,20 +175,79 @@ describe('BackgroundTodoProcessor', () => {
 		cts.dispose();
 	});
 
-	test('executeFinalReview is a no-op when no executePass has run', () => {
+	// ── requestFinalReview ──────────────────────────────────────
+
+	test('requestFinalReview is a no-op when no context has been recorded', () => {
 		const processor = new BackgroundTodoProcessor();
-		processor.executeFinalReview();
+		processor.requestFinalReview('turn-1');
 		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
 	});
 
-	test('executeFinalReview is a no-op when no todos have been created', async () => {
+	test('requestFinalReview is a no-op when no todos have been created', async () => {
 		const processor = new BackgroundTodoProcessor();
 		// Simulate a noop pass so a context exists but hasCreatedTodos remains false
 		processor.start(makeDelta(['r1']), async () => ({ outcome: 'noop' }));
 		await processor.waitForCompletion();
 		expect(processor.hasCreatedTodos).toBe(false);
-		processor.executeFinalReview();
-		// Should not transition to InProgress because hasCreatedTodos is false
+		processor.requestFinalReview('turn-1');
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+	});
+
+	test('requestFinalReview runs when processor is idle and todos exist', async () => {
+		const processor = new BackgroundTodoProcessor();
+		// Use requestRegularPass so _lastExecutionContext is recorded
+		processor.requestRegularPass(makeDelta(['r1']), makeExecutionContext(['r1']));
+		// Force hasCreatedTodos
+		await processor.waitForCompletion();
+		// The work threw because the mock context has no real endpoint, but
+		// we need hasCreatedTodos = true. Use the low-level start() for that.
+		processor.start(makeDelta(['r2']), async () => ({ outcome: 'success' }));
+		await processor.waitForCompletion();
+		expect(processor.hasCreatedTodos).toBe(true);
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+
+		// Now request final review — it should transition to InProgress
+		processor.requestFinalReview('turn-1');
+		expect(processor.state).toBe(BackgroundTodoProcessorState.InProgress);
+		await processor.waitForCompletion();
+	});
+
+	test('requestFinalReview deduplicates by turn ID', async () => {
+		const processor = new BackgroundTodoProcessor();
+		processor.start(makeDelta(['r1']), async () => ({ outcome: 'success' }));
+		await processor.waitForCompletion();
+		// Record a context
+		processor.requestRegularPass(makeDelta(['r2']), makeExecutionContext(['r2']));
+		await processor.waitForCompletion();
+
+		// First request should be accepted
+		processor.requestFinalReview('turn-1');
+		expect(processor.state).toBe(BackgroundTodoProcessorState.InProgress);
+		await processor.waitForCompletion();
+
+		// Second request with same turn ID should be a no-op
+		processor.requestFinalReview('turn-1');
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+	});
+
+	test('requestFinalReview drains after a regular pass completes', async () => {
+		const processor = new BackgroundTodoProcessor();
+		const ranWork: string[] = [];
+
+		// Start a slow regular pass
+		processor.start(makeDelta(['r1']), async () => {
+			ranWork.push('regular');
+			await new Promise(resolve => setTimeout(resolve, 50));
+			return { outcome: 'success' };
+		});
+
+		// While in progress, record context and request final review
+		processor.requestRegularPass(makeDelta(['r2']), makeExecutionContext(['r1', 'r2']));
+		processor.requestFinalReview('turn-1');
+
+		await processor.waitForCompletion();
+		// Regular pass ran first (from start()), then the coalesced requestRegularPass
+		// drained, then the final review drained.
 		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
 	});
 
@@ -176,9 +263,7 @@ describe('BackgroundTodoProcessor', () => {
 		});
 		expect(processor.state).toBe(BackgroundTodoProcessorState.InProgress);
 
-		// Queue a second pass with a *different* work callback (workB). This simulates
-		// executeFinalReview queuing a finalize-mode work closure while a regular pass
-		// is still in flight. The drained pass MUST run workB, not workA.
+		// Queue a second pass with a *different* work callback (workB).
 		processor.start(makeDelta(['r2']), async () => {
 			ranWork.push('B');
 			return { outcome: 'success' };
@@ -188,7 +273,7 @@ describe('BackgroundTodoProcessor', () => {
 		expect(ranWork).toEqual(['A', 'B']);
 	});
 
-	test('cancel clears pending coalesced work', async () => {
+	test('cancel clears pending coalesced work and final review', async () => {
 		const processor = new BackgroundTodoProcessor();
 		const ranWork: string[] = [];
 
