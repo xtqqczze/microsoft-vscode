@@ -1757,6 +1757,7 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 				cwd: endCwd?.toString(),
 				timedOut: didTimeout || undefined,
 				timeoutMs: didTimeout ? timeoutValue : undefined,
+				inputNeeded: didInputNeeded || undefined,
 			},
 			toolResultDetails: isError ? {
 				input: command,
