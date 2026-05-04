@@ -528,7 +528,6 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 			},
 			location: this.location,
 			enableCacheBreakpoints: summarizationEnabled && !useLastTwoMessagesCacheBPs,
-			hideTodoPromptInstructions: isBackgroundTodoAgentEnabled(this.configurationService, this.expService, this.request),
 			...this.extraPromptProps,
 			customizations: this._resolvedCustomizations
 		};

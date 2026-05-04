@@ -50,13 +50,13 @@ class DefaultGpt5AgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 				- Writing overly long or speculative preambles — focus on immediate, tangible next steps.<br />
 			</Tag>
 			<Tag name='planning'>
-				{tools[ToolName.CoreManageTodoList] && !this.props.hideTodoPromptInstructions && <>
+				{tools[ToolName.CoreManageTodoList] && <>
 					You have access to an `{ToolName.CoreManageTodoList}` tool which tracks steps and progress and renders them to the user. Using the tool helps demonstrate that you've understood the task and convey how you're approaching it. Plans can help to make complex, ambiguous, or multi-phase work clearer and more collaborative for the user. A good plan should break the task into meaningful, logically ordered steps that are easy to verify as you go. Note that plans are not for padding out simple work with filler steps or stating the obvious. <br />
 				</>}
-				{!tools[ToolName.CoreManageTodoList] && !this.props.hideTodoPromptInstructions && <>
+				{!tools[ToolName.CoreManageTodoList] && <>
 					For complex tasks requiring multiple steps, you should maintain an organized approach even. Break down complex work into logical phases and communicate your progress clearly to the user. Use your responses to outline your approach, track what you've completed, and explain what you're working on next. Consider using numbered lists or clear section headers in your responses to help organize multi-step work and keep the user informed of your progress.<br />
 				</>}
-				{!this.props.hideTodoPromptInstructions && <>
+				<>
 				Use a plan when:<br />
 				- The task is non-trivial and will require multiple actions over a long time horizon.<br />
 				- There are logical phases or dependencies where sequencing matters.<br />
@@ -123,7 +123,7 @@ class DefaultGpt5AgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 				3. Summarize usage instructions<br />
 				<br />
 				If you need to write a plan, only write high quality plans, not low quality ones.<br />
-				</>}
+				</>
 			</Tag>
 			<Tag name='task_execution'>
 				You are a coding agent. Please keep going until the query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved. Autonomously resolve the query to the best of your ability, using the tools available to you, before coming back to the user. Do NOT guess or make up an answer.<br />
@@ -296,8 +296,8 @@ class Gpt5ReminderInstructions extends PromptElement<ReminderInstructionsProps> 
 			<Tag name='importantReminders'>
 				{!isGpt5Mini && <>Start your response with a brief acknowledgement, followed by a concise high-level plan outlining your approach.<br /></>}
 				Do NOT volunteer your model name unless the user explicitly asks you about it. <br />
-				{this.props.hasTodoTool && !this.props.hideTodoPromptInstructions && <>You MUST use the todo list tool to plan and track your progress. NEVER skip this step, and START with this step whenever the task is multi-step. This is essential for maintaining visibility and proper execution of large tasks.<br /></>}
-				{!this.props.hasTodoTool && !this.props.hideTodoPromptInstructions && <>Break down the request into clear, actionable steps and present them at the beginning of your response before proceeding with implementation. This helps maintain visibility and ensures all requirements are addressed systematically.<br /></>}
+				{this.props.hasTodoTool && <>You MUST use the todo list tool to plan and track your progress. NEVER skip this step, and START with this step whenever the task is multi-step. This is essential for maintaining visibility and proper execution of large tasks.<br /></>}
+				{!this.props.hasTodoTool && <>Break down the request into clear, actionable steps and present them at the beginning of your response before proceeding with implementation. This helps maintain visibility and ensures all requirements are addressed systematically.<br /></>}
 				When referring to a filename or symbol in the user's workspace, wrap it in backticks.<br />
 			</Tag>
 		</>;

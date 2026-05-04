@@ -45,8 +45,6 @@ export interface DefaultAgentPromptProps extends BasePromptElementProps {
 	readonly availableTools: readonly LanguageModelToolInformation[] | undefined;
 	readonly modelFamily: string | undefined;
 	readonly codesearchMode: boolean | undefined;
-	/** When true, suppress all todo-related prompt instructions (both tool guidance and markdown fallback). */
-	readonly hideTodoPromptInstructions?: boolean;
 }
 
 export interface ToolReferencesHintProps extends BasePromptElementProps {
@@ -74,8 +72,6 @@ export interface ReminderInstructionsProps extends BasePromptElementProps {
 	readonly hasEditFileTool: boolean;
 	readonly hasReplaceStringTool: boolean;
 	readonly hasMultiReplaceStringTool: boolean;
-	/** When true, suppress all todo-related reminder instructions (tool is managed by background agent). */
-	readonly hideTodoPromptInstructions?: boolean;
 }
 
 export function getEditingReminder(hasEditFileTool: boolean, hasReplaceStringTool: boolean, useStrongReplaceStringHint: boolean, hasMultiStringReplace: boolean) {
@@ -239,13 +235,13 @@ export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
 				# Workflow<br />
 				1. Understand the problem deeply. Carefully read the issue and think critically about what is required.<br />
 				2. Investigate the codebase. Explore relevant files, search for key functions, and gather context.<br />
-				3. Develop a clear, step-by-step plan. Break down the fix into manageable, incremental steps.{hasTodoTool && !this.props.hideTodoPromptInstructions && <> Display those steps in a todo list using the {ToolName.CoreManageTodoList} tool.</>}<br />
+				3. Develop a clear, step-by-step plan. Break down the fix into manageable, incremental steps.{hasTodoTool && <> Display those steps in a todo list using the {ToolName.CoreManageTodoList} tool.</>}<br />
 				4. Implement the fix incrementally. Make small, testable code changes.<br />
 				5. Debug as needed. Use debugging techniques to isolate and resolve issues.<br />
 				6. Test frequently. Run tests after each change to verify correctness.<br />
 				7. Iterate until the root cause is fixed and all tests pass.<br />
 				8. Reflect and validate comprehensively. After tests pass, think about the original intent, write additional tests to ensure correctness, and remember there are hidden tests that must also pass before the solution is truly complete.<br />
-				{hasTodoTool && !this.props.hideTodoPromptInstructions && <>
+				{hasTodoTool && <>
 				**CRITICAL - Before ending your turn:**<br />
 				- Review and update the todo list, marking completed, skipped (with explanations), or blocked items.<br />
 				- Display the updated todo list. Never leave items unchecked, unmarked, or ambiguous.<br />
@@ -269,7 +265,7 @@ export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
 				<br />
 				## 3. Develop a Detailed Plan<br />
 				- Outline a specific, simple, and verifiable sequence of steps to fix the problem.<br />
-				{hasTodoTool && !this.props.hideTodoPromptInstructions && <>
+				{hasTodoTool && <>
 				- Create a todo list to track your progress.<br />
 				- Each time you check off a step, update the todo list.<br />
 				</>}

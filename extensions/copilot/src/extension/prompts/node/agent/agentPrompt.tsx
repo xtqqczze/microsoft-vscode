@@ -77,9 +77,6 @@ export interface AgentPromptProps extends GenericBasePromptElementProps {
 	 * An explicit summarization mode configuration can still force Full mode.
 	 */
 	readonly forceSimpleSummary?: boolean;
-
-	/** When true, suppress all todo-related prompt instructions (both tool guidance and markdown fallback). */
-	readonly hideTodoPromptInstructions?: boolean;
 }
 
 /** Proportion of the prompt token budget any singular textual tool result is allowed to use. */
@@ -181,7 +178,6 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 				availableTools={this.props.promptContext.tools?.availableTools}
 				modelFamily={this.props.endpoint.family}
 				codesearchMode={this.props.codesearchMode}
-				hideTodoPromptInstructions={this.props.hideTodoPromptInstructions}
 			/>;
 		}
 
@@ -190,7 +186,6 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 			availableTools={this.props.promptContext.tools?.availableTools}
 			modelFamily={modelFamily}
 			codesearchMode={this.props.codesearchMode}
-			hideTodoPromptInstructions={this.props.hideTodoPromptInstructions}
 		/>;
 	}
 
@@ -317,8 +312,7 @@ export interface AgentUserMessageProps extends BasePromptElementProps, AgentUser
 	readonly additionalHookContext?: string;
 	/** When true, this request was system-initiated (e.g. terminal completion notification) and should skip context/wrapping. */
 	readonly isSystemInitiated?: boolean;
-	/** When true, suppress all todo-related prompt instructions (both tool guidance and markdown fallback). */
-	readonly hideTodoPromptInstructions?: boolean;}
+}
 
 export function getUserMessagePropsFromTurn(turn: Turn, endpoint: IChatEndpoint, customizations?: AgentUserMessageCustomizations): AgentUserMessageProps {
 	return {
@@ -348,7 +342,6 @@ export function getUserMessagePropsFromAgentProps(agentProps: AgentPromptProps, 
 		hasStopHookQuery: agentProps.promptContext.hasStopHookQuery,
 		additionalHookContext: agentProps.promptContext.additionalHookContext,
 		isSystemInitiated: agentProps.promptContext.request?.isSystemInitiated,
-		hideTodoPromptInstructions: agentProps.hideTodoPromptInstructions,
 		// TODO:@roblourens
 		sessionId: (agentProps.promptContext.tools?.toolInvocationToken as any)?.sessionId,
 		sessionResource: (agentProps.promptContext.tools?.toolInvocationToken as any)?.sessionResource,
@@ -405,7 +398,6 @@ export class AgentUserMessage extends PromptElement<AgentUserMessageProps> {
 			hasEditFileTool,
 			hasReplaceStringTool,
 			hasMultiReplaceStringTool,
-			hideTodoPromptInstructions: this.props.hideTodoPromptInstructions,
 		};
 		const ToolReferencesHintClass = this.props.ToolReferencesHintClass ?? DefaultToolReferencesHint;
 		const toolReferencesHintProps: ToolReferencesHintProps = {
