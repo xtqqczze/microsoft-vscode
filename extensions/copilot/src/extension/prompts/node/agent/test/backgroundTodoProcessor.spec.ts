@@ -187,4 +187,26 @@ describe('BackgroundTodoProcessor', () => {
 		await processor.waitForCompletion();
 		expect(ranWork).toEqual(['A', 'B']);
 	});
+
+	test('cancel clears pending coalesced work', async () => {
+		const processor = new BackgroundTodoProcessor();
+		const ranWork: string[] = [];
+
+		processor.start(makeDelta(['r1']), async () => {
+			ranWork.push('A');
+			await new Promise(resolve => setTimeout(resolve, 50));
+			return { outcome: 'success' };
+		});
+
+		processor.start(makeDelta(['r2']), async () => {
+			ranWork.push('B');
+			return { outcome: 'success' };
+		});
+
+		processor.cancel();
+		await new Promise(resolve => setTimeout(resolve, 80));
+
+		expect(ranWork).toEqual(['A']);
+		expect(processor.state).toBe(BackgroundTodoProcessorState.Idle);
+	});
 });

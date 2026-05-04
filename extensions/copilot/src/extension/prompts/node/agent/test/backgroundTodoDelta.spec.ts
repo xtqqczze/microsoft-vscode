@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'vitest';
 import { BackgroundTodoDeltaTracker } from '../backgroundTodoDelta';
 import { IBuildPromptContext, IToolCallRound } from '../../../../prompt/common/intents';
+import { URI } from '../../../../../util/vs/base/common/uri';
 
 function makeRound(id: string): IToolCallRound {
 	return {
@@ -20,6 +21,7 @@ function makePromptContext(opts: {
 	query?: string;
 	toolCallRounds?: IToolCallRound[];
 	historyRounds?: IToolCallRound[][];
+	sessionResource?: URI;
 }): IBuildPromptContext {
 	return {
 		query: opts.query ?? 'fix the bug',
@@ -29,6 +31,7 @@ function makePromptContext(opts: {
 		})) as any,
 		chatVariables: { hasVariables: () => false } as any,
 		toolCallRounds: opts.toolCallRounds,
+		request: opts.sessionResource ? { sessionResource: opts.sessionResource } as any : undefined,
 	};
 }
 
@@ -88,6 +91,25 @@ describe('BackgroundTodoDeltaTracker', () => {
 		expect(delta).toBeDefined();
 		expect(delta!.newRounds).toHaveLength(1);
 		expect(delta!.newRounds[0].id).toBe('hist-r1');
+	});
+
+	test('processes history before current rounds and de-dupes round ids', () => {
+		const tracker = new BackgroundTodoDeltaTracker();
+		const h1 = makeRound('hist-r1');
+		const sharedHistory = makeRound('shared');
+		const sharedCurrent = makeRound('shared');
+		const c1 = makeRound('current-r1');
+		const ctx = makePromptContext({ historyRounds: [[h1, sharedHistory]], toolCallRounds: [sharedCurrent, c1] });
+		const delta = tracker.getDelta(ctx);
+		expect(delta!.newRounds.map(round => round.id)).toEqual(['hist-r1', 'shared', 'current-r1']);
+	});
+
+	test('keeps sessionResource as Uri', () => {
+		const tracker = new BackgroundTodoDeltaTracker();
+		const sessionResource = URI.parse('test://session/background-todo');
+		const ctx = makePromptContext({ sessionResource });
+		const delta = tracker.getDelta(ctx);
+		expect(delta!.sessionResource).toBe(sessionResource);
 	});
 
 	test('markRoundsProcessed advances cursor', () => {

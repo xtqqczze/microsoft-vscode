@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { BasePromptElementProps, PromptElement, PromptSizing, SystemMessage, UserMessage } from '@vscode/prompt-tsx';
-import { IBackgroundTodoHistory, renderGroupedProgress, renderLatestRound, renderSubagentDigests } from './backgroundTodoProcessor';
+import { IBackgroundTodoHistory, renderGroupedProgress, renderLatestRound, renderToolCallRound } from './backgroundTodoProcessor';
 
 export interface BackgroundTodoPromptProps extends BasePromptElementProps {
 	/** Current todo list state as rendered markdown, or undefined if no todos exist yet. */
@@ -111,8 +111,8 @@ Ordering and state rules:
 /**
  * Prompt-tsx element for the background todo processor.
  *
- * Priorities ensure prompt-tsx prunes grouped progress before removing
- * current todos, user request, latest round detail, or assistant context.
+ * Priorities ensure prompt-tsx keeps current todos, the user request, and
+ * latest activity before older tool-call details and compact summaries.
  */
 export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProps> {
 	async render(_state: void, _sizing: PromptSizing) {
@@ -120,7 +120,17 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 
 		const groupedText = renderGroupedProgress(history.groupedProgress);
 		const latestText = history.latestRound ? renderLatestRound(history.latestRound) : undefined;
-		const subagentText = renderSubagentDigests(history.subagentDigests);
+
+		const previousRoundMessages = history.previousRounds.map((round, i) => {
+			// Newer rounds get higher priority while staying below latest activity.
+			const priority = 790 + Math.min(i, 30);
+			return (
+				<UserMessage priority={priority} flexGrow={1}>
+					Previous agent activity [{i + 1}]:{'\n'}
+					{renderToolCallRound(round)}
+				</UserMessage>
+			);
+		});
 
 		// Render each assistant context snippet as its own UserMessage with
 		// descending priority so prompt-tsx can prune the oldest snippets
@@ -133,6 +143,16 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 				<UserMessage priority={priority}>
 					Agent reasoning [{i + 1}]:{'\n'}
 					{snippet}
+				</UserMessage>
+			);
+		});
+
+		const subagentDigestMessages = history.subagentDigests.map((digest, i) => {
+			return (
+				<UserMessage priority={780} flexGrow={1}>
+					Subagent finding [{i + 1}] (reference only - do NOT mirror this structure as the todo list):{'\n'}
+					[{digest.target}]{'\n'}
+					{digest.output}
 				</UserMessage>
 			);
 		});
@@ -163,18 +183,15 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 					</UserMessage>
 				)}
 
+				{previousRoundMessages}
+
 				{assistantContextMessages}
 
-				{subagentText.length > 0 && (
-					<UserMessage priority={780}>
-						Subagent findings (reference only - do NOT mirror this structure as the todo list):{'\n'}
-						{subagentText}
-					</UserMessage>
-				)}
+				{subagentDigestMessages}
 
 				{groupedText.length > 0 && (
 					<UserMessage priority={800} flexGrow={1}>
-						Cumulative progress so far:{'\n'}
+						Compact cumulative progress summary:{'\n'}
 						{groupedText}
 					</UserMessage>
 				)}

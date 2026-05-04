@@ -3,23 +3,23 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type * as vscode from 'vscode';
+import { URI } from '../../../../util/vs/base/common/uri';
 import { Turn } from '../../../prompt/common/conversation';
 import { IBuildPromptContext, IToolCallRound } from '../../../prompt/common/intents';
 import { classifyTool } from './backgroundTodoProcessor';
 
 /**
- * Extract the session resource as a serialized string from a prompt context.
- * `request.sessionResource` is a `Uri` at runtime, so we must call `.toString()`
- * to avoid passing a `Uri` object where a string is expected downstream.
+ * Extract the session resource as a Uri from a prompt context.
  */
-export function extractSessionResourceString(promptContext: IBuildPromptContext): string | undefined {
-	const fromRequest = (promptContext.request as { sessionResource?: { toString(): string } } | undefined)?.sessionResource;
+export function extractSessionResource(promptContext: IBuildPromptContext): vscode.Uri | undefined {
+	const fromRequest = promptContext.request?.sessionResource;
 	if (fromRequest) {
-		return typeof fromRequest === 'string' ? fromRequest : fromRequest.toString();
+		return fromRequest;
 	}
-	const fromToken = (promptContext.tools?.toolInvocationToken as { sessionResource?: { toString(): string } } | undefined)?.sessionResource;
+	const fromToken = (promptContext.tools?.toolInvocationToken as { sessionResource?: string | vscode.Uri } | undefined)?.sessionResource;
 	if (fromToken) {
-		return typeof fromToken === 'string' ? fromToken : fromToken.toString();
+		return typeof fromToken === 'string' ? URI.parse(fromToken) as vscode.Uri : fromToken;
 	}
 	return undefined;
 }
@@ -34,8 +34,8 @@ export interface IBackgroundTodoDelta {
 	readonly newRounds: readonly IToolCallRound[];
 	/** Full conversation history (read-only reference, stable within a turn). */
 	readonly history: readonly Turn[];
-	/** Session resource URI string, needed for todo tool invocation. */
-	readonly sessionResource: string | undefined;
+	/** Session resource URI, needed for todo tool invocation. */
+	readonly sessionResource: vscode.Uri | undefined;
 	/** Metadata useful for policy decisions. */
 	readonly metadata: IBackgroundTodoDeltaMetadata;
 }
@@ -83,19 +83,23 @@ export class BackgroundTodoDeltaTracker {
 	peekDelta(promptContext: IBuildPromptContext): IBackgroundTodoDelta | undefined {
 		const currentRounds = promptContext.toolCallRounds ?? [];
 		const newRounds: IToolCallRound[] = [];
+		const seenRoundIds = new Set<string>();
 
-		for (const round of currentRounds) {
-			if (!this._processedRoundIds.has(round.id)) {
-				newRounds.push(round);
+		// Process historical rounds before current rounds so older context is
+		// pruned first if the background prompt exceeds its budget.
+		for (const turn of promptContext.history) {
+			for (const round of turn.rounds) {
+				if (!this._processedRoundIds.has(round.id) && !seenRoundIds.has(round.id)) {
+					seenRoundIds.add(round.id);
+					newRounds.push(round);
+				}
 			}
 		}
 
-		// Also check history turns for rounds not yet seen (follow-up turns).
-		for (const turn of promptContext.history) {
-			for (const round of turn.rounds) {
-				if (!this._processedRoundIds.has(round.id)) {
-					newRounds.push(round);
-				}
+		for (const round of currentRounds) {
+			if (!this._processedRoundIds.has(round.id) && !seenRoundIds.has(round.id)) {
+				seenRoundIds.add(round.id);
+				newRounds.push(round);
 			}
 		}
 
@@ -129,7 +133,7 @@ export class BackgroundTodoDeltaTracker {
 			userRequest,
 			newRounds,
 			history: promptContext.history,
-			sessionResource: extractSessionResourceString(promptContext),
+			sessionResource: extractSessionResource(promptContext),
 			metadata: {
 				newRoundCount: newRounds.length,
 				newToolCallCount,

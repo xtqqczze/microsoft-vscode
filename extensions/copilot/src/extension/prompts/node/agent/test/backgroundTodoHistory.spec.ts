@@ -15,6 +15,7 @@ import {
 	renderGroupedProgress,
 	renderLatestRound,
 	renderSubagentDigests,
+	renderToolCallRound,
 } from '../backgroundTodoProcessor';
 
 function makeCall(name: string, args: Record<string, unknown> = {}): IToolCall {
@@ -155,6 +156,7 @@ describe('compressHistory', () => {
 	test('returns empty history for no rounds', () => {
 		const result = compressHistory([]);
 		expect(result.groupedProgress).toHaveLength(0);
+		expect(result.previousRounds).toHaveLength(0);
 		expect(result.latestRound).toBeUndefined();
 		expect(result.assistantContext).toHaveLength(0);
 	});
@@ -165,6 +167,7 @@ describe('compressHistory', () => {
 		], 'I updated the file');
 		const result = compressHistory([round]);
 		expect(result.groupedProgress).toHaveLength(0);
+		expect(result.previousRounds).toHaveLength(0);
 		expect(result.latestRound).toBeDefined();
 		expect(result.latestRound!.toolSummaries).toHaveLength(1);
 		expect(result.latestRound!.assistantResponse).toBe('I updated the file');
@@ -186,6 +189,23 @@ describe('compressHistory', () => {
 
 		// r1 and r2 should be grouped; r3 is latestRound
 		expect(result.groupedProgress).toHaveLength(2);
+		expect(result.previousRounds).toEqual([
+			{
+				id: 'r1',
+				toolSummaries: [
+					{ name: ToolName.ReadFile, target: 'src/a.ts' },
+					{ name: ToolName.ReplaceString, target: 'src/a.ts' },
+				],
+				assistantResponse: '',
+			},
+			{
+				id: 'r2',
+				toolSummaries: [
+					{ name: ToolName.ReadFile, target: 'src/b.ts' },
+				],
+				assistantResponse: '',
+			},
+		]);
 		// src/a.ts has 1 meaningful + 1 context, should sort first
 		const aGroup = result.groupedProgress.find(g => g.target === 'src/a.ts');
 		expect(aGroup).toBeDefined();
@@ -256,6 +276,29 @@ describe('compressHistory', () => {
 		expect(summaries[2].note).toBeUndefined();
 	});
 
+	test('attaches explanation/description as a per-call note in previous rounds', () => {
+		const r1 = makeRound('r1', [
+			makeCall(ToolName.MultiReplaceString, {
+				explanation: 'Update the processor to keep full tool round detail',
+				replacements: [{ filePath: 'src/a.ts' }],
+			}),
+			makeCall(ToolName.CoreRunSubagent, { description: 'Inspect related prompt rendering' }),
+		], 'Earlier progress');
+		const r2 = makeRound('r2', [makeCall(ToolName.ReadFile, { filePath: 'src/b.ts' })]);
+		const result = compressHistory([r1, r2]);
+
+		expect(result.previousRounds).toEqual([
+			{
+				id: 'r1',
+				toolSummaries: [
+					{ name: ToolName.MultiReplaceString, target: 'src/a.ts', note: 'Update the processor to keep full tool round detail' },
+					{ name: ToolName.CoreRunSubagent, target: 'subagent', note: 'Inspect related prompt rendering' },
+				],
+				assistantResponse: 'Earlier progress',
+			},
+		]);
+	});
+
 	test('does not truncate the latest round response (prompt-tsx handles pruning)', () => {
 		const longResponse = 'x'.repeat(3000);
 		const round = makeRound('r1', [makeCall(ToolName.ReadFile, { filePath: 'a.ts' })], longResponse);
@@ -315,6 +358,26 @@ describe('renderGroupedProgress', () => {
 	});
 });
 
+// ── renderToolCallRound ─────────────────────────────────────────
+
+describe('renderToolCallRound', () => {
+	test('renders historical tool rounds with targets and notes', () => {
+		const text = renderToolCallRound({
+			id: 'r1',
+			toolSummaries: [
+				{ name: ToolName.ReplaceString, target: 'src/app.ts', note: 'Patch the app entrypoint' },
+				{ name: ToolName.CoreRunInTerminal, target: 'terminal' },
+			],
+			assistantResponse: 'I updated and validated the app',
+		});
+
+		expect(text).toContain('Round r1:');
+		expect(text).toContain(`- ${ToolName.ReplaceString} → src/app.ts`);
+		expect(text).toContain('Patch the app entrypoint');
+		expect(text).toContain('Agent said: I updated and validated the app');
+	});
+});
+
 // ── renderLatestRound ───────────────────────────────────────────
 
 describe('renderLatestRound', () => {
@@ -346,7 +409,7 @@ describe('renderLatestRound', () => {
 
 describe('subagent digests', () => {
 	test('compressHistory extracts subagent outputs when toolCallResults provided', () => {
-		const subagentCall: IToolCall = { name: ToolName.ExploreSubagent, arguments: '{}', id: 'tc-sa-1' };
+		const subagentCall: IToolCall = { name: ToolName.ExploreSubagent, arguments: JSON.stringify({ description: 'Find logging gaps' }), id: 'tc-sa-1' };
 		const editCall = makeCall(ToolName.ReplaceString, { filePath: 'src/a.ts' });
 		const r1 = makeRound('r1', [subagentCall]);
 		const r2 = makeRound('r2', [editCall], 'done');
@@ -357,8 +420,23 @@ describe('subagent digests', () => {
 		const result = compressHistory([r1, r2], results);
 
 		expect(result.subagentDigests).toHaveLength(1);
-		expect(result.subagentDigests[0].target).toBe('search subagent');
+		expect(result.subagentDigests[0].target).toBe('search subagent: Find logging gaps');
 		expect(result.subagentDigests[0].output).toContain('Found logging gaps');
+	});
+
+	test('compressHistory chunks large subagent outputs', () => {
+		const subagentCall: IToolCall = { name: ToolName.ExploreSubagent, arguments: '{}', id: 'tc-sa-1' };
+		const longOutput = 'x'.repeat(9000);
+		const results: Record<string, LanguageModelToolResult> = {
+			'tc-sa-1': new LanguageModelToolResult([new LanguageModelTextPart(longOutput)]),
+		};
+
+		const result = compressHistory([makeRound('r1', [subagentCall])], results);
+
+		expect(result.subagentDigests.length).toBeGreaterThan(1);
+		expect(result.subagentDigests.map(digest => digest.output).join('')).toBe(longOutput);
+		expect(result.subagentDigests.every(digest => digest.output.length <= 4000)).toBe(true);
+		expect(result.subagentDigests[0].target).toBe('search subagent (part 1/3)');
 	});
 
 	test('compressHistory returns empty subagentDigests when no toolCallResults', () => {

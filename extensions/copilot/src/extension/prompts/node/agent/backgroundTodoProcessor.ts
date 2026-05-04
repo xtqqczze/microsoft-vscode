@@ -20,7 +20,7 @@ import { normalizeToolSchema } from '../../../tools/common/toolSchemaNormalizer'
 import { ToolName } from '../../../tools/common/toolNames';
 import { IToolsService } from '../../../tools/common/toolsService';
 import { renderPromptElement } from '../base/promptRenderer';
-import { BackgroundTodoDeltaTracker, extractSessionResourceString, IBackgroundTodoDelta } from './backgroundTodoDelta';
+import { BackgroundTodoDeltaTracker, extractSessionResource, IBackgroundTodoDelta } from './backgroundTodoDelta';
 import { BackgroundTodoPrompt } from './backgroundTodoPrompt';
 
 /**
@@ -255,14 +255,15 @@ export class BackgroundTodoProcessor {
 		const passNum = this._passCount;
 		this._state = BackgroundTodoProcessorState.InProgress;
 		this._lastError = undefined;
-		this._cts = new CancellationTokenSource(parentToken);
-		const token = this._cts.token;
+		const cts = new CancellationTokenSource(parentToken);
+		this._cts = cts;
+		const token = cts.token;
 
 		this._logService?.debug(`[BackgroundTodo] starting pass #${passNum} — newRounds=${delta.metadata.newRoundCount}, meaningful=${delta.metadata.meaningfulToolCallCount}, context=${delta.metadata.contextToolCallCount}`);
 
-		this._promise = work(delta, token).then(
+		const passPromise = work(delta, token).then(
 			(result) => {
-				if (this._state !== BackgroundTodoProcessorState.InProgress) {
+				if (this._state !== BackgroundTodoProcessorState.InProgress || this._cts !== cts) {
 					this._logService?.debug(`[BackgroundTodo] pass #${passNum} completed but state was ${this._state} (cancelled?)`);
 					return; // cancelled while in flight
 				}
@@ -271,21 +272,37 @@ export class BackgroundTodoProcessor {
 				}
 				this._logService?.debug(`[BackgroundTodo] pass #${passNum} completed: outcome=${result.outcome}, durationMs=${result.durationMs ?? '?'}, model=${result.model ?? '?'}, promptTokens=${result.promptTokens ?? '?'}, completionTokens=${result.completionTokens ?? '?'}`);
 				this.deltaTracker.markProcessed(delta);
+				this._disposeCts(cts);
 				this._state = BackgroundTodoProcessorState.Idle;
-				this._checkPending(work, parentToken);
+				const hasPending = this._checkPending(work, parentToken);
+				if (!hasPending && this._promise === passPromise) {
+					this._promise = undefined;
+				}
 			},
 			(err) => {
-				if (this._state !== BackgroundTodoProcessorState.InProgress) {
+				if (this._state !== BackgroundTodoProcessorState.InProgress || this._cts !== cts) {
 					return; // cancelled while in flight
 				}
 				this._lastError = err;
+				this._disposeCts(cts);
 				this._state = BackgroundTodoProcessorState.Failed;
 				this._logService?.warn(`[BackgroundTodo] pass #${passNum} failed: ${err}`);
 				// Do NOT advance the cursor — the delta's rounds remain unprocessed
 				// so a subsequent pass can retry with fresh or coalesced activity.
-				this._checkPending(work, parentToken);
+				const hasPending = this._checkPending(work, parentToken);
+				if (!hasPending && this._promise === passPromise) {
+					this._promise = undefined;
+				}
 			},
 		);
+		this._promise = passPromise;
+	}
+
+	private _disposeCts(cts: CancellationTokenSource): void {
+		if (this._cts === cts) {
+			this._cts = undefined;
+		}
+		cts.dispose();
 	}
 
 	/**
@@ -294,7 +311,7 @@ export class BackgroundTodoProcessor {
 	private _checkPending(
 		work: (delta: IBackgroundTodoDelta, token: CancellationToken) => Promise<IBackgroundTodoResult>,
 		parentToken?: CancellationToken,
-	): void {
+	): boolean {
 		const pending = this._pendingDelta;
 		if (pending) {
 			// Prefer the work callback that was stashed alongside the pending delta —
@@ -306,7 +323,9 @@ export class BackgroundTodoProcessor {
 			this._pendingDelta = undefined;
 			this._pendingWork = undefined;
 			this._runPass(pending, pendingWork, parentToken);
+			return true;
 		}
+		return false;
 	}
 
 	/**
@@ -395,7 +414,7 @@ export class BackgroundTodoProcessor {
 			userRequest: ctx.promptContext.query,
 			newRounds: allRounds,
 			history: ctx.promptContext.history,
-			sessionResource: extractSessionResourceString(ctx.promptContext),
+			sessionResource: extractSessionResource(ctx.promptContext),
 			metadata: {
 				newRoundCount: allRounds.length,
 				newToolCallCount: meaningful + contextual,
@@ -442,10 +461,11 @@ export class BackgroundTodoProcessor {
 		}
 
 		// Read current todo state
-		const todoContext = delta.sessionResource
+		const sessionResource = delta.sessionResource;
+		const todoContext = sessionResource
 			? await context.instantiationService.invokeFunction(async (accessor) => {
 				const todoProvider = accessor.get<ITodoListContextProvider>(ITodoListContextProvider);
-				return todoProvider.getCurrentTodoContext(delta.sessionResource!);
+				return todoProvider.getCurrentTodoContext(sessionResource.toString());
 			})
 			: undefined;
 
@@ -454,7 +474,7 @@ export class BackgroundTodoProcessor {
 		// Calling collectAllRounds(delta.history, delta.newRounds) would duplicate
 		// rounds that peekDelta already extracted from history.
 		const compressedHistory = compressHistory(delta.newRounds, context.promptContext.toolCallResults);
-		context.logService.debug(`[BackgroundTodo] compressed history — groups=${compressedHistory.groupedProgress.length}, latestRoundTools=${compressedHistory.latestRound?.toolSummaries.length ?? 0}, assistantContextSnippets=${compressedHistory.assistantContext.length}, subagentDigests=${compressedHistory.subagentDigests.length}, hasTodos=${todoContext !== undefined}`);
+		context.logService.debug(`[BackgroundTodo] compressed history — groups=${compressedHistory.groupedProgress.length}, previousRounds=${compressedHistory.previousRounds.length}, latestRoundTools=${compressedHistory.latestRound?.toolSummaries.length ?? 0}, assistantContextSnippets=${compressedHistory.assistantContext.length}, subagentDigests=${compressedHistory.subagentDigests.length}, hasTodos=${todoContext !== undefined}`);
 
 		// Render the prompt
 		const { messages } = await renderPromptElement(
@@ -565,10 +585,15 @@ export class BackgroundTodoProcessor {
 		}
 
 		try {
-			const toolInvocationToken = (context.promptContext.tools?.toolInvocationToken) ?? undefined;
+			const toolInvocationToken = context.promptContext.tools?.toolInvocationToken;
+			if (!toolInvocationToken) {
+				context.logService.warn('[BackgroundTodo] todo tool invocation skipped: missing tool invocation token');
+				BackgroundTodoProcessor._sendTelemetry(context.telemetryService, 'toolInvokeError', conversationId, associatedRequestId, durationMs, usage?.prompt_tokens, usage?.completion_tokens, fastEndpoint.model);
+				return { outcome: 'noop', durationMs, model: fastEndpoint.model };
+			}
 			await context.toolsService.invokeTool(ToolName.CoreManageTodoList, {
 				input: parsedInput,
-				toolInvocationToken: toolInvocationToken!,
+				toolInvocationToken,
 			}, token);
 		} catch (err) {
 			context.logService.warn(`[BackgroundTodo] tool invocation failed: ${err}`);
@@ -627,12 +652,15 @@ export class BackgroundTodoProcessor {
 		this._lastError = undefined;
 		this._promise = undefined;
 		this._pendingDelta = undefined;
+		this._pendingWork = undefined;
+		this._lastExecutionContext = undefined;
+		this._finalReviewQueued = false;
 	}
 }
 
 // ══════════════════════════════════════════════════════════════════
-// History compression — classifies, groups, and renders tool-call
-// rounds into a compact form for the background todo prompt.
+// History processing — classifies, groups, and renders tool-call
+// rounds for the background todo prompt.
 // ══════════════════════════════════════════════════════════════════
 
 // ── Tool classification ─────────────────────────────────────────
@@ -803,7 +831,7 @@ export function extractTarget(call: IToolCall): string {
 	return call.name;
 }
 
-// ── Compressed history types ────────────────────────────────────
+// ── History types ───────────────────────────────────────────────
 
 /**
  * A group of tool calls targeting the same file or category,
@@ -820,12 +848,32 @@ export interface IToolCallGroup {
 	readonly totalCalls: number;
 }
 
+/** A single tool call rendered with enough context to distinguish similar calls. */
+export interface IToolCallSummary {
+	/** Tool name as exposed to the model. */
+	readonly name: string;
+	/** File path or tool-type category (e.g. "terminal", "tests/tasks"). */
+	readonly target?: string;
+	/** Optional human-readable intent extracted from tool arguments. */
+	readonly note?: string;
+}
+
+/** Full-fidelity detail for one historical tool-call round. */
+export interface IToolCallRoundDetail {
+	/** Round id, used only as a stable label in rendered history. */
+	readonly id: string;
+	/** Tool name + optional target + optional human-readable note for each call in the round. */
+	readonly toolSummaries: readonly IToolCallSummary[];
+	/** The assistant's response text after this round. */
+	readonly assistantResponse: string;
+}
+
 /**
  * Full-fidelity detail for the most recent tool-call round.
  */
 export interface ILatestRoundDetail {
 	/** Tool name + optional target + optional human-readable note for each call in the round. */
-	readonly toolSummaries: readonly { name: string; target?: string; note?: string }[];
+	readonly toolSummaries: readonly IToolCallSummary[];
 	/** The assistant's response text after this round, truncated. */
 	readonly assistantResponse: string;
 }
@@ -844,12 +892,14 @@ export interface ISubagentDigest {
 }
 
 /**
- * Compressed representation of conversation history for the background
- * todo prompt. Produced by {@link compressHistory}.
+ * Representation of conversation history for the background todo prompt.
+ * Produced by {@link compressHistory}.
  */
 export interface IBackgroundTodoHistory {
 	/** Grouped progress from all rounds except the latest. */
 	readonly groupedProgress: readonly IToolCallGroup[];
+	/** Per-round tool activity from all rounds except the latest. */
+	readonly previousRounds: readonly IToolCallRoundDetail[];
 	/** Full-fidelity detail for the most recent round. */
 	readonly latestRound: ILatestRoundDetail | undefined;
 	/** 1–2 recent assistant response snippets for reasoning context. */
@@ -869,6 +919,8 @@ const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
 	ToolName.CoreRunSubagent,
 ]);
 
+const MAX_SUBAGENT_DIGEST_CHUNK_LENGTH = 4000;
+
 /**
  * Collect all tool-call rounds from history turns and current-turn rounds
  * in chronological order.
@@ -885,9 +937,10 @@ export function collectAllRounds(history: readonly Turn[], currentRounds: readon
 }
 
 /**
- * Compress raw tool-call rounds into a structured history for the
- * background todo prompt. All rounds except the last are collapsed
- * into groups; the last round is kept at full fidelity.
+ * Process raw tool-call rounds into a structured history for the
+ * background todo prompt. Older rounds are kept as per-round summaries
+ * and also grouped as a compact fallback; the last round is kept at full
+ * fidelity.
  *
  * If `toolCallResults` is provided, subagent outputs are extracted into
  * {@link IBackgroundTodoHistory.subagentDigests} so the background agent
@@ -898,7 +951,7 @@ export function compressHistory(
 	toolCallResults?: Record<string, vscode.LanguageModelToolResult>,
 ): IBackgroundTodoHistory {
 	if (allRounds.length === 0) {
-		return { groupedProgress: [], latestRound: undefined, assistantContext: [], subagentDigests: [] };
+		return { groupedProgress: [], previousRounds: [], latestRound: undefined, assistantContext: [], subagentDigests: [] };
 	}
 
 	const latestRoundRaw = allRounds[allRounds.length - 1];
@@ -944,20 +997,12 @@ export function compressHistory(
 			totalCalls: g.total,
 		}));
 
-	// ── Latest round detail ─────────────────────────────────
-	const filteredCalls = latestRoundRaw.toolCalls.filter(c => classifyTool(c.name) !== 'excluded');
-	const toolSummaries = filteredCalls
-		.map(c => {
-			const note = extractToolNote(c);
-			return note
-				? { name: c.name, target: extractTarget(c), note }
-				: { name: c.name, target: extractTarget(c) };
-		});
+	const previousRounds = olderRounds
+		.map(round => toToolCallRoundDetail(round))
+		.filter(round => round.toolSummaries.length > 0 || round.assistantResponse.trim().length > 0);
 
-	const latestRound: ILatestRoundDetail = {
-		toolSummaries,
-		assistantResponse: latestRoundRaw.response,
-	};
+	// ── Latest round detail ─────────────────────────────────
+	const latestRound = toLatestRoundDetail(latestRoundRaw);
 
 	// ── Assistant context ────────────────────────────────────
 	const assistantContext = extractAssistantContext(allRounds);
@@ -967,7 +1012,33 @@ export function compressHistory(
 		? extractSubagentDigests(allRounds, toolCallResults)
 		: [];
 
-	return { groupedProgress, latestRound, assistantContext, subagentDigests };
+	return { groupedProgress, previousRounds, latestRound, assistantContext, subagentDigests };
+}
+
+function toToolCallRoundDetail(round: IToolCallRound): IToolCallRoundDetail {
+	return {
+		id: round.id,
+		toolSummaries: summarizeToolCalls(round.toolCalls),
+		assistantResponse: round.response,
+	};
+}
+
+function toLatestRoundDetail(round: IToolCallRound): ILatestRoundDetail {
+	return {
+		toolSummaries: summarizeToolCalls(round.toolCalls),
+		assistantResponse: round.response,
+	};
+}
+
+function summarizeToolCalls(calls: readonly IToolCall[]): IToolCallSummary[] {
+	return calls
+		.filter(call => classifyTool(call.name) !== 'excluded')
+		.map(call => {
+			const note = extractToolNote(call);
+			return note
+				? { name: call.name, target: extractTarget(call), note }
+				: { name: call.name, target: extractTarget(call) };
+		});
 }
 
 /**
@@ -989,7 +1060,7 @@ function extractAssistantContext(allRounds: readonly IToolCallRound[]): string[]
 
 /**
  * Extract textual outputs from subagent tool calls in chronological order.
- * Each digest is individually truncated; the prompt-tsx renderer is responsible
+ * Large digests are split into chunks; the prompt-tsx renderer is responsible
  * for pruning lower-priority blocks if the overall prompt exceeds the budget.
  */
 function extractSubagentDigests(
@@ -1011,11 +1082,32 @@ function extractSubagentDigests(
 			if (output.length === 0) {
 				continue;
 			}
-			digests.push({ target: extractTarget(call), output });
+			const target = extractSubagentDigestTarget(call);
+			const chunks = splitSubagentDigestOutput(output);
+			for (let i = 0; i < chunks.length; i++) {
+				digests.push({
+					target: chunks.length === 1 ? target : `${target} (part ${i + 1}/${chunks.length})`,
+					output: chunks[i],
+				});
+			}
 		}
 	}
 
 	return digests;
+}
+
+function extractSubagentDigestTarget(call: IToolCall): string {
+	const target = extractTarget(call);
+	const note = extractToolNote(call);
+	return note ? `${target}: ${note}` : target;
+}
+
+function splitSubagentDigestOutput(output: string): string[] {
+	const chunks: string[] = [];
+	for (let start = 0; start < output.length; start += MAX_SUBAGENT_DIGEST_CHUNK_LENGTH) {
+		chunks.push(output.slice(start, start + MAX_SUBAGENT_DIGEST_CHUNK_LENGTH));
+	}
+	return chunks;
 }
 
 function stringifyToolResult(result: vscode.LanguageModelToolResult): string {
@@ -1052,20 +1144,30 @@ export function renderGroupedProgress(groups: readonly IToolCallGroup[]): string
 	}).join('\n');
 }
 
-/**
- * Render the latest round detail into a string for the prompt.
- */
-export function renderLatestRound(detail: ILatestRoundDetail): string {
-	const toolLines = detail.toolSummaries.map(s => {
-		const head = s.target ? `- ${s.name} → ${s.target}` : `- ${s.name}`;
-		return s.note ? `${head}\n      ↳ ${s.note}` : head;
-	}).join('\n');
-
-	const parts = ['Current tools:', toolLines];
+export function renderToolCallRound(detail: IToolCallRoundDetail): string {
+	const parts = [`Round ${detail.id}:`, renderToolSummaries(detail.toolSummaries)];
 	if (detail.assistantResponse.length > 0) {
 		parts.push(`\nAgent said: ${detail.assistantResponse}`);
 	}
 	return parts.join('\n');
+}
+
+/**
+ * Render the latest round detail into a string for the prompt.
+ */
+export function renderLatestRound(detail: ILatestRoundDetail): string {
+	const parts = ['Current tools:', renderToolSummaries(detail.toolSummaries)];
+	if (detail.assistantResponse.length > 0) {
+		parts.push(`\nAgent said: ${detail.assistantResponse}`);
+	}
+	return parts.join('\n');
+}
+
+function renderToolSummaries(toolSummaries: readonly IToolCallSummary[]): string {
+	return toolSummaries.map(s => {
+		const head = s.target ? `- ${s.name} → ${s.target}` : `- ${s.name}`;
+		return s.note ? `${head}\n      ↳ ${s.note}` : head;
+	}).join('\n');
 }
 
 /**
