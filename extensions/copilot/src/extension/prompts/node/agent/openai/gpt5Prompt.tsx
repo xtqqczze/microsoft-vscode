@@ -56,7 +56,6 @@ class DefaultGpt5AgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 				{!tools[ToolName.CoreManageTodoList] && <>
 					For complex tasks requiring multiple steps, you should maintain an organized approach even. Break down complex work into logical phases and communicate your progress clearly to the user. Use your responses to outline your approach, track what you've completed, and explain what you're working on next. Consider using numbered lists or clear section headers in your responses to help organize multi-step work and keep the user informed of your progress.<br />
 				</>}
-				<>
 				Use a plan when:<br />
 				- The task is non-trivial and will require multiple actions over a long time horizon.<br />
 				- There are logical phases or dependencies where sequencing matters.<br />
@@ -123,7 +122,6 @@ class DefaultGpt5AgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 				3. Summarize usage instructions<br />
 				<br />
 				If you need to write a plan, only write high quality plans, not low quality ones.<br />
-				</>
 			</Tag>
 			<Tag name='task_execution'>
 				You are a coding agent. Please keep going until the query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved. Autonomously resolve the query to the best of your ability, using the tools available to you, before coming back to the user. Do NOT guess or make up an answer.<br />
