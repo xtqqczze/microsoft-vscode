@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { BasePromptElementProps, PromptElement, PromptSizing, SystemMessage, UserMessage } from '@vscode/prompt-tsx';
-import { IBackgroundTodoHistory, renderGroupedProgress, renderLatestRound, renderToolCallRound } from './backgroundTodoProcessor';
+import { BackgroundTodoProcessor, IBackgroundTodoHistory, renderGroupedProgress, renderLatestRound, renderToolCallRound } from './backgroundTodoProcessor';
 
 export interface BackgroundTodoPromptProps extends BasePromptElementProps {
 	/** Current todo list state as rendered markdown, or undefined if no todos exist yet. */
@@ -138,9 +138,10 @@ export class BackgroundTodoPrompt extends PromptElement<BackgroundTodoPromptProp
 		// descending priority so prompt-tsx can prune the oldest snippets
 		// first when the prompt is over budget.
 		const assistantContextMessages = history.assistantContext.map((snippet, i) => {
-			// Newer snippets get higher priority. Base priority 820, decrement by
-			// index so the first (oldest) snippet is the lowest.
-			const priority = 820 - i;
+			// Newer snippets (higher index) get higher priority so prompt-tsx
+			// prunes the oldest snippets first when the prompt exceeds budget.
+			const total = history.assistantContext.length;
+			const priority = 820 - (total - 1 - i);
 			return (
 				<UserMessage priority={priority}>
 					Agent reasoning [{i + 1}]:{'\n'}

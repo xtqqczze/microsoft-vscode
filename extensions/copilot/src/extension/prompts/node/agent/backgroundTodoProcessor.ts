@@ -469,11 +469,12 @@ export class BackgroundTodoProcessor {
 			})
 			: undefined;
 
-		// Use delta.newRounds directly — they already include unprocessed rounds
-		// from both the current turn and history (collected by peekDelta).
-		// Calling collectAllRounds(delta.history, delta.newRounds) would duplicate
-		// rounds that peekDelta already extracted from history.
-		const compressedHistory = compressHistory(delta.newRounds, context.promptContext.toolCallResults);
+		// Use the full trajectory (history + current turn rounds) so the model
+		// can see completion evidence from earlier rounds — not just the new
+		// activity since the last pass. The delta tracker drives *when* to fire
+		// (policy); the full trajectory drives *what context* the model sees.
+		const allRounds = collectAllRounds(context.promptContext.history, context.promptContext.toolCallRounds ?? []);
+		const compressedHistory = compressHistory(allRounds, context.promptContext.toolCallResults);
 		context.logService.debug(`[BackgroundTodo] compressed history — groups=${compressedHistory.groupedProgress.length}, previousRounds=${compressedHistory.previousRounds.length}, latestRoundTools=${compressedHistory.latestRound?.toolSummaries.length ?? 0}, assistantContextSnippets=${compressedHistory.assistantContext.length}, subagentDigests=${compressedHistory.subagentDigests.length}, hasTodos=${todoContext !== undefined}`);
 
 		// Render the prompt
