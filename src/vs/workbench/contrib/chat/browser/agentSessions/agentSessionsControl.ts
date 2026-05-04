@@ -801,8 +801,12 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 	focus(): void {
 		this.sessionsList?.domFocus();
 
-		if ((this.sessionsList?.getFocus().length ?? 0) === 0) {
-			this.sessionsList?.focusFirst();
+		try {
+			if ((this.sessionsList?.getFocus().length ?? 0) === 0) {
+				this.sessionsList?.focusFirst();
+			}
+		} catch {
+			// Tree model may be temporarily inconsistent during async refresh.
 		}
 	}
 
