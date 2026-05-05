@@ -236,7 +236,6 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 		}
 
 		if (this.#isScrolling) {
-			this.#isScrolling = false;
 			return;
 		}
 
