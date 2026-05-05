@@ -741,7 +741,7 @@
           },
           "markdown.preview.markEditorSelection": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "description": "%markdown.preview.markEditorSelection.desc%",
             "scope": "resource"
           },
@@ -753,7 +753,7 @@
           },
           "markdown.preview.doubleClickToSwitchToEditor": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "description": "%markdown.preview.doubleClickToSwitchToEditor.desc%",
             "scope": "resource"
           },
