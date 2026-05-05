@@ -30,7 +30,7 @@ const AGENTS_WINDOW_PROFILE_FLAGS: UseDefaultProfileFlags = {
 	mcp: true,
 	snippets: true,
 	tasks: true,
-  extensions: true,
+	extensions: true,
 };
 
 export const enum ProfileResourceType {
