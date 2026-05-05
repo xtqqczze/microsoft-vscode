@@ -29,6 +29,7 @@ const AGENTS_WINDOW_PROFILE_OPTIONS: IUserDataProfileOptions = {
 		mcp: true,
 		snippets: true,
 		tasks: true,
+		extensions: true,
 	}
 };
 
