@@ -165,7 +165,7 @@ suite('Inline Completions', () => {
 	test('Next/previous', async function () {
 		const provider = new MockInlineCompletionsProvider();
 		await withAsyncTestCodeEditorAndInlineCompletionsModel('',
-			{ fakeClock: true, logTimeTrace: true, provider },
+			{ fakeClock: true, provider },
 			async ({ editor, editorViewModel, model, context, logger }) => {
 				context.keyboardType('foo');
 				provider.setReturnValue({ insertText: 'foobar1', range: new Range(1, 1, 1, 4) });
