@@ -6,6 +6,7 @@
 import { RunOnceScheduler } from '../../../base/common/async.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
+import { equals } from '../../../base/common/objects.js';
 import { ILogService } from '../../log/common/log.js';
 import { ActionType, NotificationType, ActionEnvelope, ActionOrigin, INotification, IRootConfigChangedAction, SessionAction, RootAction, StateAction, TerminalAction, isRootAction, isSessionAction } from '../common/state/sessionActions.js';
 import type { IStateSnapshot } from '../common/state/sessionProtocol.js';
@@ -333,6 +334,22 @@ export class AgentHostStateManager extends Disposable {
 		let resultingState: unknown = undefined;
 		// Apply to state
 		if (isRootAction(action)) {
+			// `RootConfigChanged` can be a true no-op: the reducer merges/replaces
+			// values even when the patch matches the current state, and re-emitting
+			// it would cause clients observing rootState.onDidChange to react and
+			// potentially re-dispatch in a loop. Check the action's own patch
+			// against current values before running the reducer so we avoid
+			// allocating a new state object at all.
+			if (action.type === ActionType.RootConfigChanged && this._rootState.config) {
+				const current = this._rootState.config.values;
+				const patch = action.config;
+				const isNoOp = action.replace
+					? equals(current, patch)
+					: equals({ ...current, ...patch }, current);
+				if (isNoOp) {
+					return this._rootState;
+				}
+			}
 			this._rootState = rootReducer(this._rootState, action as RootAction, this._log);
 			resultingState = this._rootState;
 		}
