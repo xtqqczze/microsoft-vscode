@@ -24,7 +24,8 @@ const SCROLL_WHEEL_SENSITIVITY = 50;
 const SCROLL_WHEEL_SMOOTH_SCROLL_ENABLED = true;
 
 /** The default size (px) used when a scrollbar element does not pass an explicit size. */
-let globalDefaultScrollbarSize = 10;
+export const DEFAULT_SCROLLBAR_SIZE = 10;
+let globalDefaultScrollbarSize = DEFAULT_SCROLLBAR_SIZE;
 const _onDidChangeDefaultScrollbarSizeEmitter = new Emitter<number>();
 export const onDidChangeDefaultScrollbarSize: Event<number> = _onDidChangeDefaultScrollbarSizeEmitter.event;
 
@@ -293,11 +294,15 @@ export abstract class AbstractScrollableElement extends Widget {
 		// menus, peek, chat input, etc.) use a fixed size and must not be updated.
 		const hSizeExplicit = typeof options.horizontalScrollbarSize !== 'undefined';
 		const vSizeExplicit = typeof options.verticalScrollbarSize !== 'undefined';
+		const hSliderExplicit = typeof options.horizontalSliderSize !== 'undefined';
+		const vSliderExplicit = typeof options.verticalSliderSize !== 'undefined';
 		if (!hSizeExplicit || !vSizeExplicit) {
 			this._register(onDidChangeDefaultScrollbarSize(newSize => {
 				this.updateOptions({
 					...(!hSizeExplicit ? { horizontalScrollbarSize: newSize } : {}),
+					...(!hSizeExplicit && !hSliderExplicit ? { horizontalSliderSize: newSize } : {}),
 					...(!vSizeExplicit ? { verticalScrollbarSize: newSize } : {}),
+					...(!vSizeExplicit && !vSliderExplicit ? { verticalSliderSize: newSize } : {}),
 				});
 			}));
 		}
@@ -380,8 +385,14 @@ export abstract class AbstractScrollableElement extends Widget {
 		if (typeof newOptions.horizontalScrollbarSize !== 'undefined') {
 			this._options.horizontalScrollbarSize = newOptions.horizontalScrollbarSize;
 		}
+		if (typeof newOptions.horizontalSliderSize !== 'undefined') {
+			this._options.horizontalSliderSize = newOptions.horizontalSliderSize;
+		}
 		if (typeof newOptions.verticalScrollbarSize !== 'undefined') {
 			this._options.verticalScrollbarSize = newOptions.verticalScrollbarSize;
+		}
+		if (typeof newOptions.verticalSliderSize !== 'undefined') {
+			this._options.verticalSliderSize = newOptions.verticalSliderSize;
 		}
 		if (typeof newOptions.scrollByPage !== 'undefined') {
 			this._options.scrollByPage = newOptions.scrollByPage;
