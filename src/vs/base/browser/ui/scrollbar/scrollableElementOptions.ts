@@ -137,10 +137,8 @@ export interface ScrollableElementChangeOptions {
 	scrollPredominantAxis?: boolean;
 	horizontal?: ScrollbarVisibility;
 	horizontalScrollbarSize?: number;
-	horizontalSliderSize?: number;
 	vertical?: ScrollbarVisibility;
 	verticalScrollbarSize?: number;
-	verticalSliderSize?: number;
 	scrollByPage?: boolean;
 }
 
