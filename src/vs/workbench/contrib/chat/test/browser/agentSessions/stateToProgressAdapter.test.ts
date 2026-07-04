@@ -6,9 +6,10 @@
 import assert from 'assert';
 import { autorun } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import type { IMarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { MessageKind, ToolCallStatus, ToolCallConfirmationReason, ToolResultContentType, TurnState, ResponsePartKind, type ActiveTurn, type ICompletedToolCall, type ToolCallRunningState, type Turn, type ToolCallResponsePart, ToolCallCancellationReason, type Message } from '../../../../../../platform/agentHost/common/state/sessionState.js';
-import { IChatToolInvocation, IChatToolInvocationSerialized, type IChatMarkdownContent, type IChatProgressMessage, type IChatThinkingPart, type IChatUsage } from '../../../common/chatService/chatService.js';
+import { IChatToolInvocation, IChatToolInvocationSerialized, type IChatMarkdownContent, type IChatThinkingPart, type IChatUsage } from '../../../common/chatService/chatService.js';
 import { isToolResultInputOutputDetails, type IToolResultInputOutputDetails, ToolDataSource, ToolInvocationPresentation } from '../../../common/tools/languageModelToolsService.js';
 import { turnsToHistory as rawTurnsToHistory, activeTurnToProgress as rawActiveTurnToProgress, toolCallStateToInvocation as rawToolCallStateToInvocation, finalizeToolInvocation as rawFinalizeToolInvocation, updateRunningToolSpecificData as rawUpdateRunningToolSpecificData, usageInfoToQuotas, formatTurnResponseDetails } from '../../../browser/agentSessions/agentHost/stateToProgressAdapter.js';
 
@@ -151,7 +152,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(history[0].systemInitiatedLabel, undefined);
 		});
 
-		test('system notification response part restores as progress message', () => {
+		test('system notification response part restores as system notification', () => {
 			const turn = createTurn({
 				responseParts: [{ kind: ResponsePartKind.SystemNotification, content: 'Shell command completed' }],
 			});
@@ -160,8 +161,9 @@ suite('stateToProgressAdapter', () => {
 			const response = history[1];
 			assert.strictEqual(response.type, 'response');
 			if (response.type !== 'response') { return; }
-			const progress = response.parts[0] as IChatProgressMessage;
-			assert.strictEqual(progress.kind, 'progressMessage');
+			const progress = response.parts[0];
+			assert.strictEqual(progress.kind, 'systemNotification');
+			if (progress.kind !== 'systemNotification') { return; }
 			assert.strictEqual(progress.content.value, 'Shell command completed');
 		});
 
@@ -450,6 +452,8 @@ suite('stateToProgressAdapter', () => {
 				// description is the TASK description from _meta, not the agent description
 				assert.strictEqual(serialized.toolSpecificData.description, 'Find related files');
 				assert.strictEqual(serialized.toolSpecificData.result, 'Agent result');
+				// The subagent chat resource is carried so the UI can offer "Open chat".
+				assert.strictEqual(serialized.toolSpecificData.chatResource, 'copilot://session/subagent/tc-1');
 			}
 		});
 
@@ -794,6 +798,69 @@ suite('stateToProgressAdapter', () => {
 
 			const invocation = toolCallStateToInvocation(tc, 'parent-tc-42');
 			assert.strictEqual(invocation.subAgentInvocationId, 'parent-tc-42');
+		});
+	});
+
+	suite('addComment reference', () => {
+
+		const commentRange = { startLineNumber: 3, startColumn: 1, endLineNumber: 3, endColumn: 5 };
+
+		function addCommentInput(text: string): string {
+			return JSON.stringify({ resourceUri: 'file:///workspace/a.ts', range: commentRange, text });
+		}
+
+		function markdown(message: string | IMarkdownString | undefined): IMarkdownString {
+			assert.ok(message && typeof message !== 'string', 'expected a markdown reference');
+			return message;
+		}
+
+		test('renders tool name, truncated quoted preview and a reveal command link', () => {
+			const tc = createToolCallState({ toolName: 'addComment', invocationMessage: 'Adding comment', toolInput: addCommentInput('This comment is quite long and should be truncated') });
+			const message = markdown(toolCallStateToInvocation(tc).invocationMessage);
+
+			assert.deepStrictEqual(
+				{
+					value: message.value,
+					supportThemeIcons: message.supportThemeIcons,
+					isTrusted: message.isTrusted,
+				},
+				{
+					value: `[addComment "This comment is quite long and should be…"](command:_agentFeedbackReview.revealAt?${encodeURIComponent(JSON.stringify(['file:///workspace/a.ts', commentRange]))})`,
+					supportThemeIcons: true,
+					isTrusted: { enabledCommands: ['_agentFeedbackReview.revealAt'] },
+				},
+			);
+		});
+
+		test('does not truncate a short comment', () => {
+			const tc = createToolCallState({ toolName: 'addComment', invocationMessage: 'Adding comment', toolInput: addCommentInput('Short note') });
+			const message = markdown(toolCallStateToInvocation(tc).invocationMessage);
+			assert.ok(message.value.includes('addComment "Short note"'), message.value);
+			assert.ok(!message.value.includes('…'), message.value);
+		});
+
+		test('sets the same reference as the past-tense message on completion', () => {
+			const running = createToolCallState({ toolName: 'addComment', invocationMessage: 'Adding comment', toolInput: addCommentInput('Short note') });
+			const invocation = toolCallStateToInvocation(running);
+			const completed = createCompletedToolCall({ toolName: 'addComment', toolInput: addCommentInput('Short note'), pastTenseMessage: 'Added comment' });
+			finalizeToolInvocation(invocation, completed);
+			assert.strictEqual(markdown(invocation.pastTenseMessage).value, markdown(invocation.invocationMessage).value);
+		});
+
+		test('falls back to the server message when the input cannot be parsed', () => {
+			const tc = createToolCallState({ toolName: 'addComment', invocationMessage: 'Adding comment', toolInput: 'not json' });
+			assert.strictEqual(toolCallStateToInvocation(tc).invocationMessage, 'Adding comment');
+		});
+
+		test('falls back to the server message when the range is not a valid 1-based range', () => {
+			for (const range of [
+				{ startLineNumber: 0, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+				{ startLineNumber: 1, startColumn: 1.5, endLineNumber: 1, endColumn: 2 },
+				{ startLineNumber: -1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+			]) {
+				const tc = createToolCallState({ toolName: 'addComment', invocationMessage: 'Adding comment', toolInput: JSON.stringify({ resourceUri: 'file:///workspace/a.ts', range, text: 'hi' }) });
+				assert.strictEqual(toolCallStateToInvocation(tc).invocationMessage, 'Adding comment', JSON.stringify(range));
+			}
 		});
 	});
 
@@ -1195,13 +1262,14 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual((result[0] as IChatMarkdownContent).content.value, 'Hello world');
 		});
 
-		test('produces progress message for system notification', () => {
+		test('produces system notification for system notification response part', () => {
 			const result = activeTurnToProgress(URI.file('/'), createActiveTurnState([
 				{ kind: ResponsePartKind.SystemNotification, content: 'Shell command completed' },
 			]), undefined);
 			assert.strictEqual(result.length, 1);
-			assert.strictEqual(result[0].kind, 'progressMessage');
-			assert.strictEqual((result[0] as IChatProgressMessage).content.value, 'Shell command completed');
+			assert.strictEqual(result[0].kind, 'systemNotification');
+			if (result[0].kind !== 'systemNotification') { return; }
+			assert.strictEqual(result[0].content.value, 'Shell command completed');
 		});
 
 		test('produces thinking progress for reasoning', () => {
@@ -1368,6 +1436,57 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandOutput?.text, 'text-output');
 		});
 
+		test('uses shell_exit exit code for completed SDK shell tool history', () => {
+			const tc = createCompletedToolCall({
+				_meta: { toolKind: 'terminal' },
+				toolInput: 'gti status',
+				content: [
+					{ type: ToolResultContentType.Text, text: 'command not found\n' },
+					{ type: ToolResultContentType.ShellExit, shellId: '0', exitCode: 127, cwd: '/repo', outputPreview: 'preview only\n' },
+				],
+				success: true,
+			});
+
+			const turn = createTurn({
+				responseParts: [{ kind: ResponsePartKind.ToolCall, toolCall: tc } as ToolCallResponsePart],
+			});
+
+			const history = turnsToHistory(URI.file('/'), [turn], 'p');
+			const response = history[1];
+			assert.strictEqual(response.type, 'response');
+			if (response.type !== 'response') { return; }
+			const serialized = response.parts[0] as IChatToolInvocationSerialized;
+			assert.strictEqual(serialized.toolSpecificData?.kind, 'terminal');
+			const termData = serialized.toolSpecificData as { kind: 'terminal'; terminalCommandOutput?: { text: string }; terminalCommandState?: { exitCode: number } };
+			assert.strictEqual(termData.terminalCommandState?.exitCode, 127);
+			assert.strictEqual(termData.terminalCommandOutput?.text, 'command not found\r\n');
+		});
+
+		test('keeps zero shell_exit exit code as success for completed SDK shell tool history', () => {
+			const tc = createCompletedToolCall({
+				_meta: { toolKind: 'terminal' },
+				toolInput: 'pwd',
+				content: [
+					{ type: ToolResultContentType.Text, text: '/repo\n' },
+					{ type: ToolResultContentType.ShellExit, shellId: '0', exitCode: 0, cwd: '/repo' },
+				],
+				success: true,
+			});
+
+			const turn = createTurn({
+				responseParts: [{ kind: ResponsePartKind.ToolCall, toolCall: tc } as ToolCallResponsePart],
+			});
+
+			const history = turnsToHistory(URI.file('/'), [turn], 'p');
+			const response = history[1];
+			assert.strictEqual(response.type, 'response');
+			if (response.type !== 'response') { return; }
+			const serialized = response.parts[0] as IChatToolInvocationSerialized;
+			assert.strictEqual(serialized.toolSpecificData?.kind, 'terminal');
+			const termData = serialized.toolSpecificData as { kind: 'terminal'; terminalCommandState?: { exitCode: number } };
+			assert.strictEqual(termData.terminalCommandState?.exitCode, 0);
+		});
+
 		test('running tool call with terminal content block sets terminalCommandUri', () => {
 			const tc = createToolCallState({
 				_meta: { toolKind: 'terminal' },
@@ -1417,6 +1536,36 @@ suite('stateToProgressAdapter', () => {
 			assert.ok(termData.terminalCommandUri);
 			assert.strictEqual(termData.terminalCommandUri.toString(), 'agenthost-terminal:/final-term');
 			assert.strictEqual(termData.terminalCommandState?.exitCode, 0);
+		});
+
+		test('finalize uses shell_exit exit code over SDK tool success', () => {
+			const tc = createToolCallState({
+				_meta: { toolKind: 'terminal' },
+				toolInput: 'false',
+				status: ToolCallStatus.Running,
+			});
+			const invocation = toolCallStateToInvocation(tc);
+
+			finalizeToolInvocation(invocation, {
+				status: ToolCallStatus.Completed,
+				toolCallId: 'tc-1',
+				toolName: 'bash',
+				displayName: 'Run Shell Command',
+				invocationMessage: 'Running shell command',
+				_meta: { toolKind: 'terminal' },
+				toolInput: 'false',
+				confirmed: ToolCallConfirmationReason.NotNeeded,
+				success: true,
+				pastTenseMessage: 'Ran false',
+				content: [
+					{ type: ToolResultContentType.Text, text: '' },
+					{ type: ToolResultContentType.ShellExit, shellId: '0', exitCode: 1, cwd: '/repo' },
+				],
+			});
+
+			assert.strictEqual(invocation.toolSpecificData?.kind, 'terminal');
+			const termData = invocation.toolSpecificData as { kind: 'terminal'; terminalCommandState?: { exitCode: number } };
+			assert.strictEqual(termData.terminalCommandState?.exitCode, 1);
 		});
 
 	});

@@ -28,6 +28,7 @@ import { IChatSessionsService } from '../../../../../workbench/contrib/chat/comm
 import { ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
 import { IWorkbenchEnvironmentService } from '../../../../../workbench/services/environment/common/environmentService.js';
 import { LOCAL_AGENT_HOST_PROVIDER_ID, LocalAgentHostDefaultProviderSettingId } from '../../../../common/agentHostSessionsProvider.js';
+import { IAgentHostEnablementService } from '../../../../services/agentHost/common/agentHostEnablementService.js';
 import { AGENT_HOST_LOG_OUTPUT_CHANNEL_ID } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { buildAgentHostSessionWorkspace, readBranchProtectionPatterns } from '../../../../common/agentHostSessionWorkspace.js';
 import { IGitHubInfo, ISessionWorkspace, ISessionWorkspaceBrowseAction, SESSION_WORKSPACE_GROUP_LOCAL } from '../../../../services/sessions/common/session.js';
@@ -53,6 +54,11 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 	readonly browseActions: readonly ISessionWorkspaceBrowseAction[];
 	readonly supportsLocalWorkspaces = true;
 
+	/** Quick chats are only offered while the agent host is enabled. */
+	get supportsQuickChats(): boolean {
+		return this._agentHostEnablementService.enabled;
+	}
+
 	/** `true` when running in the dedicated Agents window vs. a regular editor window. */
 	private readonly _isSessionsWindow: boolean;
 
@@ -73,6 +79,7 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 
 	constructor(
 		@IAgentHostService private readonly _agentHostService: IAgentHostService,
+		@IAgentHostEnablementService private readonly _agentHostEnablementService: IAgentHostEnablementService,
 		@IChatSessionsService chatSessionsService: IChatSessionsService,
 		@IChatService chatService: IChatService,
 		@IChatWidgetService chatWidgetService: IChatWidgetService,
