@@ -85,6 +85,14 @@ export class ActivitybarPart extends Part {
 		return this._isCompact ? ActivitybarPart.COMPACT_ACTIVITYBAR_WIDTH : ActivitybarPart.ACTIVITYBAR_WIDTH;
 	}
 
+	/** The action (item) height that drives visible item sizing and the composite bar overflow size. */
+	private get actionHeight(): number {
+		if (this._isCompact) {
+			return ActivitybarPart.COMPACT_ACTION_HEIGHT;
+		}
+		return this.layoutService.isFloatingPanelsEnabled() ? ActivitybarPart.FLOATING_ACTION_HEIGHT : ActivitybarPart.ACTION_HEIGHT;
+	}
+
 	/** Extra space reserved around the part when the floating panels experiment is enabled. */
 	private get floatingGutter(): number { return this.layoutService.isFloatingPanelsEnabled() ? ActivitybarPart.FLOATING_MARGIN : 0; }
 
@@ -125,12 +133,9 @@ export class ActivitybarPart extends Part {
 
 	private updateCompactStyle(): void {
 		if (this.element) {
-			const actionHeight = this._isCompact
-				? ActivitybarPart.COMPACT_ACTION_HEIGHT
-				: (this.layoutService.isFloatingPanelsEnabled() ? ActivitybarPart.FLOATING_ACTION_HEIGHT : ActivitybarPart.ACTION_HEIGHT);
 			this.element.classList.toggle('compact', this._isCompact);
 			this.element.style.setProperty('--activity-bar-width', `${this.baseWidth}px`);
-			this.element.style.setProperty('--activity-bar-action-height', `${actionHeight}px`);
+			this.element.style.setProperty('--activity-bar-action-height', `${this.actionHeight}px`);
 			this.element.style.setProperty('--activity-bar-icon-size', `${this._isCompact ? ActivitybarPart.COMPACT_ICON_SIZE : ActivitybarPart.ICON_SIZE}px`);
 		}
 	}
@@ -151,9 +156,7 @@ export class ActivitybarPart extends Part {
 	}
 
 	private createCompositeBar(): PaneCompositeBar {
-		const actionHeight = this._isCompact
-			? ActivitybarPart.COMPACT_ACTION_HEIGHT
-			: (this.layoutService.isFloatingPanelsEnabled() ? ActivitybarPart.FLOATING_ACTION_HEIGHT : ActivitybarPart.ACTION_HEIGHT);
+		const actionHeight = this.actionHeight;
 		const iconSize = this._isCompact ? ActivitybarPart.COMPACT_ICON_SIZE : ActivitybarPart.ICON_SIZE;
 
 		return this.instantiationService.createInstance(ActivityBarCompositeBar, this.location, {

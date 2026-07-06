@@ -294,6 +294,19 @@ suite('ActivitybarPart', () => {
 		assert.strictEqual(el.classList.contains('compact'), true);
 	});
 
+	test('updateCompactStyle sets correct CSS custom properties in floating mode', () => {
+		const { part } = createActivitybarPart(false, true);
+
+		const el = document.createElement('div');
+		fixture.appendChild(el);
+		part.create(el);
+
+		assert.strictEqual(el.style.getPropertyValue('--activity-bar-width'), `${ActivitybarPart.FLOATING_ACTIVITYBAR_WIDTH}px`);
+		assert.strictEqual(el.style.getPropertyValue('--activity-bar-action-height'), `${ActivitybarPart.FLOATING_ACTION_HEIGHT}px`);
+		assert.strictEqual(el.style.getPropertyValue('--activity-bar-icon-size'), `${ActivitybarPart.ICON_SIZE}px`);
+		assert.strictEqual(el.classList.contains('compact'), false);
+	});
+
 	test('toggling compact updates CSS custom properties on element', () => {
 		const { part, configService } = createActivitybarPart(false);
 
