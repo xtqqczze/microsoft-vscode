@@ -1311,14 +1311,19 @@ configurationRegistry.registerConfiguration({
 			enumItemLabels: ExploreAgentDefaultModel.modelLabels,
 			markdownEnumDescriptions: ExploreAgentDefaultModel.modelDescriptions
 		},
+		[ChatConfiguration.UseMainBYOKModelForUtilityModels]: {
+			type: 'boolean',
+			markdownDescription: nls.localize('chat.useMainBYOKModelForUtilityModels.description', "Use the selected main agent model for built-in utility flows when it is a bring your own key (BYOK) model. This setting only applies to BYOK models and has no effect when the selected main agent model is provided by GitHub Copilot. Utility flows power background features such as generating chat titles and summaries. This setting takes precedence over {0} and does not apply when a specific model is configured in {1} or {2}.", '`#chat.useCopilotModelsForUtilityModels#`', '`#chat.utilityModel#`', '`#chat.utilitySmallModel#`'),
+			default: false,
+		},
 		[ChatConfiguration.UseCopilotModelsForUtilityModels]: {
 			type: 'boolean',
-			markdownDescription: nls.localize('chat.useCopilotModelsForUtilityModels.description', "Use default GitHub Copilot models for built-in utility flows when the main chat model is a bring your own key (BYOK) model. Utility flows power background features such as generating chat titles and summaries. This setting does not apply when a specific model is configured in {0} or {1}.", '`#chat.utilityModel#`', '`#chat.utilitySmallModel#`'),
+			markdownDescription: nls.localize('chat.useCopilotModelsForUtilityModels.description', "Use default GitHub Copilot models for built-in utility flows when the main chat model is a bring your own key (BYOK) model. Utility flows power background features such as generating chat titles and summaries. This setting does not apply when {0} is enabled or when a specific model is configured in {1} or {2}.", '`#chat.useMainBYOKModelForUtilityModels#`', '`#chat.utilityModel#`', '`#chat.utilitySmallModel#`'),
 			default: false,
 		},
 		[ChatConfiguration.UtilityModel]: {
 			type: 'string',
-			description: nls.localize('chat.utilityModel.description', "Override the language model used by built-in utility flows. Leave empty to use the default model when the main chat model is provided by GitHub Copilot."),
+			description: nls.localize('chat.utilityModel.description', "Override the language model used by built-in utility flows. Leave empty to use the configured default behavior."),
 			default: '',
 			enum: UtilityModelContribution.modelIds,
 			enumItemLabels: UtilityModelContribution.modelLabels,
@@ -1326,7 +1331,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.UtilitySmallModel]: {
 			type: 'string',
-			description: nls.localize('chat.utilitySmallModel.description', "Override the language model used by built-in small/fast utility flows. A fast and inexpensive model is recommended. Leave empty to use the default model when the main chat model is provided by GitHub Copilot."),
+			description: nls.localize('chat.utilitySmallModel.description', "Override the language model used by built-in small/fast utility flows. A fast and inexpensive model is recommended. Leave empty to use the configured default behavior."),
 			default: '',
 			enum: UtilitySmallModelContribution.modelIds,
 			enumItemLabels: UtilitySmallModelContribution.modelLabels,

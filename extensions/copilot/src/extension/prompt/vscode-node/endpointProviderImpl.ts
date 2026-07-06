@@ -58,6 +58,7 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 			if (
 				e.affectsConfiguration(ProductionEndpointProvider.UTILITY_MODEL_CONFIG_KEY)
 				|| e.affectsConfiguration(ProductionEndpointProvider.UTILITY_SMALL_MODEL_CONFIG_KEY)
+				|| e.affectsConfiguration(ProductionEndpointProvider.USE_MAIN_AGENT_MODEL_FOR_UTILITY_MODELS_CONFIG_KEY)
 				|| e.affectsConfiguration(ProductionEndpointProvider.USE_COPILOT_MODELS_FOR_UTILITY_MODELS_CONFIG_KEY)
 			) {
 				this._logService.trace(`[ProductionEndpointProvider] Utility model configuration changed; invalidating alias endpoints.`);
@@ -79,8 +80,9 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 	// `vscode.lm.selectChatModels({ vendor, id })`.
 	private static readonly UTILITY_MODEL_CONFIG_KEY = 'chat.utilityModel';
 	private static readonly UTILITY_SMALL_MODEL_CONFIG_KEY = 'chat.utilitySmallModel';
+	private static readonly USE_MAIN_AGENT_MODEL_FOR_UTILITY_MODELS_CONFIG_KEY = 'chat.useMainAgentModelForUtilityModels';
 	private static readonly USE_COPILOT_MODELS_FOR_UTILITY_MODELS_CONFIG_KEY = 'chat.useCopilotModelsForUtilityModels';
-	private _mainModelIsBYOK = false;
+	private _mainAgentBYOKModel: LanguageModelChat | undefined;
 
 	/**
 	 * Per-family marker recording that we already emitted a telemetry event
@@ -114,9 +116,12 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 		}
 
 		if (model.id !== 'copilot-utility' && model.id !== 'copilot-utility-small') {
-			const mainModelIsBYOK = model.vendor !== 'copilot';
-			if (this._mainModelIsBYOK !== mainModelIsBYOK) {
-				this._mainModelIsBYOK = mainModelIsBYOK;
+			const mainAgentBYOKModel = model.vendor !== 'copilot' ? model : undefined;
+			const mainAgentModelChanged = this._mainAgentBYOKModel?.vendor !== mainAgentBYOKModel?.vendor
+				|| this._mainAgentBYOKModel?.id !== mainAgentBYOKModel?.id
+				|| this._mainAgentBYOKModel?.version !== mainAgentBYOKModel?.version;
+			this._mainAgentBYOKModel = mainAgentBYOKModel;
+			if (mainAgentModelChanged) {
 				this._lastOverrideTelemetryFingerprint.clear();
 				this._onDidModelsRefresh.fire();
 			}
@@ -178,8 +183,12 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 			return override;
 		}
 
+		if (this._mainAgentBYOKModel && this._configService.getNonExtensionConfig<unknown>(ProductionEndpointProvider.USE_MAIN_AGENT_MODEL_FOR_UTILITY_MODELS_CONFIG_KEY) === true) {
+			return this._instantiationService.createInstance(ExtensionContributedChatEndpoint, this._mainAgentBYOKModel);
+		}
+
 		if (!this._useCopilotModelsForUtilityModelsByDefault()) {
-			throw new Error(`No utility model is configured for '${family}' while the selected main model is BYOK.`);
+			throw new Error(`No utility model is configured for '${family}' while the selected main agent model is BYOK.`);
 		}
 
 		switch (family) {
@@ -192,11 +201,11 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 
 	/**
 	 * Whether an unset utility model should resolve to a built-in GitHub Copilot
-	 * model. `true` when the selected main model is itself a Copilot model, or
+	 * model. `true` when the selected main agent model is itself a Copilot model, or
 	 * when the user opted in via {@link USE_COPILOT_MODELS_FOR_UTILITY_MODELS_CONFIG_KEY}.
 	 */
 	private _useCopilotModelsForUtilityModelsByDefault(): boolean {
-		return !this._mainModelIsBYOK
+		return !this._mainAgentBYOKModel
 			|| this._configService.getNonExtensionConfig<unknown>(ProductionEndpointProvider.USE_COPILOT_MODELS_FOR_UTILITY_MODELS_CONFIG_KEY) === true;
 	}
 

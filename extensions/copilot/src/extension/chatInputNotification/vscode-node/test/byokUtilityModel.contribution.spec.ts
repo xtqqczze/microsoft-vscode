@@ -166,6 +166,18 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		expect(mockNotification.show).not.toHaveBeenCalled();
 	});
 
+	test('does not show notification when main agent model reuse is enabled', async () => {
+		const { authService } = createAuthService({ anyGitHubSession: undefined });
+		const { configService } = createConfigService({
+			'chat.useMainAgentModelForUtilityModels': true,
+		});
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+
+		await flushAsync();
+
+		expect(mockNotification.show).not.toHaveBeenCalled();
+	});
+
 	test('hides notification once both utility settings are configured', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
 		const { configService, set } = createConfigService();
@@ -180,6 +192,20 @@ describe('ByokUtilityModelNotificationContribution', () => {
 
 		set('chat.utilitySmallModel', 'ollama/llama3');
 		await flushAsync();
+		expect(mockNotification.hide).toHaveBeenCalled();
+	});
+
+	test('hides notification when main agent model reuse is enabled', async () => {
+		const { authService } = createAuthService({ anyGitHubSession: undefined });
+		const { configService, set } = createConfigService();
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+
+		await flushAsync();
+		expect(mockNotification.show).toHaveBeenCalled();
+
+		set('chat.useMainAgentModelForUtilityModels', true);
+		await flushAsync();
+
 		expect(mockNotification.hide).toHaveBeenCalled();
 	});
 

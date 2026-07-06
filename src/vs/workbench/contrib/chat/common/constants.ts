@@ -27,6 +27,7 @@ export enum ChatConfiguration {
 	ExploreAgentDefaultModel = 'chat.exploreAgent.defaultModel',
 	UtilityModel = 'chat.utilityModel',
 	UtilitySmallModel = 'chat.utilitySmallModel',
+	UseMainBYOKModelForUtilityModels = 'chat.useMainBYOKModelForUtilityModels',
 	UseCopilotModelsForUtilityModels = 'chat.useCopilotModelsForUtilityModels',
 	RequestQueueingDefaultAction = 'chat.requestQueuing.defaultAction',
 	AgentStatusEnabled = 'chat.agentsControl.enabled',

@@ -12,15 +12,16 @@ import { Disposable } from '../../../util/vs/base/common/lifecycle';
 const NOTIFICATION_ID = 'copilot.byokUtilityModelHint';
 const UTILITY_MODEL_SETTING = 'chat.utilityModel';
 const UTILITY_SMALL_MODEL_SETTING = 'chat.utilitySmallModel';
+const USE_MAIN_BYOK_MODEL_FOR_UTILITY_MODELS_SETTING = 'chat.useMainBYOKModelForUtilityModels';
 
 /**
  * Shows a chat input notification in air-gapped BYOK scenarios (no GitHub
  * session) when at least one BYOK model is available but the utility model
  * settings are still defaults. Some utility flows are unavailable until the
- * user points them at a BYOK model.
+ * user points them at a BYOK model or opts to reuse the main agent BYOK model.
  *
  * The notification hides automatically once the user signs in, BYOK models
- * disappear, or both utility settings are configured.
+ * disappear, both utility settings are configured, or main agent model reuse is enabled.
  */
 export class ByokUtilityModelNotificationContribution extends Disposable {
 
@@ -38,7 +39,11 @@ export class ByokUtilityModelNotificationContribution extends Disposable {
 		this._register(this._authService.onDidAuthenticationChange(() => this._update()));
 		this._register(vscode.lm.onDidChangeChatModels(() => this._update()));
 		this._register(this._configService.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration(UTILITY_MODEL_SETTING) || e.affectsConfiguration(UTILITY_SMALL_MODEL_SETTING)) {
+			if (
+				e.affectsConfiguration(UTILITY_MODEL_SETTING)
+				|| e.affectsConfiguration(UTILITY_SMALL_MODEL_SETTING)
+				|| e.affectsConfiguration(USE_MAIN_BYOK_MODEL_FOR_UTILITY_MODELS_SETTING)
+			) {
 				this._update();
 			}
 		}));
@@ -67,8 +72,9 @@ export class ByokUtilityModelNotificationContribution extends Disposable {
 		const signedOut = !this._authService.anyGitHubSession;
 		const utilityUnset = !this._isUtilityOverrideSet(UTILITY_MODEL_SETTING);
 		const utilitySmallUnset = !this._isUtilityOverrideSet(UTILITY_SMALL_MODEL_SETTING);
+		const useMainBYOKModelForUtilityModels = this._configService.getNonExtensionConfig<unknown>(USE_MAIN_BYOK_MODEL_FOR_UTILITY_MODELS_SETTING) === true;
 
-		if (!signedOut || !this._hasByokModels || (!utilityUnset && !utilitySmallUnset)) {
+		if (!signedOut || !this._hasByokModels || useMainBYOKModelForUtilityModels || (!utilityUnset && !utilitySmallUnset)) {
 			this._hideNotification();
 			return;
 		}
