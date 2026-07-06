@@ -1,6 +1,6 @@
 {
   "name": "code-oss-dev",
-  "version": "1.128.0",
+  "version": "1.129.0",
   "distro": "a78eb8284ce7699e371b36071b579f557406f153",
   "author": {
     "name": "Microsoft Corporation"
@@ -114,7 +114,7 @@
     "@vscode/iconv-lite-umd": "0.7.1",
     "@vscode/native-watchdog": "^1.4.6",
     "@vscode/policy-watcher": "^1.4.0",
-    "@vscode/proxy-agent": "^0.42.0",
+    "@vscode/proxy-agent": "^0.43.0",
     "@vscode/ripgrep-universal": "^1.18.0",
     "@vscode/sandbox-runtime": "0.0.1",
     "@vscode/spdlog": "^0.15.8",
