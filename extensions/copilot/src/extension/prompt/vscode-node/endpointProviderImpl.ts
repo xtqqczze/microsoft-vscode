@@ -21,6 +21,7 @@ import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 
 
+// Keep in sync with `BYOKUtilityModelDefault` in `src/vs/workbench/contrib/chat/common/constants.ts` and the `chat.byokUtilityModelDefault` enum in `chat.shared.contribution.ts`.
 const enum BYOKUtilityModelDefault {
 	None = 'none',
 	MainAgent = 'mainAgent',
