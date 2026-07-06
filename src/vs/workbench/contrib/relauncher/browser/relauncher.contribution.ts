@@ -72,6 +72,7 @@ export class SettingsChangeRelauncher extends Disposable implements IWorkbenchCo
 		'chat.agentHost.enabled',
 		'chat.agentHost.claudeAgent.enabled',
 		'chat.agentHost.codexAgent.enabled',
+		'chat.agentHost.byokModels.enabled',
 		'chat.agents.claude.preferAgentHost',
 		'chat.editor.claude.preferAgentHost',
 		'chat.agentHost.otel.enabled',
