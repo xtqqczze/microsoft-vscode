@@ -117,6 +117,7 @@ export class ActivitybarPart extends Part {
 			// the fixed part width): signal the grid that the size constraint changed.
 			if (e.affectsConfiguration(LayoutSettings.MODERN_UI)) {
 				this.updateCompactStyle();
+				this.recreateCompositeBar();
 				this._onDidChange.fire(undefined);
 			}
 		}));
