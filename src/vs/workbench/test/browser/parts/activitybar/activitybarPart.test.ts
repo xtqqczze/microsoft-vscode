@@ -118,8 +118,8 @@ suite('ActivitybarPart', () => {
 				iconSize: ActivitybarPart.ICON_SIZE,
 			},
 			{
-				width: 48,
-				actionHeight: 48,
+				width: 44,
+				actionHeight: 44,
 				iconSize: 24,
 			}
 		);
@@ -133,7 +133,7 @@ suite('ActivitybarPart', () => {
 				iconSize: ActivitybarPart.COMPACT_ICON_SIZE,
 			},
 			{
-				width: 36,
+				width: 32,
 				actionHeight: 32,
 				iconSize: 16,
 			}
