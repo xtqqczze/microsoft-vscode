@@ -17,7 +17,6 @@
 			"../node_modules/@types"
 		],
 		"preserveSymlinks": true,
-		"baseUrl": ".",
 		"paths": {
 			"@vscode/markdown-editor": [
 				"../node_modules/@vscode/markdown-editor/dist/index.d.ts"
