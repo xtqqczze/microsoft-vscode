@@ -118,8 +118,8 @@ suite('ActivitybarPart', () => {
 				iconSize: ActivitybarPart.ICON_SIZE,
 			},
 			{
-				width: 44,
-				actionHeight: 44,
+				width: 48,
+				actionHeight: 48,
 				iconSize: 24,
 			}
 		);
@@ -133,9 +133,24 @@ suite('ActivitybarPart', () => {
 				iconSize: ActivitybarPart.COMPACT_ICON_SIZE,
 			},
 			{
-				width: 32,
+				width: 36,
 				actionHeight: 32,
 				iconSize: 16,
+			}
+		);
+	});
+
+	test('floating constants are narrower than default', () => {
+		assert.deepStrictEqual(
+			{
+				width: ActivitybarPart.FLOATING_ACTIVITYBAR_WIDTH,
+				actionHeight: ActivitybarPart.FLOATING_ACTION_HEIGHT,
+				compactWidth: ActivitybarPart.FLOATING_COMPACT_ACTIVITYBAR_WIDTH,
+			},
+			{
+				width: 44,
+				actionHeight: 44,
+				compactWidth: 32,
 			}
 		);
 	});
@@ -170,8 +185,8 @@ suite('ActivitybarPart', () => {
 		assert.deepStrictEqual(
 			{ min: part.minimumWidth, max: part.maximumWidth },
 			{
-				min: ActivitybarPart.ACTIVITYBAR_WIDTH + ActivitybarPart.FLOATING_MARGIN,
-				max: ActivitybarPart.ACTIVITYBAR_WIDTH + ActivitybarPart.FLOATING_MARGIN,
+				min: ActivitybarPart.FLOATING_ACTIVITYBAR_WIDTH + ActivitybarPart.FLOATING_MARGIN,
+				max: ActivitybarPart.FLOATING_ACTIVITYBAR_WIDTH + ActivitybarPart.FLOATING_MARGIN,
 			}
 		);
 	});
@@ -248,7 +263,7 @@ suite('ActivitybarPart', () => {
 		fireConfigChange(configService, LayoutSettings.MODERN_UI);
 
 		assert.deepStrictEqual(events, [undefined]);
-		assert.strictEqual(part.minimumWidth, ActivitybarPart.ACTIVITYBAR_WIDTH + ActivitybarPart.FLOATING_MARGIN);
+		assert.strictEqual(part.minimumWidth, ActivitybarPart.FLOATING_ACTIVITYBAR_WIDTH + ActivitybarPart.FLOATING_MARGIN);
 	});
 
 	// --- CSS custom properties on element -----------------------------------
