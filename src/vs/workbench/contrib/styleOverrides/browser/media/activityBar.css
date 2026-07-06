@@ -18,8 +18,8 @@
  * pushed behind the icon (which lives on the action-label at z-index 1) so the
  * icon stays legible on top of the fill. The size is derived from the activity
  * bar's own CSS variables so it works for both the normal (44px) and compact
- * (32px wide / 32px tall) layouts. The square side tracks the action height
- * (the limiting dimension), and `left` keeps it horizontally centered.
+ * (32px wide / 32px tall) layouts. Bar width equals action height in both sizes,
+ * so the box is a centered square and `left` keeps it horizontally centered.
  */
 .style-override .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator {
 	z-index: 0;
@@ -33,6 +33,7 @@
 
 /* Compact: minimal horizontal inset — 28×28px box centered in the 32px item. */
 .style-override .activitybar.compact > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator {
+	top: 2px;
 	left: 2px;
 	width: calc(var(--activity-bar-action-height, 32px) - 4px);
 	height: calc(var(--activity-bar-action-height, 32px) - 4px);

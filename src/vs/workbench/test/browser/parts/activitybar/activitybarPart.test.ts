@@ -110,7 +110,7 @@ suite('ActivitybarPart', () => {
 
 	// --- Static constants ---------------------------------------------------
 
-	test('default constants match original (pre-compact) dimensions', () => {
+	test('default constants match expected dimensions', () => {
 		assert.deepStrictEqual(
 			{
 				width: ActivitybarPart.ACTIVITYBAR_WIDTH,
