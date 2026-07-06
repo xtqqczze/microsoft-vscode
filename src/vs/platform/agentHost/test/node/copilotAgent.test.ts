@@ -29,7 +29,7 @@ import { ILogService, NullLogService } from '../../../log/common/log.js';
 import { IAgentHostProxyResolver } from '../../node/agentHostProxyResolver.js';
 import { ITelemetryService } from '../../../telemetry/common/telemetry.js';
 import { NullTelemetryService } from '../../../telemetry/common/telemetryUtils.js';
-import { AgentHostConfigKey } from '../../common/agentHostCustomizationConfig.js';
+import { CopilotCliConfigKey } from '../../common/copilotCliConfig.js';
 import { IAgentPluginManager, ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { AgentSession, GITHUB_COPILOT_PROTECTED_RESOURCE, type AgentSignal, type IAgentActionSignal, type IAgentCreateChatForkSource, type IAgentSessionMetadata, type IAgentSpawnChatEvent } from '../../common/agentService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
@@ -1144,7 +1144,7 @@ suite('CopilotAgent', () => {
 				// Force the client to start so a subsequent config change has something to restart.
 				await agent.listSessions();
 
-				configurationService.updateRootConfig({ [AgentHostConfigKey.RubberDuck]: true });
+				configurationService.updateRootConfig({ [CopilotCliConfigKey.RubberDuck]: true });
 				await Promise.resolve();
 
 				assert.strictEqual(client.stopCount, 1);
@@ -1163,7 +1163,7 @@ suite('CopilotAgent', () => {
 				let disposed = false;
 				setDefaultSessionStub(agent, 'active', { dispose() { disposed = true; } });
 
-				configurationService.updateRootConfig({ [AgentHostConfigKey.RubberDuck]: true });
+				configurationService.updateRootConfig({ [CopilotCliConfigKey.RubberDuck]: true });
 				await Promise.resolve();
 
 				assert.strictEqual(client.stopCount, 1);
@@ -1180,7 +1180,7 @@ suite('CopilotAgent', () => {
 				await agent.authenticate('https://api.github.com', 'token');
 				await agent.listSessions();
 
-				configurationService.updateRootConfig({ [AgentHostConfigKey.EnableCustomTerminalTool]: true });
+				configurationService.updateRootConfig({ [CopilotCliConfigKey.EnableCustomTerminalTool]: true });
 				await Promise.resolve();
 
 				assert.strictEqual(client.stopCount, 0);
@@ -2377,7 +2377,7 @@ suite('CopilotAgent', () => {
 			const { agent, configurationService } = createTestAgentContext(disposables, { sessionDataService, copilotClient: client });
 			try {
 				await agent.authenticate('https://api.github.com', 'token');
-				configurationService.updateRootConfig({ [AgentHostConfigKey.EnableCustomTerminalTool]: false });
+				configurationService.updateRootConfig({ [CopilotCliConfigKey.EnableCustomTerminalTool]: false });
 
 				const result = await agent.createSession({
 					session: AgentSession.uri('copilotcli', 'sdk-terminal-defaults'),

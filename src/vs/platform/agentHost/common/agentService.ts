@@ -53,16 +53,9 @@ export function isAgentHostEnabled(configurationService: IConfigurationService):
 /** Configuration key that controls whether AHP JSONL logs are written for agent host transports. */
 export const AgentHostAhpJsonlLoggingSettingId = 'chat.agentHost.ahpJsonlLoggingEnabled';
 
-/** Configuration key that controls whether Agent Host uses its terminal tool override for Copilot SDK sessions. */
-export const AgentHostCustomTerminalToolEnabledSettingId = 'chat.agentHost.customTerminalTool.enabled';
-
-/**
- * Configuration key that controls whether Copilot SDK sessions running a Claude
- * Opus 4.8 model apply the Opus 4.8-tuned system-prompt section overrides.
- * Forwarded into the agent host's root config (`opus48Prompt`) by
- * `AgentHostCopilotPromptContribution`.
- */
-export const AgentHostOpus48PromptEnabledSettingId = 'chat.agentHost.opus48Prompt.enabled';
+// The Copilot-CLI-specific setting IDs (`customTerminalTool`, `opus48Prompt`,
+// `reasoningEffortOverride`, `modelCapabilityOverrides`) live with their
+// root-config keys in `copilotCliConfig.ts`.
 
 /**
  * Configuration key controlling whether the Claude provider is registered in
@@ -156,7 +149,7 @@ export function isAgentEnabled(envValue: string | undefined, defaultEnabled: boo
 
 /**
  * Configuration key that controls the sandbox mode for the Copilot SDK's built-in
- * shell tool (the path taken when {@link AgentHostCustomTerminalToolEnabledSettingId}
+ * shell tool (the path taken when `AgentHostCustomTerminalToolEnabledSettingId`
  * is `false`). Values mirror {@link AgentSandboxEnabledValue}:
  *
  *  - `'off'` (the default): no sandbox policy is forwarded for the SDK shell
@@ -166,7 +159,7 @@ export function isAgentEnabled(envValue: string | undefined, defaultEnabled: boo
  *    Outbound network is enforced via the user's allow/deny host lists.
  *  - `'allowNetwork'`: same as `'on'` but with unrestricted outbound network.
  *
- * Has no effect when {@link AgentHostCustomTerminalToolEnabledSettingId} is
+ * Has no effect when `AgentHostCustomTerminalToolEnabledSettingId` is
  * `true` \u2014 the host\u2019s own terminal sandbox engine then handles shell
  * commands and reads `chat.agent.sandbox.enabled` directly.
  */
