@@ -240,3 +240,7 @@
 .style-override.monaco-workbench .pane-body.integrated-terminal .tabs-container.has-text .terminal-tabs-chat-entry .terminal-tabs-entry {
 	border-radius: var(--vscode-cornerRadius-small);
 }
+
+.style-override.monaco-workbench .terminal-resize-overlay {
+	border-radius: var(--vscode-cornerRadius-large);
+}
