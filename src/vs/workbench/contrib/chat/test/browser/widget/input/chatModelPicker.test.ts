@@ -1292,7 +1292,6 @@ suite('buildModelPickerItems', () => {
 	});
 });
 
-
 /**
  * Regression coverage for the chat model picker.
  *
