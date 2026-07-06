@@ -116,7 +116,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		expect(mockNotification.message).toBe('Set BYOK utility models');
 		expect(mockNotification.actions).toHaveLength(1);
 		expect(mockNotification.actions[0].commandId).toBe('workbench.action.openSettings');
-		expect(mockNotification.actions[0].commandArgs).toEqual(['chat.utility']);
+		expect(mockNotification.actions[0].commandArgs).toEqual(['chat.byokUtilityModelDefault']);
 	});
 
 	test('shows notification with single action when only chat.utilityModel is unset', async () => {
@@ -166,16 +166,28 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		expect(mockNotification.show).not.toHaveBeenCalled();
 	});
 
-	test('does not show notification when main agent model reuse is enabled', async () => {
+	test('does not show notification when the main agent model is the BYOK utility default', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
 		const { configService } = createConfigService({
-			'chat.useMainAgentModelForUtilityModels': true,
+			'chat.byokUtilityModelDefault': 'mainAgent',
 		});
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
 
 		await flushAsync();
 
 		expect(mockNotification.show).not.toHaveBeenCalled();
+	});
+
+	test('continues to show notification when Copilot is the BYOK utility default while signed out', async () => {
+		const { authService } = createAuthService({ anyGitHubSession: undefined });
+		const { configService } = createConfigService({
+			'chat.byokUtilityModelDefault': 'copilot',
+		});
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+
+		await flushAsync();
+
+		expect(mockNotification.show).toHaveBeenCalled();
 	});
 
 	test('hides notification once both utility settings are configured', async () => {
@@ -195,7 +207,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		expect(mockNotification.hide).toHaveBeenCalled();
 	});
 
-	test('hides notification when main agent model reuse is enabled', async () => {
+	test('hides notification when the main agent model is the BYOK utility default', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
 		const { configService, set } = createConfigService();
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
@@ -203,7 +215,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		await flushAsync();
 		expect(mockNotification.show).toHaveBeenCalled();
 
-		set('chat.useMainAgentModelForUtilityModels', true);
+		set('chat.byokUtilityModelDefault', 'mainAgent');
 		await flushAsync();
 
 		expect(mockNotification.hide).toHaveBeenCalled();

@@ -21,6 +21,12 @@ import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 
 
+const enum BYOKUtilityModelDefault {
+	None = 'none',
+	MainAgent = 'mainAgent',
+	Copilot = 'copilot',
+}
+
 export class ProductionEndpointProvider extends Disposable implements IEndpointProvider {
 
 	declare readonly _serviceBrand: undefined;
@@ -58,8 +64,7 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 			if (
 				e.affectsConfiguration(ProductionEndpointProvider.UTILITY_MODEL_CONFIG_KEY)
 				|| e.affectsConfiguration(ProductionEndpointProvider.UTILITY_SMALL_MODEL_CONFIG_KEY)
-				|| e.affectsConfiguration(ProductionEndpointProvider.USE_MAIN_AGENT_MODEL_FOR_UTILITY_MODELS_CONFIG_KEY)
-				|| e.affectsConfiguration(ProductionEndpointProvider.USE_COPILOT_MODELS_FOR_UTILITY_MODELS_CONFIG_KEY)
+				|| e.affectsConfiguration(ProductionEndpointProvider.BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY)
 			) {
 				this._logService.trace(`[ProductionEndpointProvider] Utility model configuration changed; invalidating alias endpoints.`);
 				// Clear telemetry fingerprints so a re-applied override emits
@@ -80,8 +85,7 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 	// `vscode.lm.selectChatModels({ vendor, id })`.
 	private static readonly UTILITY_MODEL_CONFIG_KEY = 'chat.utilityModel';
 	private static readonly UTILITY_SMALL_MODEL_CONFIG_KEY = 'chat.utilitySmallModel';
-	private static readonly USE_MAIN_AGENT_MODEL_FOR_UTILITY_MODELS_CONFIG_KEY = 'chat.useMainAgentModelForUtilityModels';
-	private static readonly USE_COPILOT_MODELS_FOR_UTILITY_MODELS_CONFIG_KEY = 'chat.useCopilotModelsForUtilityModels';
+	private static readonly BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY = 'chat.byokUtilityModelDefault';
 	private _mainAgentBYOKModel: LanguageModelChat | undefined;
 
 	/**
@@ -183,12 +187,15 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 			return override;
 		}
 
-		if (this._mainAgentBYOKModel && this._configService.getNonExtensionConfig<unknown>(ProductionEndpointProvider.USE_MAIN_AGENT_MODEL_FOR_UTILITY_MODELS_CONFIG_KEY) === true) {
-			return this._instantiationService.createInstance(ExtensionContributedChatEndpoint, this._mainAgentBYOKModel);
-		}
-
-		if (!this._useCopilotModelsForUtilityModelsByDefault()) {
-			throw new Error(`No utility model is configured for '${family}' while the selected main agent model is BYOK.`);
+		if (this._mainAgentBYOKModel) {
+			switch (this._getBYOKUtilityModelDefault()) {
+				case BYOKUtilityModelDefault.MainAgent:
+					return this._instantiationService.createInstance(ExtensionContributedChatEndpoint, this._mainAgentBYOKModel);
+				case BYOKUtilityModelDefault.None:
+					throw new Error(`No utility model is configured for '${family}' while the selected main agent model is BYOK.`);
+				case BYOKUtilityModelDefault.Copilot:
+					break;
+			}
 		}
 
 		switch (family) {
@@ -199,14 +206,19 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 		}
 	}
 
-	/**
-	 * Whether an unset utility model should resolve to a built-in GitHub Copilot
-	 * model. `true` when the selected main agent model is itself a Copilot model, or
-	 * when the user opted in via {@link USE_COPILOT_MODELS_FOR_UTILITY_MODELS_CONFIG_KEY}.
-	 */
-	private _useCopilotModelsForUtilityModelsByDefault(): boolean {
-		return !this._mainAgentBYOKModel
-			|| this._configService.getNonExtensionConfig<unknown>(ProductionEndpointProvider.USE_COPILOT_MODELS_FOR_UTILITY_MODELS_CONFIG_KEY) === true;
+	private _getBYOKUtilityModelDefault(): BYOKUtilityModelDefault {
+		const value = this._configService.getNonExtensionConfig<unknown>(ProductionEndpointProvider.BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY);
+		switch (value) {
+			case undefined:
+				return BYOKUtilityModelDefault.None;
+			case BYOKUtilityModelDefault.None:
+			case BYOKUtilityModelDefault.MainAgent:
+			case BYOKUtilityModelDefault.Copilot:
+				return value;
+			default:
+				this._logService.warn(`[ProductionEndpointProvider] Ignoring invalid ${ProductionEndpointProvider.BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY} value: '${String(value)}'.`);
+				return BYOKUtilityModelDefault.None;
+		}
 	}
 
 	/**
