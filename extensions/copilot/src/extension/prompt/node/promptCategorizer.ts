@@ -183,7 +183,7 @@ export class PromptCategorizerService implements IPromptCategorizerService {
 			const mainModelEndpoint = await this.endpointProvider.getChatEndpoint(request);
 
 			if (!isCAPIEndpoint(mainModelEndpoint)) {
-				// The main mode is a BYOK model, and prompt categorization should not be run
+				// The main model is a BYOK model and prompt categorization should not be run.
 				this.logService.debug('[PromptCategorizer] Skipping categorization because main model is BYOK');
 				return;
 			}
