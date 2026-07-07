@@ -113,11 +113,21 @@ export function isNoAuthConfig(config: BYOKModelConfig): config is BYOKNoAuthMod
  *   `contextWindow - maxOutputTokens`.
  * - Otherwise the window falls back to `maxInputTokens + maxOutputTokens` for backward
  *   compatibility.
+ *
+ * The returned limits are always internally consistent: `maxOutputTokens` is clamped so
+ * it never exceeds the context window, and `maxInputTokens` is clamped to the remaining
+ * budget (`contextWindow - maxOutputTokens`). This prevents invalid combinations such as
+ * `maxOutputTokens > contextWindow`, or a `maxInputTokens` supplied alongside a smaller
+ * `contextWindow` overflowing the window.
  */
 export function resolveModelTokenLimits(capabilities: Pick<BYOKModelCapabilities, 'maxInputTokens' | 'maxOutputTokens' | 'contextWindow'>): { contextWindow: number; maxInputTokens: number; maxOutputTokens: number } {
-	const maxOutputTokens = capabilities.maxOutputTokens;
-	const contextWindow = capabilities.contextWindow ?? ((capabilities.maxInputTokens ?? 0) + maxOutputTokens);
-	const maxInputTokens = capabilities.maxInputTokens ?? Math.max(0, contextWindow - maxOutputTokens);
+	const contextWindow = capabilities.contextWindow ?? ((capabilities.maxInputTokens ?? 0) + capabilities.maxOutputTokens);
+	// The output budget can never exceed the full window.
+	const maxOutputTokens = Math.min(capabilities.maxOutputTokens, contextWindow);
+	// The prompt budget is whatever remains after the output reservation; an explicitly
+	// provided maxInputTokens is clamped to that remaining budget.
+	const remainingInputBudget = Math.max(0, contextWindow - maxOutputTokens);
+	const maxInputTokens = Math.min(capabilities.maxInputTokens ?? remainingInputBudget, remainingInputBudget);
 	return { contextWindow, maxInputTokens, maxOutputTokens };
 }
 

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { CopilotToken } from '../../../../platform/authentication/common/copilotToken';
-import { byokKnownModelToAPIInfo, BYOKModelCapabilities, isClientBYOKAllowed, resolveModelInfo } from '../byokProvider';
+import { byokKnownModelToAPIInfo, BYOKModelCapabilities, isClientBYOKAllowed, resolveModelInfo, resolveModelTokenLimits } from '../byokProvider';
 
 describe('byokKnownModelToAPIInfo', () => {
 	const baseCapabilities: BYOKModelCapabilities = {
@@ -133,6 +133,40 @@ describe('resolveModelInfo', () => {
 		const info = resolveModelInfo('m1', 'TestProvider', undefined, undefined);
 
 		expect(info.capabilities.limits?.max_context_window_tokens).toBe(128000);
+	});
+});
+
+describe('resolveModelTokenLimits', () => {
+	it('derives the window from maxInputTokens + maxOutputTokens when contextWindow is absent', () => {
+		expect(resolveModelTokenLimits({ maxInputTokens: 616000, maxOutputTokens: 384000 })).toEqual({
+			contextWindow: 1000000,
+			maxInputTokens: 616000,
+			maxOutputTokens: 384000,
+		});
+	});
+
+	it('derives maxInputTokens from contextWindow when maxInputTokens is omitted', () => {
+		expect(resolveModelTokenLimits({ contextWindow: 1000000, maxOutputTokens: 384000 })).toEqual({
+			contextWindow: 1000000,
+			maxInputTokens: 616000,
+			maxOutputTokens: 384000,
+		});
+	});
+
+	it('clamps maxOutputTokens so it never exceeds the context window', () => {
+		expect(resolveModelTokenLimits({ contextWindow: 1000, maxOutputTokens: 8192 })).toEqual({
+			contextWindow: 1000,
+			maxInputTokens: 0,
+			maxOutputTokens: 1000,
+		});
+	});
+
+	it('clamps an explicit maxInputTokens to the remaining budget when it overflows the window', () => {
+		expect(resolveModelTokenLimits({ contextWindow: 1000000, maxInputTokens: 900000, maxOutputTokens: 384000 })).toEqual({
+			contextWindow: 1000000,
+			maxInputTokens: 616000,
+			maxOutputTokens: 384000,
+		});
 	});
 });
 

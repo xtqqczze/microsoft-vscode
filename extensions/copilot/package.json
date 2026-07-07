@@ -1986,6 +1986,18 @@
                   "toolCalling",
                   "vision",
                   "maxOutputTokens"
+                ],
+                "anyOf": [
+                  {
+                    "required": [
+                      "maxInputTokens"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "contextWindow"
+                    ]
+                  }
                 ]
               }
             }
@@ -2184,6 +2196,18 @@
                   "toolCalling",
                   "vision",
                   "maxOutputTokens"
+                ],
+                "anyOf": [
+                  {
+                    "required": [
+                      "maxInputTokens"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "contextWindow"
+                    ]
+                  }
                 ]
               }
             }
@@ -2301,6 +2325,18 @@
                   "toolCalling",
                   "vision",
                   "maxOutputTokens"
+                ],
+                "anyOf": [
+                  {
+                    "required": [
+                      "maxInputTokens"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "contextWindow"
+                    ]
+                  }
                 ]
               }
             }

@@ -8,13 +8,12 @@ import { BYOKModelCapabilities } from '../../common/byokProvider';
 import { OpenRouterLMProvider } from '../openRouterProvider';
 
 /**
- * Diagnostic tests for issue #324671:
- * OpenRouter BYOK derives the context window from `top_provider.context_length`,
- * which is the window of the highest-ranked provider — NOT the model's real
- * capability (`context_length`). For multi-provider models this can be off by 32×.
- *
- * These tests characterize the CURRENT (buggy) behavior and document, in comments,
- * the value expected once the fix (prefer model-level `context_length`) lands.
+ * Tests for issue #324671:
+ * OpenRouter BYOK previously derived the context window from `top_provider.context_length`,
+ * which is the window of the highest-ranked provider — NOT the model's real capability
+ * (`context_length`). For multi-provider models this could be off by 32×. These tests
+ * verify the fix: the model-level `context_length` is preferred, with `top_provider`
+ * used only as a fallback.
  */
 
 /** Exposes the protected `resolveModelCapabilities` for focused testing. */
