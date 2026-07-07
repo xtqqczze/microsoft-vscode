@@ -26,7 +26,8 @@ import { MultiDiffEditorWidget } from '../../../../editor/browser/widget/multiDi
 import { MultiDiffEditorViewModel } from '../../../../editor/browser/widget/multiDiffEditor/multiDiffEditorViewModel.js';
 import { IMultiDiffEditorOptions } from '../../../../editor/browser/widget/multiDiffEditor/multiDiffEditorWidgetImpl.js';
 import { IResourceLabel, IWorkbenchUIElementFactory } from '../../../../editor/browser/widget/multiDiffEditor/workbenchUIElementFactory.js';
-import { shouldUseSinglePaneLayout, EditorHeaderPrimaryMenuId } from '../../../browser/parts/singlePaneEditorPart.js';
+import { Menus } from '../../../browser/menus.js';
+import { shouldUseSinglePaneLayout } from '../../../browser/parts/singlePaneEditorPart.js';
 import { ActiveSessionContextKeys } from '../common/changes.js';
 import { IChangesViewService } from '../common/changesViewService.js';
 import { ChangesActionsBar } from './changesView.js';
@@ -137,7 +138,7 @@ export class SessionChangesEditor extends EditorPane {
 
 		// The Branch Changes picker + diff stats render as the leading header menu;
 		// their custom action view items resolve globally via IActionViewItemService.
-		store.add(instantiationService.createInstance(MenuWorkbenchToolBar, left, EditorHeaderPrimaryMenuId, {
+		store.add(instantiationService.createInstance(MenuWorkbenchToolBar, left, Menus.SessionsEditorHeaderPrimary, {
 			menuOptions: { shouldForwardArgs: true },
 		}));
 
