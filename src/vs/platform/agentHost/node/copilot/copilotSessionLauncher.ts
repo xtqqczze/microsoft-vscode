@@ -307,8 +307,6 @@ export async function resolveByokSessionConfig(
 	// `IByokLmBridgeRegistry`). Inbound inference is routed to that same serving
 	// connection by the proxy (`getServingConnection`).
 	let byokModels: IByokLmModelInfo[];
-	let fallbackPlan = plan;
-	let fallbackConfig = config;
 	try {
 		byokModels = await bridgeRegistry.listModels();
 	} catch (err) {
@@ -373,6 +371,8 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			return this._createSession(plan, config, sandboxConfig);
 		}
 
+		let fallbackPlan = plan;
+		let fallbackConfig = config;
 		try {
 			const stopWatch = new StopWatch();
 			this._logService.trace(`[Copilot:${plan.sessionId}] Calling SDK resumeSession...`);
