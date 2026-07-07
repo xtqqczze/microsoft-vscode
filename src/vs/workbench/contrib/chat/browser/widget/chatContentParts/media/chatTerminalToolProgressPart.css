@@ -47,6 +47,10 @@
 	white-space: nowrap;
 }
 
+.chat-terminal-label-flex > .chat-terminal-command > code {
+	white-space: nowrap;
+}
+
 .chat-terminal-label-flex > .chat-terminal-label-suffix {
 	flex: 0 0 auto;
 	white-space: nowrap;
