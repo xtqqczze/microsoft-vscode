@@ -2546,6 +2546,8 @@ export class CopilotAgentSession extends Disposable {
 			// describe a subagent's model call, so subagent messages (mapped or dropped) are skipped.
 			if (!e.agentId) {
 				this._telemetryReporter.assistantMessageReceived(this.sessionUri.toString(), e.data.serviceRequestId, this._appliedSnapshot.tools);
+				// Restricted `conversation.messageText` (source=model): the model's raw response text.
+				this._telemetryReporter.modelMessageText(this.sessionUri.toString(), e.data.content, this._turnId, e.data.serviceRequestId);
 			}
 			// The SDK fires a `message` event with the full assembled content after
 			// streaming deltas. If deltas already created a markdown part for this
@@ -3369,6 +3371,13 @@ export class CopilotAgentSession extends Disposable {
 
 		this._register(wrapper.onUserMessage(e => {
 			this._logService.trace(`[Copilot:${sessionId}] User message: ${e.data.content.length} chars, ${e.data.attachments?.length ?? 0} attachments`);
+			// Restricted `conversation.messageText` (source=user): the raw user prompt text. Emit only
+			// for genuine human prompts on the main agent — skip subagent turns (driven by the parent)
+			// and SDK-injected synthetic messages (skill/harness injections carry a non-`user` source,
+			// matching `isSyntheticUserMessage`) so injected content is not reported as the user's prompt.
+			if (!e.agentId && (!e.data.source || e.data.source.toLowerCase() === 'user')) {
+				this._telemetryReporter.userMessageText(this.sessionUri.toString(), e.data.content, this._turnId);
+			}
 		}));
 
 		this._register(wrapper.onPendingMessagesModified(() => {
