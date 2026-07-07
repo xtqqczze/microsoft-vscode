@@ -215,6 +215,10 @@ function shouldCreateEmptySessionAfterResumeError(err: unknown): boolean {
 	return !/\b(corrupt|corrupted|invalid|validation|schema|must be|parse|malformed|unexpected token)\b/i.test(message);
 }
 
+function isCustomAgentNotFoundError(err: unknown): boolean {
+	return getCopilotSdkErrorCode(err) === -32603 && /\bCustom agent '.+' not found\b/i.test(getErrorMessage(err));
+}
+
 /**
  * Resolves the reasoning effort: a recognized override level wins over the
  * model picker's thinking level; an unrecognized override is ignored (degrades
@@ -367,36 +371,48 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			return this._createSession(plan, config, sandboxConfig);
 		}
 
+		let fallbackPlan = plan;
+		let fallbackConfig = config;
 		try {
 			const stopWatch = new StopWatch();
 			this._logService.trace(`[Copilot:${plan.sessionId}] Calling SDK resumeSession...`);
-			const raw = await plan.client.resumeSession(plan.sessionId, {
-				...config,
-				workingDirectory: plan.workingDirectory.fsPath,
-				...(plan.resolvedAgentName ? { agent: plan.resolvedAgentName } : {}),
-			});
+			const raw = await plan.client.resumeSession(plan.sessionId, config);
 			this._logService.trace(`[Copilot:${plan.sessionId}] SDK resumeSession succeeded after ${stopWatch.elapsed()}ms`);
 			await this._applySandboxConfig(raw, sandboxConfig, plan.sessionId);
 			return new CopilotSessionWrapper(raw);
 		} catch (err) {
-			const errCode = getCopilotSdkErrorCode(err);
-			const errMsg = getErrorMessage(err);
+			let resumeError = err;
+			const errCode = getCopilotSdkErrorCode(resumeError);
+			const errMsg = getErrorMessage(resumeError);
 			this._logService.warn(`[Copilot:${plan.sessionId}] SDK resumeSession failed: code=${errCode}, message=${errMsg}`);
+			if (plan.resolvedAgentName && isCustomAgentNotFoundError(resumeError)) {
+				fallbackPlan = { ...plan, resolvedAgentName: undefined };
+				fallbackConfig = { ...config, agent: undefined };
+				this._logService.warn(`[Copilot:${plan.sessionId}] Stored custom agent '${plan.resolvedAgentName}' was not found; retrying resume without a custom agent`);
+				try {
+					const raw = await fallbackPlan.client.resumeSession(fallbackPlan.sessionId, fallbackConfig);
+					await this._applySandboxConfig(raw, sandboxConfig, plan.sessionId);
+					return new CopilotSessionWrapper(raw);
+				} catch (retryErr) {
+					resumeError = retryErr;
+					this._logService.warn(`[Copilot:${plan.sessionId}] SDK resumeSession without custom agent failed: code=${getCopilotSdkErrorCode(retryErr)}, message=${getErrorMessage(retryErr)}`);
+				}
+			}
 			// The SDK fails to resume sessions that have no messages.
 			// Fall back to creating a new session with the same ID,
 			// seeding model & working directory from stored metadata.
-			if (!shouldCreateEmptySessionAfterResumeError(err)) {
-				throw err;
+			if (!shouldCreateEmptySessionAfterResumeError(resumeError)) {
+				throw resumeError;
 			}
 
 			this._logService.warn(`[Copilot:${plan.sessionId}] Resume failed (code=-32603), falling back to createSession with same ID`);
 			const wrapper = await this._createSession({
-				...plan,
+				...fallbackPlan,
 				kind: 'create',
-				model: plan.fallback.model,
-				longContextWindow: plan.fallback.longContextWindow,
-				freeLongContext: plan.fallback.freeLongContext,
-			}, config, sandboxConfig);
+				model: fallbackPlan.fallback.model,
+				longContextWindow: fallbackPlan.fallback.longContextWindow,
+				freeLongContext: fallbackPlan.fallback.freeLongContext,
+			}, fallbackConfig, sandboxConfig);
 			this._logService.info(`[Copilot:${plan.sessionId}] Fallback createSession succeeded`);
 			return wrapper;
 		}
@@ -562,6 +578,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			onExitPlanModeRequest: (request, invocation) => runtime.handleExitPlanModeRequest(request, invocation),
 			workingDirectory: plan.workingDirectory?.fsPath,
 			customAgents,
+			agent: plan.resolvedAgentName,
 			skillDirectories,
 			instructionDirectories,
 			systemMessage,

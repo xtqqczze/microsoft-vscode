@@ -39,7 +39,6 @@ import { AgentHostMcpServersConfigKey, AgentHostSessionSyncEnabledConfigKey, Aut
 import { IAgentPluginManager, ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { AgentSessionEntry, decodeProviderData, encodeProviderData, type IPersistedChat } from '../agentPeerChats.js';
 import { AgentSession, AgentSignal, AuthenticateParams, GITHUB_COPILOT_PROTECTED_RESOURCE, GITHUB_REPO_PROTECTED_RESOURCE, IActiveClient, IAgent, IAgentChatDataChange, IAgentChats, IAgentLegacyChat, IAgentCreateChatForkSource, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, IAgentSessionProjectInfo, IAgentSpawnChatEvent, IMcpNotification, IRestoredSubagentSession, SubagentChatSignal } from '../../common/agentService.js';
-import { getEffectiveAgents } from '../../common/customAgents.js';
 import { getReasoningEffortDescription, getReasoningEffortLabel } from '../../common/reasoningEffort.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { IAgentHostOTelService } from '../../common/otel/agentHostOTelService.js';
@@ -1156,22 +1155,15 @@ export class CopilotAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * Resolves an {@link AgentSelection}'s SDK-facing name by looking it up in
-	 * the active client snapshot's parsed plugin agents. Falls back to `undefined`
-	 * when no matching plugin agent is found.
+	 * Resolves an {@link AgentSelection}'s SDK-facing name from the plugin
+	 * snapshot that is, or will be, applied to the SDK session.
 	 */
-	private async _resolveAgentName(sessionUri: URI, snapshot: IActiveClientSnapshot, agent: AgentSelection): Promise<string | undefined> {
+	private _resolveAgentName(snapshot: IActiveClientSnapshot, agent: AgentSelection): string | undefined {
 		for (const plugin of snapshot.plugins) {
 			const found = plugin.agents.find(a => a.uri.toString() === agent.uri);
 			if (found) {
 				return found.name;
 			}
-		}
-		const customizations = await this.getSessionCustomizations(sessionUri);
-		const agents = getEffectiveAgents(customizations);
-		const found = agents.find(a => a.uri.toString() === agent.uri);
-		if (found) {
-			return found.name;
 		}
 		return undefined;
 	}
@@ -1709,10 +1701,8 @@ export class CopilotAgent extends Disposable implements IAgent {
 		}
 		const alternativeAgent = this._getAlternativeAgentForWorktree(provisional, workingDirectory);
 
-		const [originalAgentName, alternativeAgentName] = await Promise.all([
-			this._resolveAgentName(provisional.sessionUri, snapshot, agent),
-			alternativeAgent ? this._resolveAgentName(provisional.sessionUri, snapshot, alternativeAgent) : Promise.resolve(undefined),
-		]);
+		const originalAgentName = this._resolveAgentName(snapshot, agent);
+		const alternativeAgentName = alternativeAgent ? this._resolveAgentName(snapshot, alternativeAgent) : undefined;
 
 		if (originalAgentName) {
 			return { agent: agent, name: originalAgentName };
@@ -2608,7 +2598,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 		const context = this._getChatContext(chat);
 		if (context.isPeerChat) {
 			if (context.target) {
-				const resolvedAgentName = agent ? await this._resolveAgentName(context.session, context.target.appliedSnapshot, agent) : undefined;
+				const resolvedAgentName = agent ? this._resolveAgentName(context.target.appliedSnapshot, agent) : undefined;
 				await context.target.setAgent(resolvedAgentName);
 			}
 			return;
@@ -2624,7 +2614,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 			// plugin snapshot. If the agent is no longer present (plugin
 			// removed, never loaded), pass `undefined` so the SDK clears its
 			// selection rather than silently keeping the previous one.
-			const resolvedAgentName = agent ? await this._resolveAgentName(context.session, entry.appliedSnapshot, agent) : undefined;
+			const resolvedAgentName = agent ? this._resolveAgentName(entry.appliedSnapshot, agent) : undefined;
 			await entry.setAgent(resolvedAgentName);
 		}
 		await this._storeSessionAgentMetadata(context.session, agent);
@@ -2935,7 +2925,10 @@ export class CopilotAgent extends Disposable implements IAgent {
 		const snapshot = await activeClient.snapshot();
 
 		const shellManager = this._instantiationService.createInstance(ShellManager, sessionUri, workingDirectory);
-		const resolvedAgentName = storedMetadata.agent ? await this._resolveAgentName(sessionUri, snapshot, storedMetadata.agent) : undefined;
+		const resolvedAgentName = storedMetadata.agent ? this._resolveAgentName(snapshot, storedMetadata.agent) : undefined;
+		if (storedMetadata.agent && !resolvedAgentName) {
+			this._logService.info(`[Copilot:${sessionId}] Stored custom agent is not available in the current plugin snapshot; resuming without a custom agent`);
+		}
 		const launchPlan: CopilotSessionLaunchPlan = {
 			kind: 'resume',
 			client,
@@ -4113,7 +4106,7 @@ class SessionPluginController extends Disposable {
 	}
 
 	private _isEnabled(customization: Customization): boolean {
-		return this._enablement.get(customization.uri) ?? customization.enabled;
+		return this._enablement.get(customization.uri) ?? customization.enabled !== false;
 	}
 
 	private _applyEnablement<T extends Customization>(customization: T): T {
