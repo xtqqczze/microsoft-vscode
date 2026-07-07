@@ -231,10 +231,23 @@ export interface IChatInputPartOptions {
 	 */
 	suppressModePreferredModel?: boolean;
 	/**
+	 * When true, model picks via the picker do not write to global storage.
+	 * Note: `switchToNextModel` keybindings still persist globally.
+	 */
+	suppressModelPersistence?: boolean;
+	/**
 	 * Whether we are running in the sessions window.
 	 * When true, the secondary toolbar (permissions picker) is hidden.
 	 */
 	isSessionsWindow?: boolean;
+	/**
+	 * Total horizontal gutter (in pixels) reserved outside the input box when
+	 * computing the editor width. Defaults account for the `.interactive-input-part`
+	 * margin used by the panel/sessions chat. Hosts that override that margin (e.g.
+	 * the automations dialog, which renders the composer flush with its form column)
+	 * can pass `0` so the editor fills the box and its scrollbar sits at the edge.
+	 */
+	inputPartHorizontalPadding?: number;
 }
 
 export interface IWorkingSetEntry {
@@ -251,6 +264,10 @@ export const enum ChatWidgetLocation {
 export interface IChatWidgetLocationInfo {
 	readonly location: ChatWidgetLocation;
 	readonly isMaximized: boolean;
+}
+
+export interface IChatModeChangeEvent {
+	readonly isUserInitiated: boolean;
 }
 
 const LEGACY_SHARED_INPUT_STATE_TAGS = new Set(['view', 'editor', 'quick']);
@@ -529,8 +546,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		return this._currentLanguageModel;
 	}
 
-	private _onDidChangeCurrentChatMode: Emitter<void> = this._register(new Emitter<void>());
-	readonly onDidChangeCurrentChatMode: Event<void> = this._onDidChangeCurrentChatMode.event;
+	private _onDidChangeCurrentChatMode: Emitter<IChatModeChangeEvent> = this._register(new Emitter<IChatModeChangeEvent>());
+	readonly onDidChangeCurrentChatMode: Event<IChatModeChangeEvent> = this._onDidChangeCurrentChatMode.event;
 
 	private readonly _currentModeObservable: ISettableObservable<IChatMode>;
 	private readonly _currentChatModesObservable: ISettableObservable<IChatModes>;
@@ -1176,7 +1193,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			setModel: (model: ILanguageModelChatMetadataAndIdentifier) => {
 				this._waitForPersistedLanguageModel.clear();
 				this._waitForSessionHistoryLanguageModel.clear();
-				this.setCurrentLanguageModel(model, true);
+				this.setCurrentLanguageModel(model, true, !this.options.suppressModelPersistence);
 				this.renderAttachedContext();
 			},
 			getModels: () => this.getModels(),
@@ -1189,8 +1206,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				return !sessionType || sessionType === localChatSessionType || isAgentHostTarget(sessionType);
 			},
 			showManageModelsAction: () => {
+				// Agent-host session types (local and remote) also surface the
+				// "Manage Models" action so users can add/configure BYOK models
+				// directly from the picker, matching the agents window experience.
 				const sessionType = this.getCurrentSessionType();
-				return !sessionType || sessionType === localChatSessionType;
+				return !sessionType || sessionType === localChatSessionType || isAgentHostTarget(sessionType);
 			},
 			showUnavailableFeatured: () => {
 				// Agent-host session types also surface unavailable featured
@@ -1759,14 +1779,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			currentModeKind: this.currentModeKind,
 			sessionType: this.getCurrentSessionType(),
 		}, allModels)) {
-			this.setCurrentLanguageModelToDefault();
+			this.setCurrentLanguageModelToDefault(undefined, !this.options.suppressModelPersistence);
 		}
 	}
 
 	/**
 	 * By ID- prefer this method
 	 */
-	setChatMode(mode: ChatModeKind | string, storeSelection = true): void {
+	setChatMode(mode: ChatModeKind | string, storeSelection = true, isUserInitiated = false): void {
 		if (!this.options.supportsChangingModes) {
 			return;
 		}
@@ -1776,22 +1796,22 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			modes.findModeByName(mode) ??
 			modes.findModeById(ChatModeKind.Agent) ??
 			ChatMode.Ask;
-		this.setChatMode2(mode2, storeSelection);
+		this.setChatMode2(mode2, storeSelection, isUserInitiated);
 	}
 
-	private setChatMode2(mode: IChatMode, storeSelection = true): void {
+	private setChatMode2(mode: IChatMode, storeSelection = true, isUserInitiated = false): void {
 		if (!this.options.supportsChangingModes) {
 			return;
 		}
 
 		this._currentModeObservable.set(mode, undefined);
-		this._onDidChangeCurrentChatMode.fire();
+		this._onDidChangeCurrentChatMode.fire({ isUserInitiated });
 
 		if (storeSelection) {
 			// Sync to model (mode is now persisted in the model's input state)
 			// Log first so the upcoming _syncInputStateToModel write can be attributed
 			// to a mode change.
-			logChangesToStateModel(this._inputModel, `setChatMode2 -> _syncInputStateToModel (mode=${mode.id}, storeSelection=${storeSelection}, currentLanguageModel=${this._currentLanguageModel.get()?.identifier}) in ${this._currentSessionKey}`, undefined, undefined, this.logService);
+			logChangesToStateModel(this._inputModel, `setChatMode2 -> _syncInputStateToModel (mode=${mode.id}, storeSelection=${storeSelection}, isUserInitiated=${isUserInitiated}, currentLanguageModel=${this._currentLanguageModel.get()?.identifier}) in ${this._currentSessionKey}`, undefined, undefined, this.logService);
 			this._syncInputStateToModel();
 		}
 	}
@@ -4630,7 +4650,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			// content cards. The editor width is computed here, so it must account
 			// for the same 64px total horizontal gutter or the editor overflows its
 			// container and renders wider than the message content above it.
-			inputPartHorizontalPadding: this.options.renderStyle === 'compact' ? 16 : (this.options.isSessionsWindow ? 64 : 24),
+			inputPartHorizontalPadding: this.options.inputPartHorizontalPadding ?? (this.options.renderStyle === 'compact' ? 16 : (this.options.isSessionsWindow ? 64 : 24)),
 			inputPartHorizontalPaddingInside: this.options.renderStyle === 'compact' ? 12 : 10,
 			toolbarsWidth: this.options.renderStyle === 'compact' ? getToolbarsWidthCompact() : 0,
 			sideToolbarWidth: inputSideToolbarWidth > 0 ? inputSideToolbarWidth + 4 /*gap*/ : 0,
