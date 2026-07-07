@@ -448,7 +448,7 @@ Then if you want to include those files you can call the tool again by setting "
 		}
 
 		return {
-			maxResults: mode === CopilotToolMode.FullContext ? 200 : 20,
+			maxResults: mode === CopilotToolMode.FullContext ? this.getMaxResultsCap() : this.getDefaultMaxResults(),
 			...input,
 			includePattern,
 		};
