@@ -1918,11 +1918,15 @@
                   },
                   "maxInputTokens": {
                     "type": "number",
-                    "description": "Maximum number of input tokens supported by the model"
+                    "markdownDescription": "Maximum number of input (prompt) tokens supported by the model. Optional when `contextWindow` is set, in which case it is derived as `contextWindow - maxOutputTokens`."
                   },
                   "maxOutputTokens": {
                     "type": "number",
                     "description": "Maximum number of output tokens supported by the model"
+                  },
+                  "contextWindow": {
+                    "type": "number",
+                    "markdownDescription": "The model's full context window (input + output) in tokens, e.g. `1000000` for a 1M model. When set it is the source of truth for the context window and `maxInputTokens` can be omitted. Otherwise the window is derived as `maxInputTokens + maxOutputTokens`."
                   },
                   "editTools": {
                     "type": "array",
@@ -1981,7 +1985,6 @@
                   "url",
                   "toolCalling",
                   "vision",
-                  "maxInputTokens",
                   "maxOutputTokens"
                 ]
               }
@@ -2089,11 +2092,15 @@
                   },
                   "maxInputTokens": {
                     "type": "number",
-                    "description": "Maximum number of input tokens supported by the model"
+                    "markdownDescription": "Maximum number of input (prompt) tokens supported by the model. Optional when `contextWindow` is set, in which case it is derived as `contextWindow - maxOutputTokens`."
                   },
                   "maxOutputTokens": {
                     "type": "number",
                     "description": "Maximum number of output tokens supported by the model"
+                  },
+                  "contextWindow": {
+                    "type": "number",
+                    "markdownDescription": "The model's full context window (input + output) in tokens, e.g. `1000000` for a 1M model. When set it is the source of truth for the context window and `maxInputTokens` can be omitted. Otherwise the window is derived as `maxInputTokens + maxOutputTokens`."
                   },
                   "editTools": {
                     "type": "array",
@@ -2176,7 +2183,6 @@
                   "url",
                   "toolCalling",
                   "vision",
-                  "maxInputTokens",
                   "maxOutputTokens"
                 ]
               }
@@ -2240,11 +2246,15 @@
                   },
                   "maxInputTokens": {
                     "type": "number",
-                    "description": "Maximum number of input tokens supported by the model"
+                    "markdownDescription": "Maximum number of input (prompt) tokens supported by the model. Optional when `contextWindow` is set, in which case it is derived as `contextWindow - maxOutputTokens`."
                   },
                   "maxOutputTokens": {
                     "type": "number",
                     "description": "Maximum number of output tokens supported by the model"
+                  },
+                  "contextWindow": {
+                    "type": "number",
+                    "markdownDescription": "The model's full context window (input + output) in tokens, e.g. `1000000` for a 1M model. When set it is the source of truth for the context window and `maxInputTokens` can be omitted. Otherwise the window is derived as `maxInputTokens + maxOutputTokens`."
                   },
                   "thinking": {
                     "type": "boolean",
@@ -2290,7 +2300,6 @@
                   "url",
                   "toolCalling",
                   "vision",
-                  "maxInputTokens",
                   "maxOutputTokens"
                 ]
               }
