@@ -1788,6 +1788,27 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	protected _pendingSession: ISession | undefined;
 
 	/**
+	 * Raw ids of backend sessions that an in-flight {@link _waitForNewSession}
+	 * has already matched to its send, so a *concurrent* new-session send of
+	 * the same scheme does not resolve to the same committed session. Each
+	 * matched id is released by the owning send in its `finally`.
+	 */
+	private readonly _committingSessionRawIds = new Set<string>();
+
+	/**
+	 * Own raw ids ({@link chatResource} path) of currently in-flight
+	 * new-session sends. A send's committed backend session keeps the eager
+	 * id it was created with, so {@link _waitForNewSession} matches a send to
+	 * its OWN id first. The novelty fallback (for flows where the backend
+	 * assigns a different id) must then never latch onto *another* in-flight
+	 * send's own session — otherwise two concurrent same-scheme sends racing
+	 * in a shared download/materialize window would swap sessions (each
+	 * graduating onto the other's committed session). Populated at send start,
+	 * cleared in the send's `finally`.
+	 */
+	private readonly _inFlightNewSessionOwnIds = new Set<string>();
+
+	/**
 	 * In-flight new sessions — sessions being composed in the new-chat view
 	 * before their first message is sent, keyed by `sessionId`. See
 	 * {@link NewSession} for the encapsulated state and lifecycle.
@@ -3207,6 +3228,9 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		// Treat that raw id as the session we are waiting for, not old state.
 		const newSessionRawId = chatResource.path.replace(/^\//, '');
 		existingKeys.delete(newSessionRawId);
+		// Publish this send's own id so concurrent same-scheme sends don't
+		// latch onto it via their novelty fallback (which would swap sessions).
+		this._inFlightNewSessionOwnIds.add(newSessionRawId);
 
 		const result = await this._chatService.sendRequest(chatResource, query, sendOptions);
 		if (result.kind === 'rejected') {
@@ -3224,9 +3248,12 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		this._pendingSession = skeleton;
 		this._onDidChangeSessions.fire({ added: [skeleton], removed: [], changed: [] });
 
+		// Raw id claimed by _waitForNewSession for this send (released in finally).
+		let committedRawId: string | undefined;
 		try {
-			const committedSession = await this._waitForNewSession(existingKeys, chatResource.scheme);
+			const committedSession = await this._waitForNewSession(existingKeys, chatResource.scheme, newSessionRawId);
 			if (committedSession) {
+				committedRawId = committedSession.resource.path.substring(1);
 				this._preserveNewSessionConfig(newSession, committedSession.sessionId);
 				// Carry the picked custom agent onto the committed session before
 				// the replace event so the agent picker doesn't reset to the
@@ -3236,8 +3263,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 				// first turn (see `sendOptions.modeInfo`), so update only the local
 				// mode observable here rather than re-notifying it via `setAgent`.
 				if (selectedAgent) {
-					const committedRawId = this._rawIdFromChatId(committedSession.sessionId);
-					const committedAdapter = committedRawId ? this._sessionCache.get(committedRawId) : undefined;
+					const committedRawIdForAgent = this._rawIdFromChatId(committedSession.sessionId);
+					const committedAdapter = committedRawIdForAgent ? this._sessionCache.get(committedRawIdForAgent) : undefined;
 					committedAdapter?.setChatAgent(committedAdapter.resource, selectedAgent);
 				}
 				// Session graduated: release the eager subscription without
@@ -3258,6 +3285,13 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		} catch {
 			// Connection lost or timeout — fall through to the failure cleanup.
 		} finally {
+			// Release the claim so unrelated future sends can match this
+			// session if needed; concurrent in-flight sends already captured
+			// their `existingKeys` and won't retroactively match it.
+			if (committedRawId !== undefined) {
+				this._committingSessionRawIds.delete(committedRawId);
+			}
+			this._inFlightNewSessionOwnIds.delete(newSessionRawId);
 			// Defensive clear: covers the failure path where the try block
 			// never reached the explicit clear above.
 			this._pendingSession = undefined;
@@ -3874,23 +3908,55 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	 * type that happens to appear mid-send — a slow codex send racing against a
 	 * restored claude session, say — is never mistaken for this send's commit.
 	 */
-	private async _waitForNewSession(existingKeys: Set<string>, expectedScheme: string): Promise<ISession | undefined> {
-		await this._refreshSessions();
-		for (const [key, cached] of this._sessionCache) {
-			if (!existingKeys.has(key) && cached.resource.scheme === expectedScheme) {
-				return cached;
+	private async _waitForNewSession(existingKeys: Set<string>, expectedScheme: string, ownRawId: string): Promise<ISession | undefined> {
+		// A candidate backend session commits THIS send when it is unclaimed,
+		// of the expected type, and either (a) carries this send's own id — the
+		// eager/committed id is preserved, so this is the exact match — or
+		// (b) is a novel session that is not another in-flight send's own
+		// session (the novelty fallback covers backends that assign a fresh
+		// id, without letting two concurrent same-scheme sends swap sessions).
+		const matches = (rawId: string, scheme: string): boolean => {
+			if (scheme !== expectedScheme || this._committingSessionRawIds.has(rawId)) {
+				return false;
 			}
+			if (rawId === ownRawId) {
+				return true;
+			}
+			return !existingKeys.has(rawId) && !this._inFlightNewSessionOwnIds.has(rawId);
+		};
+
+		await this._refreshSessions();
+		// Prefer this send's own id; fall back to any acceptable novel session.
+		const scan = (): ISession | undefined => {
+			let fallback: ISession | undefined;
+			for (const cached of this._sessionCache.values()) {
+				const rawId = cached.resource.path.substring(1);
+				if (!matches(rawId, cached.resource.scheme)) {
+					continue;
+				}
+				if (rawId === ownRawId) {
+					return cached;
+				}
+				fallback ??= cached;
+			}
+			return fallback;
+		};
+		const immediate = scan();
+		if (immediate) {
+			this._committingSessionRawIds.add(immediate.resource.path.substring(1));
+			return immediate;
 		}
 
 		const waitDisposables = new DisposableStore();
 		try {
 			const sessionPromise = new Promise<ISession | undefined>((resolve) => {
 				waitDisposables.add(this._onDidChangeSessions.event(e => {
-					const newSession = e.added.find(s => {
-						const rawId = s.resource.path.substring(1);
-						return !existingKeys.has(rawId) && s.resource.scheme === expectedScheme;
-					});
+					// Prefer this send's own id within the batch before falling
+					// back to an acceptable novel session.
+					const exact = e.added.find(s => s.resource.path.substring(1) === ownRawId && matches(ownRawId, s.resource.scheme));
+					const newSession = exact ?? e.added.find(s => matches(s.resource.path.substring(1), s.resource.scheme));
 					if (newSession) {
+						this._committingSessionRawIds.add(newSession.resource.path.substring(1));
 						resolve(newSession);
 					}
 				}));
