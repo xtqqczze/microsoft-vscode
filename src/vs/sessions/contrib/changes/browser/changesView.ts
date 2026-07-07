@@ -503,6 +503,11 @@ export class ChangesViewPane extends ViewPane {
 	private splitViewContainer: HTMLElement | undefined;
 	private readonly treePaneSizeChange = this._register(new Emitter<number | undefined>());
 
+	/** Computes the CI pane's default height (content, capped to a third of the split). */
+	private computeCIPreferredHeight: (() => number) | undefined;
+	/** Once the user drags a sash we stop imposing the CI pane's default height. */
+	private ciPaneUserResized = false;
+
 	private readonly isMergeBaseBranchProtectedContextKey: IContextKey<boolean>;
 	private readonly isolationModeContextKey: IContextKey<IsolationMode>;
 	private readonly hasGitRepositoryContextKey: IContextKey<boolean>;
@@ -673,6 +678,19 @@ export class ChangesViewPane extends ViewPane {
 		const getSessionFilesPreferredHeight = () => Math.max(getSessionFilesMinimumHeight(), SessionFilesWidget.HEADER_HEIGHT + SessionFilesWidget.PREFERRED_BODY_HEIGHT);
 		const getCIContentHeight = () => Math.max(CIStatusWidget.HEADER_HEIGHT, this.ciStatusWidget?.desiredHeight ?? 0);
 		const getCIMinimumHeight = () => this.ciStatusWidget?.collapsed ? CIStatusWidget.HEADER_HEIGHT : Math.min(ciMinHeight, getCIContentHeight());
+		// Preferred default size for the CI pane: content height, capped to a third of the split.
+		const getCIPreferredHeight = () => {
+			const contentHeight = getCIContentHeight();
+			if (this.ciStatusWidget?.collapsed) {
+				return CIStatusWidget.HEADER_HEIGHT;
+			}
+			const availableHeight = this.getSplitViewAvailableHeight();
+			if (availableHeight > 0) {
+				return Math.max(getCIMinimumHeight(), Math.min(contentHeight, Math.round(availableHeight / 3)));
+			}
+			return contentHeight;
+		};
+		this.computeCIPreferredHeight = getCIPreferredHeight;
 		const thisView = this;
 
 		// Top pane: file tree
@@ -731,6 +749,9 @@ export class ChangesViewPane extends ViewPane {
 		updateSplitViewStyles();
 		this._register(this.themeService.onDidColorThemeChange(updateSplitViewStyles));
 
+		// A manual sash drag hands layout control to the user: stop imposing the CI default size.
+		this._register(this.splitView.onDidSashChange(() => { this.ciPaneUserResized = true; }));
+
 		// Initially hide the other files and CI panes until content arrives
 		this.splitView.setViewVisible(1, false);
 		this.splitView.setViewVisible(2, false);
@@ -740,7 +761,7 @@ export class ChangesViewPane extends ViewPane {
 		this._register(this.sessionFilesWidget.onDidChangeHeight(() => this.fireTreePaneSizeChange()));
 
 		// CI checks pane (index 2)
-		this._wireSectionPane(this.ciStatusWidget, 2, CIStatusWidget.HEADER_HEIGHT, getCIContentHeight);
+		this._wireSectionPane(this.ciStatusWidget, 2, CIStatusWidget.HEADER_HEIGHT, getCIPreferredHeight, () => { this.ciPaneUserResized = false; });
 
 		this._register(this.onDidChangeBodyVisibility(visible => {
 			if (visible) {
@@ -1033,21 +1054,49 @@ export class ChangesViewPane extends ViewPane {
 		this.treePaneSizeChange.fire(undefined);
 	}
 
+	/** Compute the height available to the SplitView within the body. */
+	private getSplitViewAvailableHeight(): number {
+		const bodyHeight = this.currentBodyHeight;
+		if (bodyHeight <= 0) {
+			return 0;
+		}
+		const bodyPadding = 16; // 8px top + 8px bottom from .changes-view-body
+		const actionsHeight = this.actionsContainer?.offsetHeight ?? 0;
+		const actionsMargin = actionsHeight > 0 ? 8 : 0;
+		return Math.max(0, bodyHeight - bodyPadding - actionsHeight - actionsMargin);
+	}
+
 	/** Layout the SplitView to fill available body space. */
 	private layoutSplitView(): void {
 		if (!this.splitView || !this.splitViewContainer) {
 			return;
 		}
-		const bodyHeight = this.currentBodyHeight;
-		if (bodyHeight <= 0) {
+		const availableHeight = this.getSplitViewAvailableHeight();
+		if (availableHeight <= 0) {
 			return;
 		}
-		const bodyPadding = 16; // 8px top + 8px bottom from .changes-view-body
-		const actionsHeight = this.actionsContainer?.offsetHeight ?? 0;
-		const actionsMargin = actionsHeight > 0 ? 8 : 0;
-		const availableHeight = Math.max(0, bodyHeight - bodyPadding - actionsHeight - actionsMargin);
 		this.splitViewContainer.style.height = `${availableHeight}px`;
 		this.splitView.layout(availableHeight);
+		this.applyCIDefaultSize();
+	}
+
+	/**
+	 * Re-assert the CI pane's default height (capped to a third of the split) after layout.
+	 * This is where the split height is reliably known — the preferred height can otherwise be
+	 * evaluated during wiring when the body height is still 0, yielding an uncapped fallback.
+	 * Once the user drags a sash we back off and preserve their chosen size.
+	 */
+	private applyCIDefaultSize(): void {
+		if (!this.splitView || this.ciPaneUserResized || !this.computeCIPreferredHeight) {
+			return;
+		}
+		if (!this.ciStatusWidget?.visible || this.ciStatusWidget.collapsed) {
+			return;
+		}
+		const preferred = this.computeCIPreferredHeight();
+		if (this.splitView.getViewSize(2) !== preferred) {
+			this.splitView.resizeView(2, preferred);
+		}
 	}
 
 	/**
@@ -1061,6 +1110,7 @@ export class ChangesViewPane extends ViewPane {
 		paneIndex: number,
 		headerHeight: number,
 		getPreferredHeight: () => number,
+		onDidBecomeVisible?: () => void,
 	): void {
 		let savedPaneHeight = getPreferredHeight();
 
@@ -1091,6 +1141,7 @@ export class ChangesViewPane extends ViewPane {
 			if (visible !== isCurrentlyVisible) {
 				this.splitView.setViewVisible(paneIndex, visible);
 				if (visible && !widget.collapsed) {
+					onDidBecomeVisible?.();
 					savedPaneHeight = getPreferredHeight();
 					this.splitView.resizeView(paneIndex, savedPaneHeight);
 				}
