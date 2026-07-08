@@ -1371,14 +1371,16 @@ export class McpListWidget extends Disposable {
 			actions.push(activeSessionLifecycleAction, new Separator());
 		}
 		for (const menuActions of groups) {
+			for (const menuAction of menuActions) {
+				if (isDisposable(menuAction)) {
+					disposables.add(menuAction);
+				}
+			}
 			const visibleMenuActions = serverEntry.activeSessionServer
 				? menuActions.filter(action => !shouldHideLocalActionForActiveSessionServer(action))
 				: menuActions;
 			for (const menuAction of visibleMenuActions) {
 				actions.push(menuAction);
-				if (isDisposable(menuAction)) {
-					disposables.add(menuAction);
-				}
 			}
 			if (visibleMenuActions.length > 0) {
 				actions.push(new Separator());
