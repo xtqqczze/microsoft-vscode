@@ -212,6 +212,7 @@ import { ExploreAgentDefaultModel } from './exploreAgentDefaultModel.js';
 import { PlanAgentDefaultModel } from './planAgentDefaultModel.js';
 import { UtilityModelContribution, UtilitySmallModelContribution } from './utilityModelContribution.js';
 import { ChatImageCarouselService, IChatImageCarouselService } from './chatImageCarouselService.js';
+import { AgentHostImportConversationStore, IAgentHostImportConversationStore } from './agentSessions/agentHost/agentHostImportConversationStore.js';
 
 CommandsRegistry.registerCommand('_chat.notifyQuestionCarouselAnswer', (accessor: ServicesAccessor, resolveId: string, answers?: import('../common/chatService/chatService.js').IChatQuestionAnswers) => {
 	accessor.get(IChatService).notifyQuestionCarouselAnswer('', resolveId, answers);
@@ -2637,5 +2638,6 @@ registerSingleton(IPlanReviewFeedbackService, PlanReviewFeedbackService, Instant
 registerSingleton(IChatTipService, ChatTipService, InstantiationType.Delayed);
 registerSingleton(IChatDebugService, ChatDebugServiceImpl, InstantiationType.Delayed);
 registerSingleton(IChatImageCarouselService, ChatImageCarouselService, InstantiationType.Delayed);
+registerSingleton(IAgentHostImportConversationStore, AgentHostImportConversationStore, InstantiationType.Delayed);
 
 ChatWidget.CONTRIBS.push(ChatDynamicVariableModel);

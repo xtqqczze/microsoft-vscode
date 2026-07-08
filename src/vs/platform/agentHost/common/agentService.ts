@@ -821,6 +821,20 @@ export interface IAgentCreateSessionConfig {
 		readonly turnIdMapping?: ReadonlyMap<string, string>;
 	};
 	/**
+	 * Import an existing (e.g. local) conversation into a brand-new session as
+	 * real, editable turns. The provider translates {@link turns} into a
+	 * Copilot event log seeded on disk and resumes the session so the turns are
+	 * reconstituted as genuine backend events (editable / forkable / truncatable).
+	 *
+	 * The service layer assigns fresh UUID turn ids before handing the turns to
+	 * the provider so the seeded event ids and the seeded protocol turns stay
+	 * aligned. Mutually exclusive with {@link fork}.
+	 */
+	readonly importConversation?: {
+		readonly turns: readonly Turn[];
+		readonly model?: ModelSelection;
+	};
+	/**
 	 * MCP-style opt-in progress token from the client's `createSession`. When
 	 * set, the service reports any long-running session bring-up work — chiefly
 	 * the lazy first-use SDK download — as `progress` notifications carrying
