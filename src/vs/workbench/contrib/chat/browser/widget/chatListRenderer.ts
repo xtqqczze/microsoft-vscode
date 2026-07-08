@@ -845,7 +845,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 		// Clear pending-related classes and drag handle from previous renders
 		// Do this before element-type checks to ensure dividers also get cleaned up
-		templateData.rowContainer.classList.remove('pending-item', 'pending-divider', 'pending-request', 'chat-pending-dragging');
+		templateData.rowContainer.classList.remove('pending-item', 'pending-divider', 'pending-request', 'chat-pending-dragging', 'terminal-command-request');
 		templateData.dragHandle?.remove();
 		templateData.dragHandle = undefined;
 		delete templateData.rowContainer.dataset.pendingRequestId;
@@ -897,6 +897,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		templateData.rowContainer.classList.toggle('editing-session', location === ChatAgentLocation.Chat);
 		templateData.rowContainer.classList.toggle('interactive-request', isRequestVM(element));
 		templateData.rowContainer.classList.toggle('interactive-response', isResponseVM(element));
+		if (!isRequestVM(element)) {
+			templateData.rowContainer.classList.toggle('terminal-command-request', false);
+		}
 		const progressMessageAtBottomOfResponse = checkModeOption(this.delegate.currentChatMode(), this.rendererOptions.progressMessageAtBottomOfResponse);
 		templateData.rowContainer.classList.toggle('show-detail-progress', isResponseVM(element) && !element.isComplete && !element.progressMessages.length && !progressMessageAtBottomOfResponse);
 		templateData.rowContainer.classList.toggle('chat-progress-reservable', isResponseVM(element) && !element.isComplete && !!progressMessageAtBottomOfResponse);
@@ -1541,6 +1544,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		templateData.rowContainer.classList.toggle('chat-response-loading', false);
 		templateData.rowContainer.classList.toggle('pending-request', !!element.pendingKind);
 		templateData.rowContainer.classList.toggle('system-initiated-request', !!element.isSystemInitiated);
+		templateData.rowContainer.classList.toggle('terminal-command-request', !element.isSystemInitiated && element.isTerminalCommand);
 
 		// System-initiated requests render as compact progress-style messages
 		if (element.isSystemInitiated) {

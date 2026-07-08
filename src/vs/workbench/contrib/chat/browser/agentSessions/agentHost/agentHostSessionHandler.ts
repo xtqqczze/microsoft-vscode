@@ -64,7 +64,7 @@ import {
 } from '../../../common/attachments/chatVariableEntries.js';
 import { coerceImageBuffer } from '../../../common/chatImageExtraction.js';
 import { ChatRequestQueueKind, ConfirmedReason, ElicitationState, IChatProgress, IChatQuestion, IChatQuestionAnswers, IChatService, IChatToolInvocation, ToolConfirmKind, type IChatMcpAuthenticationRequired, type IChatMcpAuthenticationRequiredServer, type IChatMcpStartingServer, type IChatMultiSelectAnswer, type IChatPlanReviewResult, type IChatQuestionAnswerValue, type IChatResponseErrorDetails, type IChatSingleSelectAnswer, type IChatTerminalToolInvocationData } from '../../../common/chatService/chatService.js';
-import { IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionItem, IChatSessionRequestHistoryItem, SessionType, type IChatInputCompletionItem, type IChatInputCompletionsParams, type IChatInputCompletionsResult, type IChatSessionServerRequest } from '../../../common/chatSessionsService.js';
+import { IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionItem, IChatSessionRequestHistoryItem, isTerminalCommandPrompt, SessionType, type IChatInputCompletionItem, type IChatInputCompletionsParams, type IChatInputCompletionsResult, type IChatSessionServerRequest } from '../../../common/chatSessionsService.js';
 import { IChatEntitlementService } from '../../../../../services/chat/common/chatEntitlementService.js';
 import { IWorkingCopyService } from '../../../../../services/workingCopy/common/workingCopyService.js';
 import { ChatMode } from '../../../common/chatModes.js';
@@ -186,6 +186,7 @@ interface ISubagentContext {
 
 interface IStartServerRequestOptions {
 	readonly isSystemInitiated?: boolean;
+	readonly isTerminalRequest?: boolean;
 }
 
 function userOriginMessage(text: string, attachments: readonly MessageAttachment[] | undefined): Message {
@@ -533,6 +534,7 @@ class AgentHostChatSession extends Disposable implements IChatSession {
 			prompt,
 			variableData,
 			isSystemInitiated: options?.isSystemInitiated,
+			isTerminalRequest: options?.isTerminalRequest,
 		});
 	}
 }
@@ -899,7 +901,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 						}
 						const fallbackRawModelId = lastTurnModelSelection(sessionState)?.id;
 						const lookup = this._createTurnModelLookup(sessionResource, fallbackRawModelId);
-						history.push(...turnsToHistory(resolvedSession, sessionState.turns, this._config.agentId, this._config.connectionAuthority, lookup, this._chatErrorContext()));
+						history.push(...turnsToHistory(resolvedSession, sessionState.turns, this._config.agentId, this._config.connectionAuthority, lookup, this._chatErrorContext(), this._config.connection.initializeResult.get()?.terminalCommandPrefix));
 
 						// Enrich history with inner tool calls from subagent
 						// child sessions. Subscribes to each child session so
@@ -1520,6 +1522,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				messageToVariableData(activeTurn.message, this._config.connectionAuthority),
 				{
 					isSystemInitiated: activeTurn.message.origin.kind === MessageKind.SystemNotification,
+					isTerminalRequest: isTerminalCommandPrompt(activeTurn.message.text, this._config.connection.initializeResult.get()?.terminalCommandPrefix),
 				},
 			);
 

@@ -232,6 +232,7 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 		const sessionType = `agent-host-${agent.provider}`;
 		const agentId = sessionType;
 		const vendor = sessionType;
+		const ahService = this._agentHostService;
 
 		// Chat session contribution.
 		// Keep the delegation picker available for local agent host sessions in
@@ -253,6 +254,9 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 				supportsCheckpoints: true,
 				supportsPromptAttachments: true,
 				supportsImageAttachments: true,
+				get terminalCommandPrefix() {
+					return ahService.initializeResult.get()?.terminalCommandPrefix;
+				}
 			},
 		}));
 
