@@ -1164,7 +1164,6 @@ export const enum ToolResultContentType {
 	EmbeddedResource = 'embeddedResource',
 	Resource = 'resource',
 	FileEdit = 'fileEdit',
-	ShellExit = 'shell_exit',
 	Terminal = 'terminal',
 	TerminalComplete = 'terminalComplete',
 	Subagent = 'subagent',
@@ -1216,20 +1215,6 @@ export interface ToolResultResourceContent extends ContentRef {
  */
 export interface ToolResultFileEditContent extends FileEdit {
 	type: ToolResultContentType.FileEdit;
-}
-
-/**
- * Shell process exit metadata produced by SDK shell tools.
- *
- * @category Tool Result Content
- */
-export interface ToolResultShellExitContent {
-	type: ToolResultContentType.ShellExit;
-	shellId: string;
-	exitCode: number;
-	cwd?: string;
-	outputPreview?: string;
-	outputTruncated?: boolean;
 }
 
 /**
@@ -1308,7 +1293,6 @@ export interface ToolResultSubagentContent {
  * `ToolResultResourceContent` for lazy-loading large results,
  * `ToolResultFileEditContent` for file edit diffs,
  * `ToolResultTerminalContent` for live terminal output,
- * `ToolResultShellExitContent` for shell command exit metadata, and
  * `ToolResultTerminalCompleteContent` for terminal-style completion metadata, and
  * `ToolResultSubagentContent` for tool-spawned worker chats (AHP extensions).
  *
@@ -1320,6 +1304,5 @@ export type ToolResultContent =
 	| ToolResultResourceContent
 	| ToolResultFileEditContent
 	| ToolResultTerminalContent
-	| ToolResultShellExitContent
 	| ToolResultTerminalCompleteContent
 	| ToolResultSubagentContent;
