@@ -91,7 +91,7 @@ export interface IAgentHostToolCallDetailsReport {
 	toolCounts: Record<string, number>;
 	/** Names of the tools offered to the model for this turn. */
 	availableTools: readonly string[];
-	/** Number of model calls (rounds) in the turn that produced tool calls. */
+	/** Number of model-call rounds in the turn, including the final tool-free response round (matches the extension's `toolCallRounds.length`). */
 	numRequests: number;
 	totalToolCalls: number;
 	parallelToolCallRounds: number;
@@ -284,9 +284,9 @@ export class AgentHostTelemetryReporter {
 	 * events (`chatParticipantTelemetry.ts` -> `sendToolCallingTelemetry`) — the per-turn tool-call
 	 * aggregate. The extension emits it once at the end of a turn's tool-calling loop; the agent host
 	 * accumulates the same counts across the turn's `assistant.message` rounds and emits on turn
-	 * completion. The tool-definition token count, per-round token/char counts, and invalid-round
-	 * count are not surfaced at the AH turn boundary and are omitted. No-ops when the turn made no
-	 * tool calls.
+	 * completion. The tool-definition token count, per-round token/char counts, invalid-round count,
+	 * and turn index (agent-host turn ids are UUIDs, not ordinals) are not surfaced at the AH turn
+	 * boundary and are omitted. No-ops when the turn made no tool calls.
 	 *
 	 * @param report The per-turn tool-call aggregate.
 	 */
@@ -296,7 +296,6 @@ export class AgentHostTelemetryReporter {
 			return;
 		}
 		const session = isAhpChatChannel(report.session) ? parseRequiredSessionUriFromChatUri(report.session) : report.session;
-		const turnIndex = Number(report.turnId);
 		const properties = multiplexProperties({
 			conversationId: AgentSession.id(session),
 			requestId: report.turnId,
@@ -308,7 +307,6 @@ export class AgentHostTelemetryReporter {
 		});
 		const measurements = {
 			numRequests: report.numRequests,
-			...(Number.isFinite(turnIndex) ? { turnIndex } : {}),
 			availableToolCount: report.availableTools.length,
 			totalToolCalls: report.totalToolCalls,
 			parallelToolCallRounds: report.parallelToolCallRounds,

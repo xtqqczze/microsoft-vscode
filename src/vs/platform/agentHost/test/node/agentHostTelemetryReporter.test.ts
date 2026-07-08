@@ -119,12 +119,12 @@ suite('AgentHostTelemetryReporter', () => {
 		const reporter = new AgentHostTelemetryReporter(service);
 
 		reporter.toolCallDetails({
-			session, turnId: '2', model: 'gpt-x', responseType: 'success',
+			session, turnId: 'a1b2c3d4-0000-4000-8000-000000000000', model: 'gpt-x', responseType: 'success',
 			toolCounts: {}, availableTools: ['grep', 'edit'],
 			numRequests: 0, totalToolCalls: 0, parallelToolCallRounds: 0, parallelToolCallsTotal: 0,
 		}); // dropped: no tool calls
 		reporter.toolCallDetails({
-			session, turnId: '2', model: 'gpt-x', responseType: 'success',
+			session, turnId: 'a1b2c3d4-0000-4000-8000-000000000000', model: 'gpt-x', responseType: 'success',
 			toolCounts: { grep: 2, edit: 1 }, availableTools: ['grep', 'edit'],
 			numRequests: 2, totalToolCalls: 3, parallelToolCallRounds: 1, parallelToolCallsTotal: 2,
 		}); // emitted
@@ -133,8 +133,8 @@ suite('AgentHostTelemetryReporter', () => {
 			eventName: 'toolCallDetailsExternal',
 			properties: {
 				conversationId: AgentSession.id(session),
-				requestId: '2',
-				messageId: '2',
+				requestId: 'a1b2c3d4-0000-4000-8000-000000000000',
+				messageId: 'a1b2c3d4-0000-4000-8000-000000000000',
 				responseType: 'success',
 				model: 'gpt-x',
 				toolCounts: JSON.stringify({ grep: 2, edit: 1 }),

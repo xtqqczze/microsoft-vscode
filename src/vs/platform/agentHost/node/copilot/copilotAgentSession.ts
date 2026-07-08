@@ -2668,23 +2668,26 @@ export class CopilotAgentSession extends Disposable {
 				this._telemetryReporter.assistantMessageReceived(this.sessionUri.toString(), e.data.serviceRequestId, this._appliedSnapshot.tools);
 				// Restricted `conversation.messageText` (source=model): the model's raw response text.
 				this._telemetryReporter.modelMessageText(this.sessionUri.toString(), e.data.content, this._turnId, e.data.serviceRequestId);
-				// Accumulate the per-turn tool-call aggregate for the restricted `toolCallDetails` event,
-				// mirroring the extension's per-round `toolCallRounds` reduction. Each `assistant.message`
-				// carrying tool requests is one round.
+				// Accumulate the per-turn tool-call aggregate for the restricted `toolCallDetails` event.
+				// Every main-agent `assistant.message` is one model-call round (matches the extension's
+				// `numRequests = toolCallRounds.length`, which counts the final tool-free response round
+				// too); the tool-count stats only apply to rounds that carried tool requests.
 				const turn = this._currentTurn;
-				const toolRequests = e.data.toolRequests;
-				if (turn && toolRequests?.length) {
+				if (turn) {
 					turn.toolCallRounds++;
-					turn.totalToolCalls += toolRequests.length;
-					if (toolRequests.length > 1) {
-						turn.parallelToolCallRounds++;
-						turn.parallelToolCallsTotal += toolRequests.length;
-					}
-					for (const req of toolRequests) {
-						turn.toolCounts.set(req.name, (turn.toolCounts.get(req.name) ?? 0) + 1);
-					}
 					if (e.data.model) {
 						turn.lastModel = e.data.model;
+					}
+					const toolRequests = e.data.toolRequests;
+					if (toolRequests?.length) {
+						turn.totalToolCalls += toolRequests.length;
+						if (toolRequests.length > 1) {
+							turn.parallelToolCallRounds++;
+							turn.parallelToolCallsTotal += toolRequests.length;
+						}
+						for (const req of toolRequests) {
+							turn.toolCounts.set(req.name, (turn.toolCounts.get(req.name) ?? 0) + 1);
+						}
 					}
 				}
 			}
