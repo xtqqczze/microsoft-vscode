@@ -1651,6 +1651,7 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 					const originalContent = edit.beforeContentUri ? wrap(edit.beforeContentUri) : undefined;
 					return {
 						uri: resource,
+						editKind: edit.kind as ChatExternalEditKind,
 						originalUri: originalResource,
 						modifiedContentUri: modifiedContent,
 						originalContentUri: originalContent,

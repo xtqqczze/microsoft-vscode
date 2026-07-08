@@ -1979,10 +1979,7 @@ export class CopilotAgentSession extends Disposable {
 				return { kind: 'reject' };
 			}
 
-			// Derive display information from the permission request kind
-			const { confirmationTitle, invocationMessage, toolInput, permissionKind, permissionPath } = getPermissionDisplay(request, this._workingDirectory);
-
-			// For write permission requests, build an FileEdit preview so the
+			// For write permission requests, build a FileEdit preview so the
 			// client can show a diff before the user approves or denies. This
 			// awaits async filesystem operations; the SDK already calls
 			// `handlePermissionRequest` from an arbitrary async context, so the
@@ -1996,6 +1993,9 @@ export class CopilotAgentSession extends Disposable {
 			if (!this._pendingPermissions.has(toolCallId)) {
 				return { kind: 'reject' };
 			}
+
+			const isNewFile = edits?.items.some(edit => !edit.before && !!edit.after);
+			const { confirmationTitle, invocationMessage, toolInput, permissionKind, permissionPath } = getPermissionDisplay(request, this._workingDirectory, isNewFile);
 
 			// Fire a pending_confirmation signal to transition the tool to PendingConfirmation
 			const toolName = request.toolName ?? request.kind;
