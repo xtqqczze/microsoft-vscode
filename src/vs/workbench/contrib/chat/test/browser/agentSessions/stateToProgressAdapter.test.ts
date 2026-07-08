@@ -1493,7 +1493,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandOutput?.text, 'text-output');
 		});
 
-		test('uses shell_exit exit code for completed SDK shell tool history', () => {
+		test('uses terminal completion exit code for completed SDK shell tool history', () => {
 			const tc = createCompletedToolCall({
 				_meta: { toolKind: 'terminal' },
 				toolInput: 'gti status',
@@ -1519,7 +1519,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandOutput?.text, 'command not found\r\n');
 		});
 
-		test('keeps zero shell_exit exit code as success for completed SDK shell tool history', () => {
+		test('keeps zero terminal completion exit code as success for completed SDK shell tool history', () => {
 			const tc = createCompletedToolCall({
 				_meta: { toolKind: 'terminal' },
 				toolInput: 'pwd',
@@ -1544,7 +1544,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandState?.exitCode, 0);
 		});
 
-		test('falls back to tool success when shell_exit has no exit code', () => {
+		test('falls back to tool success when terminal completion has no exit code', () => {
 			const tc = createCompletedToolCall({
 				_meta: { toolKind: 'terminal' },
 				toolInput: 'pwd',
@@ -1620,7 +1620,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandState?.exitCode, 0);
 		});
 
-		test('finalize uses shell_exit exit code over SDK tool success', () => {
+		test('finalize uses terminal completion exit code over SDK tool success', () => {
 			const tc = createToolCallState({
 				_meta: { toolKind: 'terminal' },
 				toolInput: 'false',

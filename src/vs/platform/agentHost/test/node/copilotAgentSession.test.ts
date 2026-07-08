@@ -2305,7 +2305,7 @@ suite('CopilotAgentSession', () => {
 			}
 		});
 
-		test('live tool_complete preserves SDK shell_exit content', async () => {
+		test('live tool_complete maps SDK shell_exit content to terminal completion', async () => {
 			const { mockSession, signals } = await createAgentSession(disposables);
 
 			mockSession.fire('tool.execution_start', {

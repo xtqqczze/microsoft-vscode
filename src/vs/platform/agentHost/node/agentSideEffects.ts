@@ -1132,6 +1132,20 @@ export class AgentSideEffects extends Disposable {
 				agent?.setCustomizationEnabled?.(action.id, action.enabled);
 				break;
 			}
+			case ActionType.SessionMcpServerStartRequested: {
+				const agent = this._options.getAgent(sessionChannel);
+				agent?.startMcpServer?.(URI.parse(sessionChannel), action.id).catch(err => {
+					this._logService.warn(`[AgentSideEffects] startMcpServer failed for ${sessionChannel}`, err);
+				});
+				break;
+			}
+			case ActionType.SessionMcpServerStopRequested: {
+				const agent = this._options.getAgent(sessionChannel);
+				agent?.stopMcpServer?.(URI.parse(sessionChannel), action.id).catch(err => {
+					this._logService.warn(`[AgentSideEffects] stopMcpServer failed for ${sessionChannel}`, err);
+				});
+				break;
+			}
 			case ActionType.SessionIsReadChanged: {
 				this._persistSessionFlag(channel, 'isRead', action.isRead ? 'true' : '');
 				break;

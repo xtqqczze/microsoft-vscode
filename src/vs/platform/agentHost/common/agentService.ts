@@ -1581,6 +1581,12 @@ export interface IAgent {
 	 */
 	setCustomizationEnabled(id: string, enabled: boolean): void;
 
+	/** Request a session MCP server start/restart by customization id. */
+	startMcpServer?(session: URI, id: string): Promise<void>;
+
+	/** Request a session MCP server stop by customization id. */
+	stopMcpServer?(session: URI, id: string): Promise<void>;
+
 	/** Gracefully shut down all sessions. */
 	shutdown(): Promise<void>;
 
