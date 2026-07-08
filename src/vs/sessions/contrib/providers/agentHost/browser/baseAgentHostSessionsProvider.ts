@@ -53,7 +53,7 @@ import { computePullRequestIcon, GitHubPullRequestState } from '../../../github/
 import { IPullRequestIconCache } from '../../../github/browser/pullRequestIconCache.js';
 import { mapProtocolStatus } from './agentHostDiffs.js';
 import { createChangesets } from './agentHostSessionChangesets.js';
-import { createSessionOutputObs } from './agentHostSessionFiles.js';
+import { createSessionOutputObs, ISessionOutputObs } from './agentHostSessionFiles.js';
 
 const STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES = 'sessions.agentHost.sessionConfigPicker.selectedValues';
 const UNSAFE_SESSION_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -297,7 +297,7 @@ class AdditionalChat extends Disposable {
 	private readonly _interactivity: ISettableObservable<ChatInteractivity>;
 	private readonly _isNew: ISettableObservable<boolean>;
 
-	constructor(resource: URI, summary: ChatSummary, isNew: boolean = false, parentChat?: URI) {
+	constructor(resource: URI, summary: ChatSummary, isNew: boolean = false, parentChat?: URI, lastTurnChanges?: IObservable<readonly ISessionFileChange[]>) {
 		super();
 		const modifiedAt = summary.modifiedAt ? new Date(summary.modifiedAt) : new Date();
 		this._title = observableValue('chatTitle', summary.title || localize('newChatTab', "New Chat"));
@@ -316,6 +316,7 @@ class AdditionalChat extends Disposable {
 			updatedAt: this._updatedAt,
 			status: derived(reader => this._isNew.read(reader) ? SessionStatus.Untitled : this._status.read(reader)),
 			changes: constObservable([]),
+			lastTurnChanges,
 			checkpoints: observableValue(this, undefined),
 			modelId: this._modelId,
 			mode: this._mode,
@@ -402,7 +403,6 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 	readonly changes: IObservable<readonly (IChatSessionFileChange | IChatSessionFileChange2)[]>;
 	readonly changesets: ISettableObservable<readonly ISessionChangeset[] | undefined>;
 	readonly externalChanges: IObservable<readonly ISessionFile[]>;
-	readonly lastTurnChanges: IObservable<readonly ISessionFileChange[]>;
 	readonly modelId: ISettableObservable<string | undefined>;
 	modelSelection: ModelSelection | undefined;
 	readonly mode: ISettableObservable<{ readonly id: string; readonly kind: string } | undefined>;
@@ -437,6 +437,13 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 	 * for single-chat sessions it is the only chat and `chats === [it]`.
 	 */
 	private readonly _defaultChat: IChat;
+	/**
+	 * The session's live output observables (external files + per-chat last-turn
+	 * changes), parsed once from the active-session subscriptions and shared by
+	 * the default chat and every peer chat so each chat's status pills reflect
+	 * that chat's own last turn.
+	 */
+	private readonly _sessionOutput: ISessionOutputObs;
 	/**
 	 * Independent title override for the default chat tab. `undefined` means the
 	 * default chat inherits the session title; a non-empty value means the user
@@ -686,8 +693,8 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 		// active-session subscriptions used for changes.
 		const sessionUri = AgentSession.uri(this.sessionType, rawId);
 		const sessionOutput = createSessionOutputObs(sessionUri, this._options, this.isActiveSessionObs, this.isArchived, this.workspace);
+		this._sessionOutput = sessionOutput;
 		this.externalChanges = sessionOutput.externalFiles;
-		this.lastTurnChanges = sessionOutput.lastTurnChanges;
 
 		const mainChat: IChat = {
 			resource: this.resource,
@@ -696,6 +703,7 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 			updatedAt: this.updatedAt,
 			status: derived(this, reader => this._defaultChatStatusOverride.read(reader) ?? this.status.read(reader)),
 			changes: this.changes,
+			lastTurnChanges: sessionOutput.getLastTurnChanges(URI.parse(buildDefaultChatUri(sessionUri))),
 			checkpoints: observableValue(this, undefined),
 			modelId: this.modelId,
 			mode: this.mode,
@@ -836,7 +844,8 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 
 	private _createAdditionalChat(chatId: string, summary: ChatSummary): AdditionalChat {
 		const resource = URI.from({ scheme: this._resourceScheme, path: `/${this._rawId}`, fragment: chatId });
-		return new AdditionalChat(resource, summary, this._newChatIds.has(chatId), this._resolveParentChatResource(summary.origin));
+		const lastTurnChanges = this._sessionOutput.getLastTurnChanges(URI.parse(summary.resource));
+		return new AdditionalChat(resource, summary, this._newChatIds.has(chatId), this._resolveParentChatResource(summary.origin), lastTurnChanges);
 	}
 
 	/**
@@ -1242,8 +1251,9 @@ interface INewSessionConstructionContext {
 	/**
 	 * Optional initial config values to seed into the new session before its
 	 * first {@link NewSession.resolveConfig} round-trip. Used to forward
-	 * `chat.permissions.default` into the agent host's `autoApprove` slot so
-	 * the picker reflects the user's preference immediately.
+	 * `chat.permissions.default` into the agent host's `autoApprove` slot and
+	 * `git.branchPrefix` into the `worktreeBranchPrefix` slot so the values are
+	 * present from the very first `resolveConfig`/`createSession`.
 	 */
 	readonly initialConfigValues?: Record<string, unknown>;
 	/**
@@ -2245,7 +2255,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			resourceScheme,
 			authenticationPending: this.authenticationPending,
 			logService: this._logService,
-			initialConfigValues: this._initialNewSessionConfig(),
+			initialConfigValues: this._initialNewSessionConfig(workspace),
 			instantiationService: this._instantiationService,
 			onSessionState: (id, state) => state === undefined
 				? this._handleNewSessionStateGone(id)
@@ -2366,8 +2376,12 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	 * (`chat.tools.global.autoApprove` policy value `false`), the approval seed
 	 * is clamped to `default` so the agent host never starts in an elevated
 	 * permission level the user is not allowed to pick.
+	 *
+	 * The user's `git.branchPrefix` setting (resource-scoped to the workspace's
+	 * first folder) is seeded into the `worktreeBranchPrefix` slot so the agent
+	 * host can prepend it to the branch it creates for an isolated worktree.
 	 */
-	protected _initialNewSessionConfig(): Record<string, unknown> | undefined {
+	protected _initialNewSessionConfig(workspace?: ISessionWorkspace): Record<string, unknown> | undefined {
 		const config = Object.create(null) as Record<string, unknown>;
 		const policyRestricted = isAutoApprovePolicyRestricted(this._baseConfigurationService);
 
@@ -2403,6 +2417,16 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		const configuredMode = configuredDefaults?.mode;
 		if (typeof configuredMode === 'string' && KNOWN_MODE_VALUES.has(configuredMode)) {
 			remembered[SessionConfigKey.Mode] = configuredMode;
+		}
+
+		// Worktree branch prefix, forwarded from `git.branchPrefix`. Seeded
+		// here (rather than remembered) since it is derived from a setting, not
+		// a user pick; an empty value is omitted so the default branch naming
+		// is preserved.
+		const resource = workspace?.folders[0]?.root;
+		const branchPrefix = this._baseConfigurationService.getValue<string>('git.branchPrefix', { resource });
+		if (typeof branchPrefix === 'string' && branchPrefix.length > 0) {
+			remembered[SessionConfigKey.WorktreeBranchPrefix] = branchPrefix;
 		}
 
 		return Object.keys(remembered).length > 0 ? remembered : undefined;

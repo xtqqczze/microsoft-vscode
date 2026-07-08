@@ -1164,8 +1164,9 @@ export const enum ToolResultContentType {
 	EmbeddedResource = 'embeddedResource',
 	Resource = 'resource',
 	FileEdit = 'fileEdit',
-	ShellExit = 'shellExit',
+	ShellExit = 'shell_exit',
 	Terminal = 'terminal',
+	TerminalComplete = 'terminalComplete',
 	Subagent = 'subagent',
 }
 
@@ -1248,6 +1249,37 @@ export interface ToolResultTerminalContent {
 }
 
 /**
+ * Record of a command executed by a terminal-style tool (e.g. a shell tool),
+ * appended to the tool result when the command exits.
+ *
+ * This records the command's exit, not the terminal's — the terminal may
+ * keep running afterwards.
+ *
+ * When live output was exposed through a terminal channel (a
+ * {@link ToolResultTerminalContent} block in the same tool result),
+ * {@link resource} identifies that channel; otherwise this block stands alone
+ * as the retained command result.
+ *
+ * @category Tool Result Content
+ */
+export interface ToolResultTerminalCompleteContent {
+	type: ToolResultContentType.TerminalComplete;
+	/**
+	 * URI of the `ahp-terminal:` channel that carried live output for this
+	 * command, if one was exposed.
+	 */
+	resource?: URI;
+	/** Exit code from the completed command, if reported by the runtime */
+	exitCode?: number;
+	/** Working directory where the command was executed */
+	cwd?: URI;
+	/** Preview of the command's output, if available */
+	preview?: string;
+	/** Whether `preview` is known to be incomplete or truncated */
+	truncated?: boolean;
+}
+
+/**
  * A reference, embedded in a tool result, to a worker chat spawned by the tool
  * call (a sub-agent delegation), referenced by a chat URI (`ahp-chat:/...`).
  *
@@ -1275,8 +1307,9 @@ export interface ToolResultSubagentContent {
  * Mirrors the content blocks in MCP `CallToolResult.content`, plus
  * `ToolResultResourceContent` for lazy-loading large results,
  * `ToolResultFileEditContent` for file edit diffs,
- * `ToolResultShellExitContent` for SDK shell exit metadata,
- * `ToolResultTerminalContent` for live terminal output, and
+ * `ToolResultTerminalContent` for live terminal output,
+ * `ToolResultShellExitContent` for shell command exit metadata, and
+ * `ToolResultTerminalCompleteContent` for terminal-style completion metadata, and
  * `ToolResultSubagentContent` for tool-spawned worker chats (AHP extensions).
  *
  * @category Tool Result Content
@@ -1286,6 +1319,7 @@ export type ToolResultContent =
 	| ToolResultEmbeddedResourceContent
 	| ToolResultResourceContent
 	| ToolResultFileEditContent
-	| ToolResultShellExitContent
 	| ToolResultTerminalContent
+	| ToolResultShellExitContent
+	| ToolResultTerminalCompleteContent
 	| ToolResultSubagentContent;

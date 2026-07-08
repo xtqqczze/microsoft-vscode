@@ -1244,12 +1244,8 @@ export class ProtocolServerHandler extends Disposable {
 			if (!state) {
 				throw new ProtocolError(AHP_SESSION_NOT_FOUND, `Session not found: ${params.channel}`);
 			}
-			// Our agent host currently does not lazy load turns
-			if (params.cursor !== undefined && params.cursor !== state.turnsNextCursor) {
-				throw new ProtocolError(JsonRpcErrorCodes.InvalidParams, `Unrecognized turns cursor: ${params.cursor}`);
-			}
-			if (state.turnsNextCursor === undefined) {
-				return {};
+			if (params.cursor && params.cursor !== state.turnsNextCursor) {
+				throw new ProtocolError(JsonRpcErrorCodes.InvalidParams, `Unrecognized fetchTurns cursor`);
 			}
 			this._stateManager.dispatchServerAction(params.channel, {
 				type: ActionType.ChatTurnsLoaded,
