@@ -82,6 +82,22 @@ export interface IAgentHostToolInvokedReport {
 	invocationTimeMs: number;
 }
 
+export interface IAgentHostToolCallDetailsReport {
+	session: string;
+	turnId: string;
+	model: string | undefined;
+	responseType: string;
+	/** Count of invocations keyed by tool name, across all rounds in the turn. */
+	toolCounts: Record<string, number>;
+	/** Names of the tools offered to the model for this turn. */
+	availableTools: readonly string[];
+	/** Number of model calls (rounds) in the turn that produced tool calls. */
+	numRequests: number;
+	totalToolCalls: number;
+	parallelToolCallRounds: number;
+	parallelToolCallsTotal: number;
+}
+
 export interface IAgentHostToolCallStalledEvent {
 	provider: string;
 	agentSessionId: string;
@@ -261,6 +277,45 @@ export class AgentHostTelemetryReporter {
 		const measurements = { messageCharLen: content.length };
 		restricted.sendEnhancedGHTelemetryEvent('conversation.messageText', properties, measurements);
 		restricted.sendInternalMSFTTelemetryEvent('conversation.messageText', properties, measurements);
+	}
+
+	/**
+	 * Mirrors the Copilot extension's restricted `toolCallDetailsExternal` / `toolCallDetailsInternal`
+	 * events (`chatParticipantTelemetry.ts` -> `sendToolCallingTelemetry`) — the per-turn tool-call
+	 * aggregate. The extension emits it once at the end of a turn's tool-calling loop; the agent host
+	 * accumulates the same counts across the turn's `assistant.message` rounds and emits on turn
+	 * completion. The tool-definition token count, per-round token/char counts, and invalid-round
+	 * count are not surfaced at the AH turn boundary and are omitted. No-ops when the turn made no
+	 * tool calls.
+	 *
+	 * @param report The per-turn tool-call aggregate.
+	 */
+	toolCallDetails(report: IAgentHostToolCallDetailsReport): void {
+		const restricted = this._restricted;
+		if (!restricted || report.totalToolCalls === 0) {
+			return;
+		}
+		const session = isAhpChatChannel(report.session) ? parseRequiredSessionUriFromChatUri(report.session) : report.session;
+		const turnIndex = Number(report.turnId);
+		const properties = multiplexProperties({
+			conversationId: AgentSession.id(session),
+			requestId: report.turnId,
+			messageId: report.turnId,
+			responseType: report.responseType,
+			...(report.model ? { model: report.model } : {}),
+			toolCounts: JSON.stringify(report.toolCounts),
+			availableTools: JSON.stringify(report.availableTools),
+		});
+		const measurements = {
+			numRequests: report.numRequests,
+			...(Number.isFinite(turnIndex) ? { turnIndex } : {}),
+			availableToolCount: report.availableTools.length,
+			totalToolCalls: report.totalToolCalls,
+			parallelToolCallRounds: report.parallelToolCallRounds,
+			parallelToolCallsTotal: report.parallelToolCallsTotal,
+		};
+		restricted.sendEnhancedGHTelemetryEvent('toolCallDetailsExternal', properties, measurements);
+		restricted.sendInternalMSFTTelemetryEvent('toolCallDetailsInternal', properties, measurements);
 	}
 
 	turnCompleted(report: IAgentHostTurnCompletedReport): void {

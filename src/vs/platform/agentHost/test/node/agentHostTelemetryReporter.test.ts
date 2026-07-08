@@ -113,4 +113,35 @@ suite('AgentHostTelemetryReporter', () => {
 		assert.deepStrictEqual(service.enhancedEvents, [expected]);
 		assert.deepStrictEqual(service.internalEvents, [expected]);
 	});
+
+	test('toolCallDetails emits toolCallDetailsExternal + toolCallDetailsInternal aggregate, and no-ops when no tool calls', () => {
+		const service = new TestRestrictedTelemetryService();
+		const reporter = new AgentHostTelemetryReporter(service);
+
+		reporter.toolCallDetails({
+			session, turnId: '2', model: 'gpt-x', responseType: 'success',
+			toolCounts: {}, availableTools: ['grep', 'edit'],
+			numRequests: 0, totalToolCalls: 0, parallelToolCallRounds: 0, parallelToolCallsTotal: 0,
+		}); // dropped: no tool calls
+		reporter.toolCallDetails({
+			session, turnId: '2', model: 'gpt-x', responseType: 'success',
+			toolCounts: { grep: 2, edit: 1 }, availableTools: ['grep', 'edit'],
+			numRequests: 2, totalToolCalls: 3, parallelToolCallRounds: 1, parallelToolCallsTotal: 2,
+		}); // emitted
+
+		assert.deepStrictEqual(service.enhancedEvents, [{
+			eventName: 'toolCallDetailsExternal',
+			properties: {
+				conversationId: AgentSession.id(session),
+				requestId: '2',
+				messageId: '2',
+				responseType: 'success',
+				model: 'gpt-x',
+				toolCounts: JSON.stringify({ grep: 2, edit: 1 }),
+				availableTools: JSON.stringify(['grep', 'edit']),
+			},
+		}]);
+		assert.strictEqual(service.internalEvents.length, 1);
+		assert.strictEqual(service.internalEvents[0].eventName, 'toolCallDetailsInternal');
+	});
 });
