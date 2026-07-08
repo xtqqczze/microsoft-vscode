@@ -466,11 +466,12 @@ configurationRegistry.registerConfiguration({
 		'agents.voice.voice': {
 			type: 'string',
 			enum: ['victoria_neutral', 'kevin_neutral', 'maya_neutral', 'daniel_neutral'],
+			enumItemLabels: ['Victoria', 'Kevin', 'Maya', 'Daniel'],
 			enumDescriptions: [
-				nls.localize('agents.voice.voice.victoria', "Victoria (neutral)."),
-				nls.localize('agents.voice.voice.kevin', "Kevin (neutral)."),
-				nls.localize('agents.voice.voice.maya', "Maya (neutral)."),
-				nls.localize('agents.voice.voice.daniel', "Daniel (neutral)."),
+				nls.localize('agents.voice.voice.victoria', "Victoria."),
+				nls.localize('agents.voice.voice.kevin', "Kevin."),
+				nls.localize('agents.voice.voice.maya', "Maya."),
+				nls.localize('agents.voice.voice.daniel', "Daniel."),
 			],
 			description: nls.localize('agents.voice.voice', "The voice used when the assistant reads responses aloud. Changing this while voice mode is connected takes effect immediately."),
 			default: 'victoria_neutral',
