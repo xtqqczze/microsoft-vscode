@@ -85,6 +85,7 @@
 	color: var(--vscode-button-secondaryForeground);
 	background-color: var(--vscode-button-secondaryBackground);
 	border: 1px solid var(--vscode-button-secondaryBorder, transparent);
+	box-sizing: border-box;
 	overflow: hidden;
 }
 
@@ -98,20 +99,25 @@
 	align-items: center;
 	width: auto;
 	min-width: 0;
-	padding: 0 8px;
+	padding: 0 4px 0 2px;
 	overflow: hidden;
 }
 
 .chat-turn-pill-preview-primary .monaco-icon-label {
-	/* Center the icon and the name/description together — the label is a flex
-		row whose file icon `::before` is a fixed 22px tall, so without this the
-		shorter text sits at the top of the stretched row rather than on the icon's
-		vertical center. */
+	/* Center the icon and the name together — the label is a flex
+		row whose file icon `::before` is a fixed 18px tall (see the rule below),
+		so without this the shorter text sits at the top of the stretched row
+		rather than on the icon's vertical center. */
 	align-items: center;
 	min-width: 0;
 	overflow: hidden;
 	/* Match the changes pill, which uses the `.monaco-text-button.small` size. */
 	font-size: 11px;
+}
+
+.chat-turn-pill-preview-primary .monaco-icon-label::before {
+	width: 12px;
+	height: 18px;
 }
 
 .chat-turn-pill-preview .monaco-button.chat-turn-pill-preview-primary:hover {

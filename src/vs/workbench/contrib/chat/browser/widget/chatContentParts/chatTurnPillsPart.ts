@@ -266,9 +266,8 @@ export class ChatTurnPillsContentPart extends Disposable implements IChatContent
 	}
 
 	/**
-	 * Row actions for the changed-files list: markdown and HTML files get a
-	 * labelless-icon-free "Preview" action that opens the file as a markdown
-	 * preview or in the integrated browser.
+	 * Row actions for the changed-files list: markdown files get a labelless-
+	 * icon-free "Preview" action that opens the file as a markdown preview.
 	 */
 	private _getRowActions(diff: IEditSessionEntryDiff): IAction[] {
 		const kind = previewKind(diff.modifiedURI);
