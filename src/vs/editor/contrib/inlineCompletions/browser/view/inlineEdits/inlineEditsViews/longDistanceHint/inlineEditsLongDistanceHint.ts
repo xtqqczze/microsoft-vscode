@@ -417,9 +417,9 @@ export class InlineEditsLongDistanceHint extends Disposable implements IInlineEd
 					}
 
 					// Check if this is a cross-file edit
-					const currentUri = this._editorObs.model.read(reader)?.uri;
+					const currentModel = this._editorObs.model.read(reader);
 					const targetUri = viewState.target.uri;
-					const isCrossFileEdit = targetUri && (!currentUri || targetUri.toString() !== currentUri.toString());
+					const isCrossFileEdit = !currentModel || !viewState.target.targets(currentModel);
 
 					if (isCrossFileEdit) {
 						// For cross-file edits, show target filename instead of outline
