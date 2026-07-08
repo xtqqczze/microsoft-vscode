@@ -13,13 +13,15 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
+import { localize } from '../../../../nls.js';
+import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { isIChatSessionFileChange2 } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ChatTurnPillsWidget, diffStatsEqual, EMPTY_DIFF_STATS, IChatTurnPillsModel, IDiffStats, IPreviewFile, observeTurnStatusPillsConfig, openChatPreviewFile, previewFilesEqual, previewKind } from '../../../../workbench/contrib/chat/browser/widget/chatTurnPills.js';
 import { isAgentHostProviderId } from '../../../common/agentHostSessionsProvider.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IChat, SessionStatus } from '../../../services/sessions/common/session.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
-import { VIEW_SESSION_CHANGES_COMMAND_ID } from '../../changes/browser/changesActions.js';
+import { LastTurnChangesMultiDiffSourceResolver } from './lastTurnChangesMultiDiffSourceResolver.js';
 import './media/sessionChatInputToolbar.css';
 
 /** The per-turn data both pills reflect. */
@@ -125,6 +127,7 @@ export class SessionChatInputToolbar extends Disposable {
 		@IOpenerService private readonly _openerService: IOpenerService,
 		@ILogService private readonly _logService: ILogService,
 		@ISessionsService private readonly _sessionsService: ISessionsService,
+		@IEditorService private readonly _editorService: IEditorService,
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
@@ -181,10 +184,18 @@ export class SessionChatInputToolbar extends Disposable {
 	}
 
 	private async _openChanges(): Promise<void> {
-		const session = this._session.get();
-		if (!session) {
+		const chat = this._chat.get();
+		if (!chat) {
 			return;
 		}
-		await this._commandService.executeCommand(VIEW_SESSION_CHANGES_COMMAND_ID, session);
+		// Open the multi-diff editor scoped to this chat's last turn. Its resource
+		// list is resolved reactively via the `LastTurnChangesMultiDiffSourceResolver`
+		// registered as a workbench contribution, so it live-updates as further
+		// edits stream in.
+		const multiDiffSource = LastTurnChangesMultiDiffSourceResolver.getMultiDiffSourceUri(chat.resource);
+		await this._editorService.openEditor({
+			multiDiffSource,
+			label: localize('sessions.lastTurnChanges.title', "Last Turn Changes"),
+		});
 	}
 }
