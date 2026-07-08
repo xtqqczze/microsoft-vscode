@@ -1919,8 +1919,6 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	}
 
 	private _playChunk(sessionId: string | undefined, audio: string, isFirstChunk: boolean, isFinal: boolean, transcript: string | undefined): void {
-		this._currentPlaybackSessionId = sessionId;
-
 		// Streaming pipeline sends a monotonically-growing transcript on every
 		// chunk. On the FIRST chunk of a response we push a fresh assistant
 		// turn into the rolling buffer; on subsequent chunks we REPLACE that
@@ -1939,6 +1937,12 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 
 		const ttsEnabled = this.configurationService.getValue<boolean>('agents.voice.textToSpeech') !== false;
 		if (ttsEnabled && audio) {
+			// Claim the playback slot only when we actually have audio to play.
+			// A transcript-only frame (empty audio) must NOT claim it, or the
+			// slot would stay pinned to a session that never starts playback
+			// (onPlaybackStopped never fires), deadlocking every other
+			// session's queued audio.
+			this._currentPlaybackSessionId = sessionId;
 			this._clearAutoListenTimer();
 			this._replyPlayedSinceSend = true;
 			this.micCaptureService.suppressUntil(Date.now() + 800);
@@ -1949,29 +1953,35 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			this._replyPlayedSinceSend = true;
 			if (isFinal) {
 				this._currentPlaybackSessionId = null;
-				this._processQueue();
+				// Avoid re-entering _processQueue if we're already inside its
+				// drain loop; that loop will continue on its own.
+				if (!this._isProcessingQueue) {
+					this._processQueue();
+				}
 				if (this._isHandsFreeEnabled()) {
 					this._scheduleAutoListen();
 				}
 			}
 		} else {
+			// TTS enabled but no audio in this frame. Forward it so a final
+			// frame can flush/stop an in-flight playback turn; a non-final
+			// empty frame is a no-op and leaves the slot untouched.
 			this.ttsPlaybackService.playAudioChunk(audio, isFinal, this._window!);
 		}
 	}
 
 	private _processQueue(): void {
-		if (this._audioQueue.length === 0 || this._currentPlaybackSessionId !== null) {
-			this._isProcessingQueue = false;
-			return;
-		}
-
+		// Drain entries until one actually claims the playback slot (starts
+		// audio) or the queue empties. Entries that produce no audio (e.g.
+		// transcript-only frames) would otherwise stall the chain, since
+		// nothing fires onPlaybackStopped to pump the next entry.
 		this._isProcessingQueue = true;
-		const next = this._audioQueue.shift()!;
-
-		for (const chunk of next.chunks) {
-			this._playChunk(next.sessionId, chunk.audio, chunk.isFirstChunk, chunk.isFinal, chunk.transcript);
+		while (this._currentPlaybackSessionId === null && this._audioQueue.length > 0) {
+			const next = this._audioQueue.shift()!;
+			for (const chunk of next.chunks) {
+				this._playChunk(next.sessionId, chunk.audio, chunk.isFirstChunk, chunk.isFinal, chunk.transcript);
+			}
 		}
-
 		this._isProcessingQueue = false;
 	}
 
