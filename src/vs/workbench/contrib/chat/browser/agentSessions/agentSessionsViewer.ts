@@ -53,6 +53,7 @@ import { BugIndicatingError } from '../../../../../base/common/errors.js';
 import { compareIgnoreCase } from '../../../../../base/common/strings.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { IChatSessionsService } from '../../common/chatSessionsService.js';
+import { IVoicePlaybackService } from '../../common/voicePlaybackService.js';
 import { createPixelSpinner } from '../../../../../base/browser/ui/pixelSpinner/pixelSpinner.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
 
@@ -70,6 +71,7 @@ interface IAgentSessionItemTemplate {
 	// Column 2 Row 1
 	readonly title: IconLabel;
 	readonly pinnedIndicator: HTMLElement;
+	readonly pendingVoiceIndicator: HTMLElement;
 	readonly statusContainer: HTMLElement;
 	readonly statusTime: HTMLElement;
 	readonly titleToolbar: MenuWorkbenchToolBar;
@@ -243,6 +245,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
+		@IVoicePlaybackService private readonly voicePlaybackService: IVoicePlaybackService,
 	) {
 		super();
 	}
@@ -261,6 +264,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 					h('div.agent-session-title-row', [
 						h('div.agent-session-title@title'),
 						h('div.agent-session-pinned-indicator@pinnedIndicator'),
+						h('div.agent-session-pending-voice-indicator@pendingVoiceIndicator'),
 						h('div.agent-session-title-toolbar@titleToolbar'),
 					]),
 					h('div.agent-session-details-row', [
@@ -299,6 +303,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 			statusIcon: disposables.add(new AgentSessionStatusIcon(elements.icon, session => this.getIcon(session), this.accessibilityService)),
 			title: disposables.add(new IconLabel(elements.title, { supportHighlights: true, supportIcons: true })),
 			pinnedIndicator: elements.pinnedIndicator,
+			pendingVoiceIndicator: elements.pendingVoiceIndicator,
 			titleToolbar,
 			detailsIcon: elements.detailsIcon,
 			badge: elements.badge,
@@ -371,6 +376,19 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 		const isPinned = session.element.isPinned();
 		template.pinnedIndicator.className = 'agent-session-pinned-indicator ' + (ThemeIcon.asClassName(Codicon.pinned));
 		template.pinnedIndicator.classList.toggle('visible', isPinned);
+
+		// Pending voice response indicator - shown when a voice response arrived
+		// while this session wasn't focused and is being held until it is.
+		const sessionResource = session.element.resource;
+		template.pendingVoiceIndicator.className = 'agent-session-pending-voice-indicator ' + ThemeIcon.asClassName(Codicon.unmute);
+		template.pendingVoiceIndicator.title = localize('pendingVoiceResponse', "Voice response ready");
+		const updatePendingVoice = () => {
+			template.pendingVoiceIndicator.classList.toggle('visible', this.voicePlaybackService.hasPendingResponse(sessionResource));
+		};
+		template.elementDisposable.add(autorun(reader => {
+			this.voicePlaybackService.pendingResponseVersion.read(reader);
+			updatePendingVoice();
+		}));
 
 		// Badge
 		const hasBadge = this.renderBadge(session, template);

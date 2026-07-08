@@ -111,8 +111,7 @@ export class VoiceClientService extends Disposable implements IVoiceClientServic
 			if (
 				e.affectsConfiguration('agents.voice.turn.autoEndMode') ||
 				e.affectsConfiguration('agents.voice.turn.silenceMs') ||
-				e.affectsConfiguration('agents.voice.turn.stopPhrases') ||
-				e.affectsConfiguration('agents.voice.turn.vadGateAsr')
+				e.affectsConfiguration('agents.voice.turn.stopPhrases')
 			) {
 				this._sendSetTurnConfig();
 			}
@@ -156,10 +155,7 @@ export class VoiceClientService extends Disposable implements IVoiceClientServic
 			? phrasesRaw.map(p => String(p).trim()).filter(p => p.length > 0)
 			: [];
 
-		const gateRaw = cfg.getValue<string>('agents.voice.turn.vadGateAsr');
-		const vad_gate_asr = gateRaw === 'on' ? true : gateRaw === 'off' ? false : null;
-
-		return { auto_end_mode, silence_ms, stop_phrases, vad_gate_asr };
+		return { auto_end_mode, silence_ms, stop_phrases, vad_gate_asr: true };
 	}
 
 	private _sendSetTurnConfig(): void {

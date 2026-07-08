@@ -546,17 +546,5 @@ configurationRegistry.registerConfiguration({
 			default: ['send it'],
 			scope: ConfigurationScope.APPLICATION,
 		},
-		'agents.voice.turn.vadGateAsr': {
-			type: 'string',
-			enum: ['default', 'on', 'off'],
-			enumDescriptions: [
-				nls.localize('agents.voice.turn.vadGateAsr.default', "Let the backend decide (gates speech recognition only when `agents.voice.turn.autoEndMode` is `off`)."),
-				nls.localize('agents.voice.turn.vadGateAsr.on', "Always gate: only forward audio to speech recognition when the backend voice-activity detector hears speech."),
-				nls.localize('agents.voice.turn.vadGateAsr.off', "Never gate: forward all captured audio to speech recognition."),
-			],
-			description: nls.localize('agents.voice.turn.vadGateAsr', "Controls voice-activity noise-gating of the audio sent to speech recognition. Independent of `agents.voice.turn.autoEndMode`, except that `default` derives its behavior from it (gating only when `autoEndMode` is `off`). Use `on`/`off` to force gating regardless of `autoEndMode`."),
-			default: 'default',
-			scope: ConfigurationScope.APPLICATION,
-		},
 	}
 });
