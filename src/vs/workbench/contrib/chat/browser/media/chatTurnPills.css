@@ -69,8 +69,8 @@
 	color: var(--vscode-chat-linesRemovedForeground);
 }
 
-/* Preview pill: a single unified control — a resource label (file icon + name +
-	"preview" description), an in-pill separator, and a dropdown chevron. The pill
+/* Preview pill: a single unified control - a resource label (file icon + name),
+	an in-pill separator, and a dropdown chevron. The pill
 	background/border live on the container so the inner (transparent) buttons read
 	as one pill; each inner button is an independent, tab-focusable click zone. The
 	3-class selector beats `.monaco-action-bar .action-item { display: block }`. */
@@ -92,8 +92,7 @@
 	touch-action: manipulation;
 }
 
-/* Left zone: the resource label (file icon + name + "preview"). The height is
-	set by the pill, so no vertical padding here. */
+/* Left zone: the resource label. The height is set by the pill, so no vertical padding here. */
 .chat-turn-pill-preview .monaco-button.chat-turn-pill-preview-primary {
 	display: inline-flex;
 	align-items: center;
