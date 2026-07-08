@@ -232,9 +232,9 @@ export class AgentHostTelemetryReporter {
 	 *
 	 * @param session Session URI string; its id becomes `conversationId`.
 	 * @param content The user's prompt text. No-ops when empty.
-	 * @param turnId The SDK turn identifier this message belongs to, mapped to the extension's `turnIndex` field.
+	 * @param turnIndex The 0-based ordinal of the turn this message belongs to, matching the extension's numeric `turnIndex` (`conversation.turns.length`). CTS parses `turn_index` as an integer, so a numeric ordinal is required here (a non-numeric id lands empty).
 	 */
-	userMessageText(session: string, content: string, turnId: string): void {
+	userMessageText(session: string, content: string, turnIndex: number): void {
 		const restricted = this._restricted;
 		if (!restricted || !content) {
 			return;
@@ -242,7 +242,7 @@ export class AgentHostTelemetryReporter {
 		const properties = multiplexProperties({
 			source: 'user',
 			conversationId: AgentSession.id(session),
-			...(turnId ? { turnIndex: turnId } : {}),
+			turnIndex: String(turnIndex),
 			messageText: content,
 		});
 		const measurements = { messageCharLen: content.length };
@@ -259,10 +259,10 @@ export class AgentHostTelemetryReporter {
 	 *
 	 * @param session Session URI string; its id becomes `conversationId`.
 	 * @param content The assistant's response text. No-ops when empty.
-	 * @param turnId The SDK turn identifier this message belongs to, mapped to the extension's `turnIndex` field.
+	 * @param turnIndex The 0-based ordinal of the turn this message belongs to, matching the extension's numeric `turnIndex` (`conversation.turns.length`). CTS parses `turn_index` as an integer, so a numeric ordinal is required here.
 	 * @param serviceRequestId The model call's `x-copilot-service-request-id`, mapped to `headerRequestId`.
 	 */
-	modelMessageText(session: string, content: string, turnId: string, serviceRequestId: string | undefined): void {
+	modelMessageText(session: string, content: string, turnIndex: number, serviceRequestId: string | undefined): void {
 		const restricted = this._restricted;
 		if (!restricted || !content) {
 			return;
@@ -270,7 +270,7 @@ export class AgentHostTelemetryReporter {
 		const properties = multiplexProperties({
 			source: 'model',
 			conversationId: AgentSession.id(session),
-			...(turnId ? { turnIndex: turnId } : {}),
+			turnIndex: String(turnIndex),
 			...(serviceRequestId ? { headerRequestId: serviceRequestId } : {}),
 			messageText: content,
 		});
@@ -285,14 +285,16 @@ export class AgentHostTelemetryReporter {
 	 * aggregate. The extension emits it once at the end of a turn's tool-calling loop; the agent host
 	 * accumulates the same counts across the turn's `assistant.message` rounds and emits on turn
 	 * completion. The tool-definition token count, per-round token/char counts, invalid-round count,
-	 * and turn index (agent-host turn ids are UUIDs, not ordinals) are not surfaced at the AH turn
-	 * boundary and are omitted. No-ops when the turn made no tool calls.
+	 * and turn index (the extension emits it only as a non-landing measurement) are not surfaced at the
+	 * AH turn boundary and are omitted. Like the extension, this fires for every turn that had tools
+	 * available — even one that made no tool calls (empty `toolCounts`) — and no-ops only when no tools
+	 * were offered.
 	 *
 	 * @param report The per-turn tool-call aggregate.
 	 */
 	toolCallDetails(report: IAgentHostToolCallDetailsReport): void {
 		const restricted = this._restricted;
-		if (!restricted || report.totalToolCalls === 0) {
+		if (!restricted || report.availableTools.length === 0) {
 			return;
 		}
 		const session = isAhpChatChannel(report.session) ? parseRequiredSessionUriFromChatUri(report.session) : report.session;
