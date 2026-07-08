@@ -63,6 +63,15 @@ export interface ChatState {
 	// ── Conversation contents ──────────────────────────────────────────
 	/** Completed turns */
 	turns: Turn[];
+	/**
+	 * Cursor for loading older completed turns into this chat state.
+	 *
+	 * Presence means `turns` is a tail window and more historical turns are
+	 * available. Pass this opaque cursor to `fetchTurns`; the host MUST insert
+	 * the loaded turns into state and update or clear this cursor before
+	 * responding. Absence means the state contains all retained turns.
+	 */
+	turnsNextCursor?: string;
 	/** Currently in-progress turn */
 	activeTurn?: ActiveTurn;
 	/** Message to inject into the current turn at a convenient point */
@@ -1155,8 +1164,8 @@ export const enum ToolResultContentType {
 	EmbeddedResource = 'embeddedResource',
 	Resource = 'resource',
 	FileEdit = 'fileEdit',
+	ShellExit = 'shellExit',
 	Terminal = 'terminal',
-	ShellExit = 'shell_exit',
 	Subagent = 'subagent',
 }
 
@@ -1209,6 +1218,20 @@ export interface ToolResultFileEditContent extends FileEdit {
 }
 
 /**
+ * Shell process exit metadata produced by SDK shell tools.
+ *
+ * @category Tool Result Content
+ */
+export interface ToolResultShellExitContent {
+	type: ToolResultContentType.ShellExit;
+	shellId: string;
+	exitCode: number;
+	cwd?: string;
+	outputPreview?: string;
+	outputTruncated?: boolean;
+}
+
+/**
  * A reference to a terminal whose output is relevant to this tool result.
  *
  * Clients can subscribe to the terminal's URI to stream its output in real
@@ -1222,25 +1245,6 @@ export interface ToolResultTerminalContent {
 	resource: URI;
 	/** Display title for the terminal content */
 	title: string;
-}
-
-/**
- * Shell command exit metadata emitted by the Copilot SDK shell tool.
- *
- * @category Tool Result Content
- */
-export interface ToolResultShellExitContent {
-	type: ToolResultContentType.ShellExit;
-	/** Shell id, as assigned by Copilot runtime */
-	shellId: string;
-	/** Exit code from the completed shell command */
-	exitCode: number;
-	/** Working directory where the shell command was executed */
-	cwd?: string;
-	/** Output preview associated with the shell command, if available */
-	outputPreview?: string;
-	/** Whether outputPreview is known to be incomplete or truncated */
-	outputTruncated?: boolean;
 }
 
 /**
@@ -1271,8 +1275,8 @@ export interface ToolResultSubagentContent {
  * Mirrors the content blocks in MCP `CallToolResult.content`, plus
  * `ToolResultResourceContent` for lazy-loading large results,
  * `ToolResultFileEditContent` for file edit diffs,
- * `ToolResultTerminalContent` for live terminal output,
- * `ToolResultShellExitContent` for shell command exit metadata, and
+ * `ToolResultShellExitContent` for SDK shell exit metadata,
+ * `ToolResultTerminalContent` for live terminal output, and
  * `ToolResultSubagentContent` for tool-spawned worker chats (AHP extensions).
  *
  * @category Tool Result Content
@@ -1282,6 +1286,6 @@ export type ToolResultContent =
 	| ToolResultEmbeddedResourceContent
 	| ToolResultResourceContent
 	| ToolResultFileEditContent
-	| ToolResultTerminalContent
 	| ToolResultShellExitContent
+	| ToolResultTerminalContent
 	| ToolResultSubagentContent;

@@ -86,6 +86,7 @@ export {
 	type ToolResultFileEditContent,
 	type ToolResultShellExitContent,
 	type ToolResultSubagentContent,
+	type ToolResultTerminalContent,
 	type ToolResultTextContent,
 	type Turn, type URI, type UsageInfo,
 	type Message
