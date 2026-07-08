@@ -53,7 +53,7 @@ import { computePullRequestIcon, GitHubPullRequestState } from '../../../github/
 import { IPullRequestIconCache } from '../../../github/browser/pullRequestIconCache.js';
 import { mapProtocolStatus } from './agentHostDiffs.js';
 import { createChangesets } from './agentHostSessionChangesets.js';
-import { createSessionOutputObs } from './agentHostSessionFiles.js';
+import { createSessionOutputObs, ISessionOutputObs } from './agentHostSessionFiles.js';
 
 const STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES = 'sessions.agentHost.sessionConfigPicker.selectedValues';
 const UNSAFE_SESSION_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -297,7 +297,7 @@ class AdditionalChat extends Disposable {
 	private readonly _interactivity: ISettableObservable<ChatInteractivity>;
 	private readonly _isNew: ISettableObservable<boolean>;
 
-	constructor(resource: URI, summary: ChatSummary, isNew: boolean = false, parentChat?: URI) {
+	constructor(resource: URI, summary: ChatSummary, isNew: boolean = false, parentChat?: URI, lastTurnChanges?: IObservable<readonly ISessionFileChange[]>) {
 		super();
 		const modifiedAt = summary.modifiedAt ? new Date(summary.modifiedAt) : new Date();
 		this._title = observableValue('chatTitle', summary.title || localize('newChatTab', "New Chat"));
@@ -316,6 +316,7 @@ class AdditionalChat extends Disposable {
 			updatedAt: this._updatedAt,
 			status: derived(reader => this._isNew.read(reader) ? SessionStatus.Untitled : this._status.read(reader)),
 			changes: constObservable([]),
+			lastTurnChanges,
 			checkpoints: observableValue(this, undefined),
 			modelId: this._modelId,
 			mode: this._mode,
@@ -402,7 +403,6 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 	readonly changes: IObservable<readonly (IChatSessionFileChange | IChatSessionFileChange2)[]>;
 	readonly changesets: ISettableObservable<readonly ISessionChangeset[] | undefined>;
 	readonly externalChanges: IObservable<readonly ISessionFile[]>;
-	readonly lastTurnChanges: IObservable<readonly ISessionFileChange[]>;
 	readonly modelId: ISettableObservable<string | undefined>;
 	modelSelection: ModelSelection | undefined;
 	readonly mode: ISettableObservable<{ readonly id: string; readonly kind: string } | undefined>;
@@ -437,6 +437,13 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 	 * for single-chat sessions it is the only chat and `chats === [it]`.
 	 */
 	private readonly _defaultChat: IChat;
+	/**
+	 * The session's live output observables (external files + per-chat last-turn
+	 * changes), parsed once from the active-session subscriptions and shared by
+	 * the default chat and every peer chat so each chat's status pills reflect
+	 * that chat's own last turn.
+	 */
+	private readonly _sessionOutput: ISessionOutputObs;
 	/**
 	 * Independent title override for the default chat tab. `undefined` means the
 	 * default chat inherits the session title; a non-empty value means the user
@@ -686,8 +693,8 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 		// active-session subscriptions used for changes.
 		const sessionUri = AgentSession.uri(this.sessionType, rawId);
 		const sessionOutput = createSessionOutputObs(sessionUri, this._options, this.isActiveSessionObs, this.isArchived, this.workspace);
+		this._sessionOutput = sessionOutput;
 		this.externalChanges = sessionOutput.externalFiles;
-		this.lastTurnChanges = sessionOutput.lastTurnChanges;
 
 		const mainChat: IChat = {
 			resource: this.resource,
@@ -696,6 +703,7 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 			updatedAt: this.updatedAt,
 			status: derived(this, reader => this._defaultChatStatusOverride.read(reader) ?? this.status.read(reader)),
 			changes: this.changes,
+			lastTurnChanges: sessionOutput.getLastTurnChanges(URI.parse(buildDefaultChatUri(sessionUri))),
 			checkpoints: observableValue(this, undefined),
 			modelId: this.modelId,
 			mode: this.mode,
@@ -836,7 +844,8 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 
 	private _createAdditionalChat(chatId: string, summary: ChatSummary): AdditionalChat {
 		const resource = URI.from({ scheme: this._resourceScheme, path: `/${this._rawId}`, fragment: chatId });
-		return new AdditionalChat(resource, summary, this._newChatIds.has(chatId), this._resolveParentChatResource(summary.origin));
+		const lastTurnChanges = this._sessionOutput.getLastTurnChanges(URI.parse(summary.resource));
+		return new AdditionalChat(resource, summary, this._newChatIds.has(chatId), this._resolveParentChatResource(summary.origin), lastTurnChanges);
 	}
 
 	/**
