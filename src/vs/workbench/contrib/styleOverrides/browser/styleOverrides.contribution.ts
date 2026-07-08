@@ -22,6 +22,7 @@ import './media/commandCenter.css';
 import './media/editorBorder.css';
 import './media/fontRamp.css';
 import './media/keyboardFocusOnly.css';
+import './media/notificationsDialogs.css';
 import './media/padding.css';
 import './media/paneHeaders.css';
 import './media/roundedCorners.css';
@@ -72,7 +73,8 @@ const STYLE_OVERRIDE_MODULES: readonly IStyleOverrideModule[] = [
 	{ id: 'shadows' },
 	{ id: 'statusBar' },
 	{ id: 'tabs' },
-	{ id: 'titlebar' }
+	{ id: 'titlebar' },
+	{ id: 'notificationsDialogs' },
 ];
 
 /**
