@@ -175,3 +175,7 @@
 	border-top-color: transparent !important;
 	border-bottom-color: transparent !important;
 }
+
+.style-override.monaco-workbench .monaco-count-badge {
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
