@@ -121,6 +121,8 @@ class MockAgentHostService extends mock<IAgentHostService>() {
 		this._authenticationPending.set(pending, undefined);
 	}
 
+	override readonly initializeResult = constObservable(undefined);
+
 	// Track live subscriptions so fireAction can route to them. A subscription
 	// may hold a SessionState (for session channels) or a ChatState (for the
 	// per-session default chat channel).
