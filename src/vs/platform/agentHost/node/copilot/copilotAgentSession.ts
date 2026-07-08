@@ -29,7 +29,7 @@ import { CopilotCliConfigKey, copilotCliConfigSchema } from '../../common/copilo
 import type { ChatInputRequestWithPlanReview, IAgentHostPlanReviewAction } from '../../common/agentHostPlanReview.js';
 import { AgentHostSandboxConfigKey, sandboxConfigSchema } from '../../common/sandboxConfigSchema.js';
 import { AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostAutoReplyEnabledConfigKey, platformRootSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
-import { AgentSignal, AuthenticateParams, IMcpNotification, IRestoredSubagentSession, subagentChatTitle } from '../../common/agentService.js';
+import { AgentSignal, AuthenticateParams, IAgentToolPendingConfirmationSignal, IMcpNotification, IRestoredSubagentSession, subagentChatTitle } from '../../common/agentService.js';
 import { stripRedundantCdPrefix } from '../../common/commandLineHelpers.js';
 import { readToolCallMeta, toToolCallMeta, type IToolCallMeta, type IToolCallUiMeta } from '../../common/meta/agentToolCallMeta.js';
 import { OtelData, type OtelAttributeValue } from '../../common/otlp/otlpLogEmitter.js';
@@ -476,6 +476,35 @@ export class CopilotAgentSession extends Disposable {
 	 * cleared when the tool completes or the session is disposed.
 	 */
 	private readonly _permissionRequestAgentIds = new Map<string, string>();
+	/**
+	 * Coordination for the SDK's permission/tool-start event-ordering race.
+	 *
+	 * The Copilot SDK (>= 1.0.6-preview) fires `permission.requested` *before*
+	 * `tool.execution_start` for server-managed tools (shell/read/etc.), but the
+	 * host derives the tool `ChatToolCallReady` from the permission request while
+	 * the tool-call *part* is only created by `ChatToolCallStart` (from
+	 * `tool.execution_start`). Because `_handlePermissionRequest` has `await`s
+	 * before it fires the confirmation, the confirmation can land either side of
+	 * the start. These two maps normalize the emitted AHP sequence so it is
+	 * identical regardless of which side wins the race — always
+	 * `ChatToolCallStart` then exactly one `ChatToolCallReady` (confirmation or
+	 * not-needed), never a not-needed ready wrongly preceding a confirmation.
+	 *
+	 * - {@link _bufferedPendingConfirmations}: a confirmation signal fired before
+	 *   its part existed (confirmation-wins). {@link onToolStart} re-fires it
+	 *   once the part is created.
+	 * - {@link _deferredServerToolReady}: the default not-needed ready that
+	 *   {@link onToolStart} would emit, deferred because a permission decision is
+	 *   still in flight (start-wins). The decision then either fires a
+	 *   confirmation (which supersedes and discards this) or auto-approves (which
+	 *   invokes it).
+	 *
+	 * (Client tools take the {@link _ensureClientToolCallStarted} synthesis path
+	 * instead, so neither map is used for them.) Both are cleared on tool
+	 * completion and on session dispose.
+	 */
+	private readonly _bufferedPendingConfirmations = new Map<string, IAgentToolPendingConfirmationSignal>();
+	private readonly _deferredServerToolReady = new Map<string, () => void>();
 	/** Pending permission requests awaiting a renderer-side decision. */
 	private readonly _pendingPermissions = new Map<string, DeferredPromise<boolean>>();
 	/** Pending user input requests awaiting a renderer-side answer. */
@@ -698,6 +727,8 @@ export class CopilotAgentSession extends Disposable {
 		}
 		this._register(toDisposable(() => this._cancelPendingClientToolCalls()));
 		this._register(toDisposable(() => this._permissionRequestAgentIds.clear()));
+		this._register(toDisposable(() => this._bufferedPendingConfirmations.clear()));
+		this._register(toDisposable(() => this._deferredServerToolReady.clear()));
 	}
 
 	// ---- AgentSignal helpers ------------------------------------------------
@@ -1820,6 +1851,48 @@ export class CopilotAgentSession extends Disposable {
 	// ---- permission handling ------------------------------------------------
 
 	/**
+	 * Fires a `pending_confirmation` signal, additionally stashing it when the
+	 * tool-call part does not exist yet so it can be re-fired once
+	 * `onToolStart` creates the part.
+	 *
+	 * Server-managed tools (shell, read, …) fire `permission.requested` a few
+	 * milliseconds *before* `tool.execution_start` under the Copilot SDK
+	 * (>= 1.0.6-preview). The `ChatToolCallReady` this produces is dropped by the
+	 * reducer when no matching part exists yet, losing the user's approval prompt
+	 * and hanging the tool at "running". Firing immediately preserves the
+	 * existing behavior (and callers that never start a tool, e.g. isolated
+	 * permission tests); the stashed copy lets {@link onToolStart} re-fire the
+	 * confirmation onto the freshly created part when the permission is still
+	 * pending. Producing a confirmation also supersedes any not-needed ready that
+	 * `onToolStart` deferred (start-wins race), so the two race outcomes emit an
+	 * identical sequence. Client tools reach this with a part already synthesized
+	 * by {@link _ensureClientToolCallStarted}, so nothing is stashed for them.
+	 */
+	private _firePendingConfirmation(signal: IAgentToolPendingConfirmationSignal): void {
+		this._deferredServerToolReady.delete(signal.state.toolCallId);
+		if (!this._activeToolCalls.has(signal.state.toolCallId)) {
+			this._bufferedPendingConfirmations.set(signal.state.toolCallId, signal);
+		}
+		this._onDidSessionProgress.fire(signal);
+	}
+
+	/**
+	 * Emits the not-needed `ChatToolCallReady` that {@link onToolStart} deferred
+	 * while a permission decision was in flight, if one is registered. Called
+	 * when the permission resolves to an auto-approval that does not surface a
+	 * confirmation (e.g. sandboxed shell). No-op when nothing was deferred (the
+	 * part did not exist yet, so `onToolStart` will emit the default ready
+	 * itself once it runs).
+	 */
+	private _emitDeferredServerToolReady(toolCallId: string): void {
+		const emit = this._deferredServerToolReady.get(toolCallId);
+		if (emit) {
+			this._deferredServerToolReady.delete(toolCallId);
+			emit();
+		}
+	}
+
+	/**
 	 * Emits a `ChatToolCallStart` for a client tool that is about to have a
 	 * permission-derived `ChatToolCallReady` dispatched for it, when the real
 	 * `tool.execution_start` has not been observed yet.
@@ -1974,6 +2047,12 @@ export class CopilotAgentSession extends Disposable {
 				if (this._pendingPermissions.get(toolCallId) === deferred) {
 					this._pendingPermissions.delete(toolCallId);
 					this._logService.info(`[Copilot:${this.sessionId}] Auto-approving sandboxed shell command for tool call ${toolCallId}`);
+					// Auto-approved without confirmation. If `onToolStart` already
+					// created the part it deferred its not-needed ready (a
+					// permission was pending); emit it now. If the part does not
+					// exist yet, `onToolStart` will emit the default ready itself
+					// once it runs (the pending permission is now cleared).
+					this._emitDeferredServerToolReady(toolCallId);
 					return { kind: 'approve-once' };
 				}
 				return { kind: 'reject' };
@@ -2014,7 +2093,7 @@ export class CopilotAgentSession extends Disposable {
 			// subagent session — without it the action would land on the
 			// parent session, which has no matching ChatToolCallStart.
 			const parentToolCallId = this._activeToolCalls.get(toolCallId)?.parentToolCallId;
-			this._onDidSessionProgress.fire({
+			this._firePendingConfirmation({
 				kind: 'pending_confirmation',
 				chat: this._chatChannelUri,
 				state: {
@@ -2260,7 +2339,7 @@ export class CopilotAgentSession extends Disposable {
 				: localize('agentHost.unsandboxedCommandConfirmation.generic', "This command needs to run outside the sandbox.");
 
 		const parentToolCallId = this._activeToolCalls.get(request.toolCallId)?.parentToolCallId;
-		this._onDidSessionProgress.fire({
+		this._firePendingConfirmation({
 			kind: 'pending_confirmation',
 			chat: this._chatChannelUri,
 			state: {
@@ -2874,6 +2953,8 @@ export class CopilotAgentSession extends Disposable {
 			if (isClientTool && !contributor) {
 				this._logService.warn(`[Copilot:${sessionId}] Client tool '${e.data.toolName}' started with no connected client; failing it immediately.`);
 				this._activeToolCalls.delete(e.data.toolCallId);
+				this._bufferedPendingConfirmations.delete(e.data.toolCallId);
+				this._deferredServerToolReady.delete(e.data.toolCallId);
 				this._emitAction({
 					type: ActionType.ChatToolCallReady,
 					turnId: this._turnId,
@@ -2905,7 +2986,11 @@ export class CopilotAgentSession extends Disposable {
 				return;
 			}
 
-			this._emitAction({
+			// Emit the tool `ChatToolCallReady`, normalizing the SDK's
+			// permission/tool-start ordering race so both outcomes produce an
+			// identical AHP sequence (see `_bufferedPendingConfirmations` /
+			// `_deferredServerToolReady`).
+			const emitNotNeededReady = () => this._emitAction({
 				type: ActionType.ChatToolCallReady,
 				turnId: this._turnId,
 				toolCallId: e.data.toolCallId,
@@ -2913,6 +2998,29 @@ export class CopilotAgentSession extends Disposable {
 				toolInput: getToolInputString(e.data.toolName, parameters, toolArgs),
 				confirmed: ToolCallConfirmationReason.NotNeeded,
 			}, parentToolCallId);
+
+			// Confirmation-wins: a confirmation was fired before this part
+			// existed and dropped by the reducer. Re-fire it onto the part now.
+			const stashedConfirmation = this._bufferedPendingConfirmations.get(e.data.toolCallId);
+			if (stashedConfirmation) {
+				this._bufferedPendingConfirmations.delete(e.data.toolCallId);
+				this._deferredServerToolReady.delete(e.data.toolCallId);
+				this._onDidSessionProgress.fire({ ...stashedConfirmation, parentToolCallId });
+				return;
+			}
+
+			// Start-wins: a permission decision for this tool is still in flight
+			// (its `await`s have not resolved). Defer the default not-needed
+			// ready — the decision will either fire a confirmation (which
+			// supersedes it) or auto-approve (which invokes it via
+			// `_emitDeferredServerToolReady`). This keeps the emitted sequence
+			// identical to the confirmation-wins ordering.
+			if (this._pendingPermissions.has(e.data.toolCallId)) {
+				this._deferredServerToolReady.set(e.data.toolCallId, emitNotNeededReady);
+				return;
+			}
+
+			emitNotNeededReady();
 		}));
 
 		this._register(wrapper.onToolComplete(async e => {
@@ -2928,6 +3036,8 @@ export class CopilotAgentSession extends Disposable {
 			this._logService.info(`[Copilot:${sessionId}] Tool completed: ${e.data.toolCallId}`);
 			this._activeToolCalls.delete(e.data.toolCallId);
 			this._permissionRequestAgentIds.delete(e.data.toolCallId);
+			this._bufferedPendingConfirmations.delete(e.data.toolCallId);
+			this._deferredServerToolReady.delete(e.data.toolCallId);
 			const displayName = tracked.displayName;
 			const toolOutput = e.data.error?.message ?? e.data.result?.content;
 
