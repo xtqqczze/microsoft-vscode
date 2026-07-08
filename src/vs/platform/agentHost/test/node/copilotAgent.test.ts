@@ -44,7 +44,7 @@ import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { IAgentHostTerminalManager } from '../../node/agentHostTerminalManager.js';
 import { IAgentHostOTelService } from '../../common/otel/agentHostOTelService.js';
 import { AgentHostCompletions, IAgentHostCompletions } from '../../node/agentHostCompletions.js';
-import { COPILOT_AGENT_HOST_SYSTEM_MESSAGE, CopilotAgent, CopilotSessionEntry, getCopilotWorktreeName, getCopilotWorktreesRoot, migrateEnablementKeys, rebaseUnder } from '../../node/copilot/copilotAgent.js';
+import { COPILOT_AGENT_HOST_SYSTEM_MESSAGE, CopilotAgent, CopilotSessionEntry, getCopilotWorktreeDirectoryName, getCopilotWorktreesRoot, migrateEnablementKeys, rebaseUnder } from '../../node/copilot/copilotAgent.js';
 import { COPILOT_AGENT_HOST_FILE_LINK_INSTRUCTIONS } from '../../node/copilot/prompts/systemMessage.js';
 import { NULL_CHECKPOINT_SERVICE } from '../../common/agentHostCheckpointService.js';
 import { IAgentHostReviewService, NULL_REVIEW_SERVICE } from '../../common/agentHostReviewService.js';
@@ -763,8 +763,30 @@ suite('CopilotAgent', () => {
 		});
 	});
 
+	test('prepends the branch prefix ahead of the built-in agents/ prefix', async () => {
+		const copilotApiService = new TestCopilotApiService();
+		copilotApiService.response = 'add-agent-host-config';
+		const generator = new CopilotBranchNameGenerator(copilotApiService, new NullLogService());
+
+		assert.deepStrictEqual({
+			withPrefix: await generator.generateBranchName({ sessionId: '12345678-aaaa-bbbb-cccc-123456789abc', message: 'Add agent host config', githubToken: 'token', branchPrefix: 'users/alice/' }),
+			emptyPrefix: await generator.generateBranchName({ sessionId: '12345678-aaaa-bbbb-cccc-123456789abc', message: 'Add agent host config', githubToken: 'token', branchPrefix: '' }),
+			fallbackWithPrefix: await generator.generateBranchName({ sessionId: '12345678-aaaa-bbbb-cccc-123456789abc', branchPrefix: 'users/alice/' }),
+		}, {
+			withPrefix: 'users/alice/agents/add-agent-host-config',
+			emptyPrefix: 'agents/add-agent-host-config',
+			fallbackWithPrefix: 'users/alice/agents/12345678-aaaa-bbbb-cccc-123456789abc',
+		});
+	});
+
 	test('uses Git extension branch-derived worktree folder names', () => {
-		assert.strictEqual(getCopilotWorktreeName('agents/add-agent-host-config-12345678'), 'add-agent-host-config-12345678');
+		assert.deepStrictEqual({
+			noPrefix: getCopilotWorktreeDirectoryName('agents/add-agent-host-config-12345678'),
+			withPrefix: getCopilotWorktreeDirectoryName('users/alice/agents/add-agent-host-config-12345678', 'users/alice/'),
+		}, {
+			noPrefix: 'add-agent-host-config-12345678',
+			withPrefix: 'add-agent-host-config-12345678',
+		});
 	});
 
 	test('keeps generated branch names short', async () => {
@@ -3842,6 +3864,46 @@ suite('CopilotAgent', () => {
 			}
 		});
 
+		test('prepends the worktreeBranchPrefix ahead of agents/ and strips it from the worktree folder name', async () => {
+			const sessionId = 'wt-prefix-session';
+			const repositoryRoot = URI.joinPath(URI.file(tmpDir), 'repo-prefix');
+			await fs.mkdir(repositoryRoot.fsPath, { recursive: true });
+
+			const gitService = new TestAgentHostGitService();
+			gitService.repositoryRoot = repositoryRoot;
+
+			const copilotApiService = new TestCopilotApiService();
+			copilotApiService.response = 'add-feature';
+			const agent = createTestAgent(disposables, {
+				sessionDataService: disposables.add(new TestSessionDataService()),
+				copilotClient: new TestCopilotClient([]),
+				gitService,
+				copilotApiService,
+			}) as TestableCopilotAgent;
+
+			try {
+				await agent.authenticate('https://api.github.com', 'token');
+
+				const workingDir = await agent.resolveWorktreeForTest({
+					workingDirectory: repositoryRoot,
+					config: { isolation: 'worktree', branch: 'main', worktreeBranchPrefix: 'users/alice/' },
+				}, sessionId, 'Add feature');
+
+				// The branch keeps the user's prefix ahead of `agents/`, while
+				// the worktree folder name strips both prefixes.
+				const expectedWorktree = URI.joinPath(getCopilotWorktreesRoot(repositoryRoot), 'add-feature');
+				assert.deepStrictEqual({
+					branchName: gitService.addedWorktrees[0]?.branchName,
+					worktree: workingDir?.toString(),
+				}, {
+					branchName: 'users/alice/agents/add-feature',
+					worktree: expectedWorktree.toString(),
+				});
+			} finally {
+				await disposeAgent(agent);
+			}
+		});
+
 		test('resolveSessionConfig does not offer or default to worktree isolation when the repository has no commits', async () => {
 			const repositoryRoot = URI.joinPath(URI.file(tmpDir), 'empty-repo-config');
 			await fs.mkdir(repositoryRoot.fsPath, { recursive: true });
@@ -3870,6 +3932,52 @@ suite('CopilotAgent', () => {
 				assert.strictEqual(noCommits.values[SessionConfigKey.Isolation], 'folder', 'isolation must default to folder for a repo without commits');
 				const isolationSchema = noCommits.schema.properties?.[SessionConfigKey.Isolation] as { enum?: readonly string[] } | undefined;
 				assert.deepStrictEqual(isolationSchema?.enum, ['folder'], 'worktree must not be offered for a repo without commits');
+			} finally {
+				await disposeAgent(agent);
+			}
+		});
+
+		test('resolveSessionConfig carries worktreeBranchPrefix across both isolations so it survives toggles', async () => {
+			const repositoryRoot = URI.joinPath(URI.file(tmpDir), 'repo-branch-prefix');
+			await fs.mkdir(repositoryRoot.fsPath, { recursive: true });
+
+			const gitService = new TestAgentHostGitService();
+			gitService.repositoryRoot = repositoryRoot;
+
+			const agent = createTestAgent(disposables, {
+				sessionDataService: disposables.add(new TestSessionDataService()),
+				copilotClient: new TestCopilotClient([]),
+				gitService,
+			}) as TestableCopilotAgent;
+
+			try {
+				await agent.authenticate('https://api.github.com', 'token');
+
+				// The prefix is declared and echoed back for both isolations
+				// (like `branch`), so a worktree → folder → worktree toggle keeps
+				// the client-seeded value in the resolved config rather than
+				// dropping it on the intermediate folder resolve.
+				const worktree = await agent.resolveSessionConfig({
+					workingDirectory: repositoryRoot,
+					config: { isolation: 'worktree', worktreeBranchPrefix: 'users/alice/' },
+				});
+
+				const folder = await agent.resolveSessionConfig({
+					workingDirectory: repositoryRoot,
+					config: { isolation: 'folder', worktreeBranchPrefix: 'users/alice/' },
+				});
+
+				assert.deepStrictEqual({
+					worktreeHasProperty: !!worktree.schema.properties?.[SessionConfigKey.WorktreeBranchPrefix],
+					worktreeValue: worktree.values[SessionConfigKey.WorktreeBranchPrefix],
+					folderHasProperty: !!folder.schema.properties?.[SessionConfigKey.WorktreeBranchPrefix],
+					folderValue: folder.values[SessionConfigKey.WorktreeBranchPrefix],
+				}, {
+					worktreeHasProperty: true,
+					worktreeValue: 'users/alice/',
+					folderHasProperty: true,
+					folderValue: 'users/alice/',
+				});
 			} finally {
 				await disposeAgent(agent);
 			}
