@@ -2946,6 +2946,102 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	display: none;
 }
 
+/* Turn changes summary: reuses the compact checkpoint summary styling and adds an
+	inline "preview <file>" action shown when the turn produced a previewable file. */
+.interactive-session .chat-turn-pills-part .chat-turn-preview {
+	display: flex;
+	align-items: center;
+	flex: none;
+	gap: var(--vscode-spacing-size40);
+	min-width: 0;
+	overflow: hidden;
+}
+
+.interactive-session .chat-turn-pills-part .chat-turn-preview.hidden,
+.interactive-session .chat-turn-pills-part > .checkpoint-file-changes-summary > .checkpoint-file-changes-disclosure > .checkpoint-file-changes-summary-header > .hidden {
+	display: none;
+}
+
+.interactive-session .chat-turn-pills-part .chat-turn-preview-separator {
+	flex: none;
+	width: var(--vscode-strokeThickness);
+	align-self: stretch;
+	margin: var(--vscode-spacing-size20) 0;
+	background-color: var(--vscode-chat-requestBorder);
+}
+
+/* In preview-only mode the changes summary (and its label) is hidden, leaving the
+	preview action as the only header content — drop its leading separator so there
+	is no divider with nothing before it. */
+.interactive-session .chat-turn-pills-part .chat-file-changes-label.hidden ~ .chat-turn-preview .chat-turn-preview-separator {
+	display: none;
+}
+
+.interactive-session .chat-turn-pills-part .chat-turn-preview-action {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size40);
+	min-width: 0;
+	max-width: 200px;
+	padding: var(--vscode-spacing-sizeNone) var(--vscode-spacing-size40);
+	border: none;
+	border-radius: var(--vscode-cornerRadius-small);
+	color: inherit;
+	background: transparent;
+	font: inherit;
+	cursor: pointer;
+	overflow: hidden;
+}
+
+.interactive-session .chat-turn-pills-part .chat-turn-preview-action:hover {
+	color: var(--vscode-foreground);
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.interactive-session .chat-turn-pills-part .chat-turn-preview-action:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: calc(-1 * var(--vscode-strokeThickness));
+}
+
+.interactive-session .chat-turn-pills-part .chat-turn-preview-verb {
+	flex: none;
+}
+
+.interactive-session .chat-turn-pills-part .chat-turn-preview-action .monaco-icon-label {
+	min-width: 0;
+	align-items: center;
+	overflow: hidden;
+}
+
+/* Per-row action bar in the changed-files list (e.g. the "Preview" action). The
+	row becomes a flex row so the file label fills the remaining width and the
+	actions hug the right edge. Scoped via the class the renderer adds only when a
+	row-action provider is supplied. */
+.interactive-session .chat-summary-list .monaco-list-row.chat-summary-list-row-with-actions,
+.interactive-session .chat-summary-list-row-with-actions {
+	display: flex;
+	align-items: center;
+}
+
+.interactive-session .chat-summary-list-row-with-actions > .monaco-icon-label {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.interactive-session .chat-summary-list-row-with-actions > .chat-summary-list-actions {
+	flex: 0 0 auto;
+	padding-right: var(--vscode-spacing-size40);
+}
+
+.interactive-session .chat-summary-list-actions .action-label {
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+}
+
+.interactive-session .chat-summary-list-actions .action-label:hover {
+	color: var(--vscode-textLink-activeForeground);
+}
+
 .interactive-session .chat-used-context {
 	display: flex;
 	flex-direction: column;
