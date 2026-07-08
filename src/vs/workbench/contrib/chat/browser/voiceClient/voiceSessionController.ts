@@ -190,6 +190,9 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	/** Tracks whether the initial listen cue has been played after connecting. */
 	private _hasPlayedInitialListenCue = false;
 
+	/** True while streaming mic audio to the backend during playback (barge-in). */
+	private _bargeInMonitorActive = false;
+
 	// --- Audio FIFO queue ---
 	private readonly _audioQueue: { sessionId: string | undefined; chunks: { audio: string; isFirstChunk: boolean; isFinal: boolean; transcript: string | undefined }[] }[] = [];
 	private _currentPlaybackSessionId: string | undefined | null = null; // null = nothing playing
@@ -528,6 +531,10 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._voiceEventDisposables.add(this.micCaptureService.onPttEnd(() => {
 			this.voiceClientService.sendPttEnd();
 		}));
+		// Barge-in: stream mic audio to the backend during assistant playback.
+		this._voiceEventDisposables.add(this.micCaptureService.onMonitorAudioChunk(b64 => {
+			this.voiceClientService.sendBargeInAudioChunk(b64);
+		}));
 		this._voiceEventDisposables.add(this.micCaptureService.onPttDiagnostic((diag: IPttDiagnostic) => {
 			// Local log so the same correlation key surfaces in the
 			// VS Code log files even if the WS is closed mid-flight.
@@ -585,6 +592,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			if (this._audioQueue.length > 0) {
 				setTimeout(() => this._processQueue(), 500);
 			} else {
+				this._stopBargeInMonitor();
 				if (this._pttHeld) {
 					this._voiceState.set('listening', undefined);
 					this._statusText.set('Listening...', undefined);
@@ -951,13 +959,23 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		// Speech started → stop TTS, suppress late chunks from the previous turn
 		// (same flow as pttDown, but for server-VAD path).
 		this._voiceEventDisposables.add(this.voiceClientService.onSpeechStarted(() => {
+			const wasMonitoring = this._bargeInMonitorActive;
 			this._clearAutoListenTimer();
-			this.ttsPlaybackService.stopPlayback();
-			this._audioQueue.length = 0;
-			this._currentPlaybackSessionId = null;
-			this._isProcessingQueue = false;
-			this._suppressIncomingAudio = true;
-			this._startUserTurn();
+			if (wasMonitoring && !this._pttHeld) {
+				// Promote the monitor into a real turn (mic stays warm via pttDown).
+				this.pttDown();
+				this.pttUp();
+				// Clear the playback AEC suppression so the turn start isn't gated.
+				this.micCaptureService.suppressUntil(0);
+			} else {
+				this.ttsPlaybackService.stopPlayback();
+				this._audioQueue.length = 0;
+				this._currentPlaybackSessionId = null;
+				this._isProcessingQueue = false;
+				this._suppressIncomingAudio = true;
+				this._stopBargeInMonitor();
+				this._startUserTurn();
+			}
 		}));
 
 		// Backend ended the held turn itself (server VAD silence / stop phrase).
@@ -1133,6 +1151,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._enterListenOnSessionInit = false;
 		this._hasPlayedInitialListenCue = false;
 		this._replyPlayedSinceSend = false;
+		this._bargeInMonitorActive = false;
 		this._audioQueue.length = 0;
 		this._currentPlaybackSessionId = null;
 		this._isProcessingQueue = false;
@@ -1266,6 +1285,9 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			}
 			this.disconnect();
 		});
+		// Stop the monitor after mic pttDown so its _pttStreaming flag is set
+		// first, letting stopMonitor keep the mic warm instead of re-acquiring.
+		this._stopBargeInMonitor();
 		this.ttsPlaybackService.stopPlayback();
 		this._voiceState.set('listening', undefined);
 		this._statusText.set('Listening...', undefined);
@@ -1312,6 +1334,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._autoListenSuppressed = true;
 		this._pttToggleMode = false;
 		this._clearAutoListenTimer();
+		this._stopBargeInMonitor();
 		if (this._pttHeld) {
 			this._finishPtt('local');
 		} else {
@@ -1454,6 +1477,37 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			clearTimeout(this._awaitingReplyWatchdog);
 			this._awaitingReplyWatchdog = undefined;
 		}
+	}
+
+	/**
+	 * Start barge-in monitoring: stream mic audio to the backend during
+	 * playback so the user can talk over the assistant. Hands-free only;
+	 * the backend emits `speech_started`, which `onSpeechStarted` promotes
+	 * into a real turn. Inert until the backend consumes `barge_in_*`.
+	 */
+	private _startBargeInMonitor(): void {
+		if (this._bargeInMonitorActive || !this._isConnected.get() || this._pttHeld || !this._window) {
+			return;
+		}
+		if (!this._isHandsFreeEnabled()) {
+			return;
+		}
+		this._bargeInMonitorActive = true;
+		this.voiceClientService.sendBargeInStart();
+		this.micCaptureService.startMonitor(this._window).catch(err => {
+			this.logService.warn('[voice] barge-in monitor failed to start', err);
+			this._bargeInMonitorActive = false;
+		});
+	}
+
+	/** Stop barge-in monitoring and tell the backend to stop listening for it. */
+	private _stopBargeInMonitor(): void {
+		if (!this._bargeInMonitorActive) {
+			return;
+		}
+		this._bargeInMonitorActive = false;
+		this.micCaptureService.stopMonitor();
+		this.voiceClientService.sendBargeInStop();
 	}
 
 	/**
@@ -1948,6 +2002,8 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			this.micCaptureService.suppressUntil(Date.now() + 800);
 			this._voiceState.set('speaking', undefined);
 			this._statusText.set('Speaking...', undefined);
+			// Hands-free: keep the mic open so the user can barge in.
+			this._startBargeInMonitor();
 			this.ttsPlaybackService.playAudioChunk(audio, isFinal, this._window!);
 		} else if (!ttsEnabled) {
 			this._replyPlayedSinceSend = true;
