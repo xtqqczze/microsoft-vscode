@@ -90,8 +90,7 @@ async function shouldPasteTerminalCommand(
  * advertises a terminal command `prefix` and the pasted text would make the
  * input begin with that prefix (i.e. run as a command), warns the user before
  * inserting — unless they have globally suppressed the warning. On confirmation
- * the paste is re-issued through the editor (which flows through the normal
- * paste pipeline, including `CopyPasteController`); on cancel nothing is
+ * the text is inserted via the editor's paste command; on cancel nothing is
  * inserted. When the paste would not become a command the event is left
  * untouched for default handling.
  *
@@ -130,9 +129,11 @@ export function handleTerminalCommandPaste(
 	}
 
 	// Veto the default paste synchronously (before the editor's paste pipeline
-	// runs), then confirm asynchronously and re-issue the paste through the
-	// editor command — which goes through the normal pipeline but does NOT
-	// re-dispatch a DOM paste event, so this handler is not re-entered.
+	// runs), then confirm asynchronously and insert the text via the editor's
+	// paste command. This inserts the raw text directly (firing `onDidPaste`
+	// but not `onWillPaste`), so it does NOT re-enter this DOM handler and does
+	// NOT run paste-into providers / `CopyPasteController` — intended for a chat
+	// input, where a terminal command should be inserted verbatim.
 	e.preventDefault();
 	e.stopImmediatePropagation();
 
