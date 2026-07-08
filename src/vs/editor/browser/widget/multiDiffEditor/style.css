@@ -95,11 +95,12 @@
 					.title {
 						font-size: 14px;
 						line-height: 22px;
+						min-width: 0;
+						overflow: hidden;
+						text-overflow: ellipsis;
 
 						&.original {
 							flex: 1;
-							min-width: 0;
-							text-overflow: ellipsis;
 						}
 					}
 
@@ -123,6 +124,10 @@
 							color: v ar(--vscode-gitDecoration-addedResourceForeground);
 						}
 						*/
+
+						&:not(.added):not(.deleted):not(.renamed) {
+							display: none;
+						}
 					}
 				}
 
