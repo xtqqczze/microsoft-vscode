@@ -665,6 +665,16 @@ export class CopilotAgent extends Disposable implements IAgent {
 		return entry.handleMcpRequest(serverName, method, params);
 	}
 
+	async startMcpServer(session: URI, id: string): Promise<void> {
+		const sessionId = AgentSession.id(session);
+		await this._findAnySession(sessionId)?.startMcpServer(id);
+	}
+
+	async stopMcpServer(session: URI, id: string): Promise<void> {
+		const sessionId = AgentSession.id(session);
+		await this._findAnySession(sessionId)?.stopMcpServer(id);
+	}
+
 	private async _getSessionCustomizationDirectory(session: URI): Promise<URI | undefined> {
 		const sessionId = AgentSession.id(session);
 		const provisional = this._provisionalSessions.get(sessionId);
@@ -1891,7 +1901,10 @@ export class CopilotAgent extends Disposable implements IAgent {
 			// worktree → folder → worktree keeps the prefix, and it reaches the
 			// agent via the send-time config snapshot. It has no
 			// `enum`/`enumDynamic`, so the config picker treats it as
-			// non-pickable and never surfaces it as a chip: the client seeds it
+			// non-pickable. To keep it from surfacing as a read-only chip in the
+			// workbench chat input, its key is also listed in the client-side
+			// `WELL_KNOWN_PICKER_PROPERTIES` (see `agentHostChatInputPicker.ts`),
+			// which the generic chip lane filters out. The client seeds it
 			// (from `git.branchPrefix`), the user never edits it, and the agent
 			// only *consumes* it for worktree isolation (see
 			// `_resolveSessionWorkingDirectory`).

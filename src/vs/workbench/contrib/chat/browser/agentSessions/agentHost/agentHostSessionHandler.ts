@@ -2584,6 +2584,13 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				parameters,
 				context: { sessionResource: opts.sessionResource },
 				chatStreamToolCallId: toolCallId,
+				// If the agent host already resolved auto-approval for this call,
+				// pass it through so the invocation transitions straight to
+				// executing instead of briefly flashing a confirmation prompt
+				// (which would flicker "needs input" in the sessions list).
+				preApproved: shouldAutoApproveClientToolCall(tc)
+					? { type: ToolConfirmKind.Setting, id: SessionConfigKey.AutoApprove }
+					: undefined,
 			};
 			const noOpCountTokens = async () => 0;
 			this._logService.info(`[AgentHost] Invoking client tool: ${toolName} (callId=${toolCallId})`);

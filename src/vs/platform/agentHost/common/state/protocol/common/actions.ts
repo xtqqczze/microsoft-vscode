@@ -10,7 +10,7 @@ import type { URI } from './state.js';
 
 import type { RootAgentsChangedAction, RootActiveSessionsChangedAction, RootTerminalsChangedAction, RootConfigChangedAction } from '../channels-root/actions.js';
 
-import type { SessionReadyAction, SessionCreationFailedAction, SessionChatAddedAction, SessionChatRemovedAction, SessionChatUpdatedAction, SessionDefaultChatChangedAction, SessionTitleChangedAction, SessionServerToolsChangedAction, SessionActiveClientSetAction, SessionActiveClientRemovedAction, SessionInputNeededSetAction, SessionInputNeededRemovedAction, SessionCustomizationsChangedAction, SessionCustomizationToggledAction, SessionCustomizationUpdatedAction, SessionCustomizationRemovedAction, SessionMcpServerStateChangedAction, SessionIsReadChangedAction, SessionIsArchivedChangedAction, SessionActivityChangedAction, SessionChangesetsChangedAction, SessionConfigChangedAction, SessionMetaChangedAction } from '../channels-session/actions.js';
+import type { SessionReadyAction, SessionCreationFailedAction, SessionChatAddedAction, SessionChatRemovedAction, SessionChatUpdatedAction, SessionDefaultChatChangedAction, SessionTitleChangedAction, SessionServerToolsChangedAction, SessionActiveClientSetAction, SessionActiveClientRemovedAction, SessionInputNeededSetAction, SessionInputNeededRemovedAction, SessionCustomizationsChangedAction, SessionCustomizationToggledAction, SessionCustomizationUpdatedAction, SessionCustomizationRemovedAction, SessionMcpServerStateChangedAction, SessionMcpServerStartRequestedAction, SessionMcpServerStopRequestedAction, SessionIsReadChangedAction, SessionIsArchivedChangedAction, SessionActivityChangedAction, SessionChangesetsChangedAction, SessionConfigChangedAction, SessionMetaChangedAction } from '../channels-session/actions.js';
 
 import type { ChatTurnStartedAction, ChatDeltaAction, ChatResponsePartAction, ChatToolCallStartAction, ChatToolCallDeltaAction, ChatToolCallReadyAction, ChatToolCallConfirmedAction, ChatToolCallCompleteAction, ChatToolCallResultConfirmedAction, ChatToolCallContentChangedAction, ChatTurnCompleteAction, ChatTurnCancelledAction, ChatErrorAction, ChatActivityChangedAction, ChatUsageAction, ChatReasoningAction, ChatPendingMessageSetAction, ChatPendingMessageRemovedAction, ChatQueuedMessagesReorderedAction, ChatDraftChangedAction, ChatInputRequestedAction, ChatInputAnswerChangedAction, ChatInputCompletedAction, ChatTruncatedAction, ChatTurnsLoadedAction } from '../channels-chat/actions.js';
 
@@ -72,6 +72,8 @@ export const enum ActionType {
 	SessionCustomizationUpdated = 'session/customizationUpdated',
 	SessionCustomizationRemoved = 'session/customizationRemoved',
 	SessionMcpServerStateChanged = 'session/mcpServerStateChanged',
+	SessionMcpServerStartRequested = 'session/mcpServerStartRequested',
+	SessionMcpServerStopRequested = 'session/mcpServerStopRequested',
 	ChatTruncated = 'chat/truncated',
 	ChatTurnsLoaded = 'chat/turnsLoaded',
 	SessionIsReadChanged = 'session/isReadChanged',
@@ -164,6 +166,8 @@ export type StateAction =
 	| SessionCustomizationUpdatedAction
 	| SessionCustomizationRemovedAction
 	| SessionMcpServerStateChangedAction
+	| SessionMcpServerStartRequestedAction
+	| SessionMcpServerStopRequestedAction
 	| SessionIsReadChangedAction
 	| SessionIsArchivedChangedAction
 	| SessionActivityChangedAction

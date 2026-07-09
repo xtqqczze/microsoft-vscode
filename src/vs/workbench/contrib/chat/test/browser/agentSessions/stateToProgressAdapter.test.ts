@@ -8,7 +8,7 @@ import { autorun } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import type { IMarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { fromAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
+import { fromAgentHostUri, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
 import { buildSubagentChatUri, MessageKind, ToolCallStatus, ToolCallConfirmationReason, ToolResultContentType, TurnState, ResponsePartKind, type ActiveTurn, type ICompletedToolCall, type ToolCallRunningState, type Turn, type ToolCallResponsePart, ToolCallCancellationReason, type Message } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IChatToolInvocation, IChatToolInvocationSerialized, type IChatMarkdownContent, type IChatThinkingPart, type IChatUsage } from '../../../common/chatService/chatService.js';
 import { isToolResultInputOutputDetails, type IToolResultInputOutputDetails, ToolDataSource, ToolInvocationPresentation } from '../../../common/tools/languageModelToolsService.js';
@@ -1406,6 +1406,41 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(invocation.toolSpecificData.kind, 'input');
 		});
 
+		test('preserves create metadata and proposed content for pending file confirmations', () => {
+			const invocation = toolCallStateToInvocation({
+				toolCallId: 'tc-create',
+				toolName: 'write',
+				displayName: 'Write',
+				invocationMessage: 'Creating package.json',
+				status: ToolCallStatus.PendingConfirmation,
+				confirmationTitle: 'Create file?',
+				edits: {
+					items: [{
+						after: {
+							uri: 'file:///workspace/package.json',
+							content: { uri: 'pending-edit-content://session/tc-create/package.json' },
+						},
+					}],
+				},
+			});
+
+			assert.deepStrictEqual(invocation.toolSpecificData, {
+				kind: 'modifiedFilesConfirmation',
+				options: ['Allow'],
+				modifiedFiles: [{
+					uri: URI.file('/workspace/package.json'),
+					editKind: 'create',
+					originalUri: undefined,
+					modifiedContentUri: toAgentHostUri(URI.parse('pending-edit-content://session/tc-create/package.json'), 'local'),
+					originalContentUri: undefined,
+					insertions: undefined,
+					deletions: undefined,
+					title: 'package.json',
+					description: '/workspace/package.json',
+				}],
+			});
+		});
+
 		test('includes all parts in correct order', () => {
 			const result = activeTurnToProgress(URI.file('/'), createActiveTurnState([
 				{ kind: ResponsePartKind.Reasoning, id: 'r-1', content: 'Thinking...' },
@@ -1493,7 +1528,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandOutput?.text, 'text-output');
 		});
 
-		test('uses shell_exit exit code for completed SDK shell tool history', () => {
+		test('uses terminal completion exit code for completed SDK shell tool history', () => {
 			const tc = createCompletedToolCall({
 				_meta: { toolKind: 'terminal' },
 				toolInput: 'gti status',
@@ -1519,7 +1554,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandOutput?.text, 'command not found\r\n');
 		});
 
-		test('keeps zero shell_exit exit code as success for completed SDK shell tool history', () => {
+		test('keeps zero terminal completion exit code as success for completed SDK shell tool history', () => {
 			const tc = createCompletedToolCall({
 				_meta: { toolKind: 'terminal' },
 				toolInput: 'pwd',
@@ -1544,7 +1579,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandState?.exitCode, 0);
 		});
 
-		test('falls back to tool success when shell_exit has no exit code', () => {
+		test('falls back to tool success when terminal completion has no exit code', () => {
 			const tc = createCompletedToolCall({
 				_meta: { toolKind: 'terminal' },
 				toolInput: 'pwd',
@@ -1620,7 +1655,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.terminalCommandState?.exitCode, 0);
 		});
 
-		test('finalize uses shell_exit exit code over SDK tool success', () => {
+		test('finalize uses terminal completion exit code over SDK tool success', () => {
 			const tc = createToolCallState({
 				_meta: { toolKind: 'terminal' },
 				toolInput: 'false',
