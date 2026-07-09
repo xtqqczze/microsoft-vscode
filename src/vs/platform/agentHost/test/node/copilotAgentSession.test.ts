@@ -4970,9 +4970,9 @@ suite('CopilotAgentSession', () => {
 			fireUserMessage(mockSession);
 			await timeout(0);
 
-			const emitted = telemetryService.events.filter(e => e.eventName === 'instructionsCollected');
+			const emitted = telemetryService.events.filter(e => e.eventName === 'agentHost.instructionsCollected');
 			assert.deepStrictEqual(emitted, [{
-				eventName: 'instructionsCollected',
+				eventName: 'agentHost.instructionsCollected',
 				data: {
 					provider: 'copilot',
 					agentSessionId: 'test-session-1',
@@ -4994,7 +4994,7 @@ suite('CopilotAgentSession', () => {
 			fireUserMessage(mockSession, { source: 'skill-pdf' });
 			await timeout(0);
 
-			assert.strictEqual(telemetryService.events.filter(e => e.eventName === 'instructionsCollected').length, 0);
+			assert.strictEqual(telemetryService.events.filter(e => e.eventName === 'agentHost.instructionsCollected').length, 0);
 			assert.strictEqual(mockSession.getInstructionSourcesCallCount, 0, 'should short-circuit before the RPC');
 		});
 
@@ -5007,7 +5007,7 @@ suite('CopilotAgentSession', () => {
 			fireUserMessage(mockSession);
 			await timeout(0);
 
-			assert.strictEqual(telemetryService.events.filter(e => e.eventName === 'instructionsCollected').length, 0);
+			assert.strictEqual(telemetryService.events.filter(e => e.eventName === 'agentHost.instructionsCollected').length, 0);
 			assert.strictEqual(mockSession.getInstructionSourcesCallCount, 1);
 		});
 	});

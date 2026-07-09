@@ -542,6 +542,10 @@
 	font-family: var(--vscode-chat-font-family, inherit);
 }
 
+.interactive-item-container.terminal-command-request > .value > .rendered-markdown {
+	font-family: var(--monaco-monospace-font);
+}
+
 .interactive-item-container .value > .rendered-markdown p {
 	/* Targetting normal text paras. `p` can also appear in other elements/widgets */
 	margin: 0 0 16px 0;
@@ -1706,7 +1710,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 				text-overflow: ellipsis;
 			}
 
-			span + .chat-input-picker-label {
+			.codicon + .chat-input-picker-label {
 				margin-left: 6px;
 			}
 
@@ -1813,7 +1817,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 				}
 			}
 
-			span + .chat-input-picker-label {
+			.codicon + .chat-input-picker-label {
 				margin-left: 2px;
 			}
 
@@ -1904,7 +1908,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	font-size: 12px;
 }
 
-.chat-input-picker-item .action-label.model-picker-split .model-picker-section span + .chat-input-picker-label {
+.chat-input-picker-item .action-label.model-picker-split .model-picker-section .codicon + .chat-input-picker-label {
 	margin-left: 2px;
 }
 
