@@ -1239,19 +1239,23 @@ suite('CopilotAgentSession', () => {
 			return [{
 				parentToolCallId: signal.parentToolCallId,
 				model: signal.action.usage.model,
+				inputTokens: signal.action.usage.inputTokens,
+				outputTokens: signal.action.usage.outputTokens,
 				totalNanoAiu: (signal.action.usage._meta as UsageInfoMeta | undefined)?.copilotUsage?.totalNanoAiu,
 			}];
 		});
 
 		assert.deepStrictEqual(usageSignals, [
 			// Parent-only call → parent aggregate.
-			{ parentToolCallId: undefined, model: 'claude-opus-4.8', totalNanoAiu: 500_000_000 },
-			// First subagent call → parent aggregate grows, plus the subagent component.
-			{ parentToolCallId: undefined, model: 'gpt-5.5', totalNanoAiu: 700_000_000 },
-			{ parentToolCallId: 'tc-subagent', model: 'gpt-5.5', totalNanoAiu: 200_000_000 },
-			// Second subagent call → parent aggregate grows, plus the subagent component.
-			{ parentToolCallId: undefined, model: 'gpt-5.5', totalNanoAiu: 1_000_000_000 },
-			{ parentToolCallId: 'tc-subagent', model: 'gpt-5.5', totalNanoAiu: 500_000_000 },
+			{ parentToolCallId: undefined, model: 'claude-opus-4.8', inputTokens: 10, outputTokens: 20, totalNanoAiu: 500_000_000 },
+			// First subagent call → parent aggregate grows but keeps the parent
+			// model/context, plus the subagent component carries the child model.
+			{ parentToolCallId: undefined, model: 'claude-opus-4.8', inputTokens: 10, outputTokens: 20, totalNanoAiu: 700_000_000 },
+			{ parentToolCallId: 'tc-subagent', model: 'gpt-5.5', inputTokens: 5, outputTokens: 7, totalNanoAiu: 200_000_000 },
+			// Second subagent call → parent aggregate grows but keeps the parent
+			// model/context, plus the subagent component.
+			{ parentToolCallId: undefined, model: 'claude-opus-4.8', inputTokens: 10, outputTokens: 20, totalNanoAiu: 1_000_000_000 },
+			{ parentToolCallId: 'tc-subagent', model: 'gpt-5.5', inputTokens: 6, outputTokens: 8, totalNanoAiu: 500_000_000 },
 		]);
 	});
 

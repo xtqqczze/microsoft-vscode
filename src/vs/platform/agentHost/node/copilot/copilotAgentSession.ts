@@ -388,6 +388,20 @@ type CopilotTurnState = 'pending' | 'running' | 'completed' | 'aborted';
  * completes a `pending` turn defensively, so a degenerate no-op send cannot
  * hang the session.
  */
+
+/**
+ * The token/model/cost context for a single model call, used to build a
+ * `UsageInfo`. All fields are optional so a partial or empty context (e.g. a
+ * subagent usage event seen before the parent's own context) is representable.
+ */
+interface UsageContext {
+	inputTokens?: number;
+	outputTokens?: number;
+	model?: string;
+	cacheReadTokens?: number;
+	cost?: number;
+}
+
 class CopilotTurn {
 
 	private _state: CopilotTurnState = 'pending';
@@ -400,6 +414,16 @@ class CopilotTurn {
 	 * so its own component cost can be reported on the subagent's child session.
 	 */
 	readonly copilotUsageTotalNanoAiuByScope = new Map<string, number>();
+
+	/**
+	 * The parent (main-agent) turn's own last context usage — model plus token
+	 * counts and per-event cost. Subagent usage events are folded into the
+	 * parent aggregate for credit purposes only, so they must not overwrite the
+	 * parent turn's model/context-token usage. Retaining the parent's own last
+	 * values lets each subagent usage event refresh the parent aggregate's
+	 * credit total while preserving the model that produced the parent response.
+	 */
+	parentContextUsage: UsageContext | undefined;
 
 	/**
 	 * Current markdown response part IDs for this turn, keyed by
@@ -3284,12 +3308,27 @@ export class CopilotAgentSession extends Disposable {
 				this._lastSeenModelId = e.data.model;
 			}
 
-			// Builds a usage object carrying this event's tokens/model and the
-			// running credit total for the given scope.
-			const buildUsage = (scope: string): UsageInfo => {
+			// This event's own context usage (the model call that produced it).
+			const eventContext = {
+				inputTokens: e.data.inputTokens,
+				outputTokens: e.data.outputTokens,
+				model: e.data.model,
+				cacheReadTokens: e.data.cacheReadTokens,
+				...(typeof e.data.cost === 'number' ? { cost: e.data.cost } : {}),
+			};
+
+			// Record the parent agent's own context usage so subagent events
+			// don't overwrite the model/context tokens shown for the parent turn.
+			if (!parentToolCallId && turn) {
+				turn.parentContextUsage = eventContext;
+			}
+
+			// Builds a usage object carrying the given context's tokens/model
+			// and the running credit total for the given scope.
+			const buildUsage = (scope: string, context: UsageContext): UsageInfo => {
 				const metadata: UsageInfoMeta = {};
-				if (typeof e.data.cost === 'number') {
-					metadata.cost = e.data.cost;
+				if (typeof context.cost === 'number') {
+					metadata.cost = context.cost;
 				}
 				if (turn && typeof copilotUsage?.totalNanoAiu === 'number') {
 					const scopedTotal = (turn.copilotUsageTotalNanoAiuByScope.get(scope) ?? 0) + copilotUsage.totalNanoAiu;
@@ -3303,16 +3342,20 @@ export class CopilotAgentSession extends Disposable {
 					metadata.quotaSnapshots = quotaSnapshots;
 				}
 				return {
-					inputTokens: e.data.inputTokens,
-					outputTokens: e.data.outputTokens,
-					model: e.data.model,
-					cacheReadTokens: e.data.cacheReadTokens,
+					inputTokens: context.inputTokens,
+					outputTokens: context.outputTokens,
+					model: context.model,
+					cacheReadTokens: context.cacheReadTokens,
 					...(Object.keys(metadata).length > 0 ? { _meta: metadata } : {}),
 				};
 			};
 
-			// Parent turn aggregate (scope `''`): every model call contributes.
-			const parentUsage = buildUsage('');
+			// Parent turn aggregate (scope `''`): every model call contributes
+			// its credits, but a subagent event must not replace the parent
+			// turn's own model/context-token usage. Fold subagent credits into
+			// the parent aggregate while preserving the parent's context.
+			const parentContext = parentToolCallId ? (turn?.parentContextUsage ?? {}) : eventContext;
+			const parentUsage = buildUsage('', parentContext);
 			lastParentUsage = parentUsage;
 			this._emitAction({
 				type: ActionType.ChatUsage,
@@ -3326,7 +3369,7 @@ export class CopilotAgentSession extends Disposable {
 				this._emitAction({
 					type: ActionType.ChatUsage,
 					turnId: this._turnId,
-					usage: buildUsage(parentToolCallId),
+					usage: buildUsage(parentToolCallId, eventContext),
 				}, parentToolCallId);
 			}
 		}));
