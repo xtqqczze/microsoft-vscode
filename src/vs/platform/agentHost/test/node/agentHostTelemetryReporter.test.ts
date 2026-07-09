@@ -187,4 +187,16 @@ suite('AgentHostTelemetryReporter', () => {
 		assert.deepStrictEqual(service.enhancedEvents, [expected]);
 		assert.deepStrictEqual(service.internalEvents, [expected]);
 	});
+
+	test('skillContentRead drops the version when no plugin name is known, matching the extension', () => {
+		const service = new TestRestrictedTelemetryService();
+		const reporter = new AgentHostTelemetryReporter(service);
+
+		reporter.skillContentRead({ name: 'local', path: '/skills/local/SKILL.md', content: 'c', source: 'project', pluginName: undefined, pluginVersion: '9.9.9' });
+
+		assert.strictEqual(service.enhancedEvents.length, 1);
+		assert.strictEqual(service.enhancedEvents[0].properties?.skillExtensionId, '');
+		assert.strictEqual(service.enhancedEvents[0].properties?.skillExtensionVersion, '');
+	});
 });
+

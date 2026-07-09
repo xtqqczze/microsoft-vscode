@@ -353,7 +353,9 @@ export class AgentHostTelemetryReporter {
 		}
 		const contentHash = report.content ? String(hash(report.content)) : '';
 		const skillStorage = report.source ?? '';
-		const skillExtensionVersion = report.pluginVersion ?? '';
+		// Match the extension: the version is only reported when the (plugin) id is known, so we
+		// never emit a `skillExtensionVersion` without a corresponding `skillExtensionId`.
+		const skillExtensionVersion = report.pluginName ? (report.pluginVersion ?? '') : '';
 		const plaintextProps = {
 			skillName: report.name,
 			skillPath: report.path,
