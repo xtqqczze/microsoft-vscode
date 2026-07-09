@@ -8,7 +8,7 @@ import { Codicon } from '../../../../base/common/codicons.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { KeyChord, KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { localize2 } from '../../../../nls.js';
-import { Action2, MenuId } from '../../../../platform/actions/common/actions.js';
+import { Action2 } from '../../../../platform/actions/common/actions.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
@@ -22,6 +22,7 @@ import { SessionsCategories } from '../../../common/categories.js';
 import { ISessionChangesService } from '../../changes/browser/sessionChangesService.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { EmptyFileEditorInput } from './emptyFileEditorInput.js';
+import { Menus } from '../../../browser/menus.js';
 
 export const NEW_FILE_TAB_COMMAND_ID = 'workbench.action.agentSessions.newFileTab';
 export const NEW_BROWSER_TAB_COMMAND_ID = 'workbench.action.agentSessions.newBrowserTab';
@@ -55,7 +56,7 @@ export class NewFileTabAction extends Action2 {
 				primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyB),
 			},
 			menu: {
-				id: MenuId.EditorTabsBarAddTab,
+				id: Menus.SessionsEditorTabsBarAddTab,
 				group: 'navigation',
 				order: 1,
 				// Only offer when the Files tab is not already shown.
@@ -90,7 +91,7 @@ export class NewBrowserTabAction extends Action2 {
 				primary: KeyChord(KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyK, KeyCode.KeyB),
 			},
 			menu: {
-				id: MenuId.EditorTabsBarAddTab,
+				id: Menus.SessionsEditorTabsBarAddTab,
 				group: 'navigation',
 				order: 2,
 				when: addTabLayoutWhen
@@ -123,7 +124,7 @@ export class NewSearchTabAction extends Action2 {
 				primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyS),
 			},
 			menu: {
-				id: MenuId.EditorTabsBarAddTab,
+				id: Menus.SessionsEditorTabsBarAddTab,
 				group: 'navigation',
 				order: 3,
 				when: addTabLayoutWhen
@@ -148,7 +149,7 @@ export class NewChangesTabAction extends Action2 {
 			f1: false,
 			precondition: addTabActionWhen,
 			menu: {
-				id: MenuId.EditorTabsBarAddTab,
+				id: Menus.SessionsEditorTabsBarAddTab,
 				group: 'navigation',
 				order: 0,
 				// Only offer when the session has a Changes editor but its tab is closed.
