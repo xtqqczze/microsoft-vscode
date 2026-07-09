@@ -397,6 +397,17 @@ return this._otel.startActiveSpan('invoke_agent child', { parentTraceContext: pa
 
 ---
 
+## Session Correlation
+
+`gen_ai.conversation.id` carries the **VS Code chat session id** on every exported span (`invoke_agent`, `chat`, `execute_tool`, `execute_hook`) so a vendor-agnostic OTLP backend can group all spans of a session on the standard GenAI key without a traceId → root join. The vendor keys `copilot_chat.session_id` / `copilot_chat.chat_session_id` are dual-emitted for the Agent Debug Log and SQLite span store (`COALESCE(conversation_id, chat_session_id)`).
+
+Notes:
+- On `chat` spans, `gen_ai.conversation.id` holds the session id — **not** the per-turn request id. The request id lives on `gen_ai.response.id` / telemetry events.
+- BYOK `chat` spans (`anthropicProvider.ts`, `geminiNativeProvider.ts`) read the session id from the in-scope `CapturingToken.chatSessionId` and emit `gen_ai.conversation.id` + `copilot_chat.session_id` + `copilot_chat.chat_session_id`.
+- `embeddings` spans are intentionally not session-scoped and carry no session id.
+
+---
+
 ## Debug Panel vs OTLP Isolation
 
 The debug panel creates spans with non-standard operation names (`content_event`, `user_message`). These MUST NOT appear in the user's OTLP collector.
