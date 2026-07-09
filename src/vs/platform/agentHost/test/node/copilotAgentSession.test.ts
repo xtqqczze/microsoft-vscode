@@ -2119,7 +2119,7 @@ suite('CopilotAgentSession', () => {
 	suite('system.notification', () => {
 
 		test('translator handles every notification kind and ignores empty content', () => {
-			const base = {
+			const base: Omit<SessionEventPayload<'system.notification'>, 'data'> = {
 				id: 'evt-system',
 				parentId: null,
 				timestamp: new Date().toISOString(),
@@ -2137,16 +2137,33 @@ suite('CopilotAgentSession', () => {
 				startsTurn: true,
 			});
 
-			assert.deepStrictEqual(buildCopilotSystemNotification({
+			const shellNotificationWithoutDescription = buildCopilotSystemNotification({
+				...base,
+				data: {
+					content: 'Shell done',
+					kind: { type: 'shell_completed', shellId: 'shell-a', exitCode: 0 },
+				},
+			});
+			assert.ok(shellNotificationWithoutDescription);
+			assert.deepStrictEqual(shellNotificationWithoutDescription, {
+				messageText: 'Shell completed',
+				startsTurn: true,
+			});
+			assert.ok(!shellNotificationWithoutDescription.messageText.includes('shell-a'));
+
+			const detachedShellNotification = buildCopilotSystemNotification({
 				...base,
 				data: {
 					content: 'Detached done',
 					kind: { type: 'shell_detached_completed', shellId: 'detached-a' },
 				},
-			}), {
-				messageText: 'Shell `detached-a` completed',
+			});
+			assert.ok(detachedShellNotification);
+			assert.deepStrictEqual(detachedShellNotification, {
+				messageText: 'Shell completed',
 				startsTurn: true,
 			});
+			assert.ok(!detachedShellNotification.messageText.includes('detached-a'));
 
 			assert.deepStrictEqual(buildCopilotSystemNotification({
 				...base,

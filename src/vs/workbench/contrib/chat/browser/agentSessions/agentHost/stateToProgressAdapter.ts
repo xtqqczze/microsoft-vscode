@@ -855,18 +855,37 @@ function getTerminalInput(tc: ToolCallState): string | undefined {
 
 	return undefined;
 }
+
 function getTerminalOutput(tc: ToolCallState) {
-	// TODO: Revisit whether SDK shell tool output should continue coming from
-	// ToolResultContentType.Text, or from terminalComplete.preview when available.
-	const text = tc.status === ToolCallStatus.Completed || tc.status === ToolCallStatus.Running ? tc.content?.find(isToolResultTextContent)?.text : undefined;
-	if (!text) {
+	if (tc.status !== ToolCallStatus.Completed && tc.status !== ToolCallStatus.Running) {
 		return undefined;
 	}
+
+	const terminalComplete = tc.content?.find(isToolResultTerminalCompleteContent);
+
+	// Prefer the structured terminal snapshot. Text content is a compatibility
+	// fallback for older/restored results and can include legacy bookkeeping.
+	let text = terminalComplete?.preview;
+	if (text === undefined) {
+		const fallbackText = tc.content?.find(isToolResultTextContent)?.text;
+		text = fallbackText === undefined ? undefined : stripLegacyTerminalExitMarkers(fallbackText);
+	}
+	if (text === undefined || (!text && terminalComplete?.truncated !== true)) {
+		return undefined;
+	}
+
 	// The detached xterm used to render this output treats input as a raw TTY stream,
 	// so a lone `\n` only advances the row without resetting the column (producing a
 	// staircase). SDK terminal tools return plain text with `\n` line endings, so
 	// normalize to `\r\n` here. The replace is idempotent on already-CRLF input.
-	return { text: text.replace(/\r?\n/g, '\r\n') };
+	return {
+		text: text.replace(/\r?\n/g, '\r\n'),
+		...(terminalComplete?.truncated !== undefined ? { truncated: terminalComplete.truncated } : {}),
+	};
+}
+
+function stripLegacyTerminalExitMarkers(text: string): string {
+	return text.replace(/<shellId:[^>\r\n]*completed with exit code \d+>\s*$/i, '');
 }
 
 function isToolResultTextContent(content: ToolResultContent): content is Extract<ToolResultContent, { type: ToolResultContentType.Text }> {
