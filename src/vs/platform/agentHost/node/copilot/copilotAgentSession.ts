@@ -3173,6 +3173,17 @@ export class CopilotAgentSession extends Disposable {
 			if (this._shouldDropUnmappedSubagentEvent(e, 'skill.invoked')) {
 				return;
 			}
+			// Restricted `skillContentRead`: which skill file was loaded. Main-agent only, like the other restricted events.
+			if (!e.agentId) {
+				this._telemetryReporter.skillContentRead({
+					name: e.data.name,
+					path: e.data.path,
+					content: e.data.content,
+					source: e.data.source,
+					pluginName: e.data.pluginName,
+					pluginVersion: e.data.pluginVersion,
+				});
+			}
 			const parentToolCallId = this._parentToolCallIdForSubagentEvent(e);
 			const synth = synthesizeSkillToolCall(e.data, e.id);
 			this._emitAction({
