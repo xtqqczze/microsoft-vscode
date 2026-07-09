@@ -2429,6 +2429,11 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			remembered[SessionConfigKey.WorktreeBranchPrefix] = branchPrefix;
 		}
 
+		const worktreeIncludeFiles = this._baseConfigurationService.getValue<string[]>('git.worktreeIncludeFiles', { resource });
+		if (Array.isArray(worktreeIncludeFiles) && worktreeIncludeFiles.length > 0) {
+			remembered[SessionConfigKey.WorktreeIncludeFiles] = worktreeIncludeFiles;
+		}
+
 		return Object.keys(remembered).length > 0 ? remembered : undefined;
 	}
 
@@ -2832,6 +2837,26 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 						type: ActionType.SessionCustomizationToggled,
 						id: c.id,
 						enabled,
+					});
+				},
+				start: async () => {
+					const connection = this.connection;
+					if (!connection) {
+						return;
+					}
+					connection.dispatch(sessionUri.toString(), {
+						type: ActionType.SessionMcpServerStartRequested,
+						id: c.id,
+					});
+				},
+				stop: async () => {
+					const connection = this.connection;
+					if (!connection) {
+						return;
+					}
+					connection.dispatch(sessionUri.toString(), {
+						type: ActionType.SessionMcpServerStopRequested,
+						id: c.id,
 					});
 				},
 			}));
