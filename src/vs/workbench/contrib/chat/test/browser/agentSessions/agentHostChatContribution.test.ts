@@ -78,6 +78,7 @@ import { MenuId, MenuRegistry, isIMenuItem, type IMenuItem } from '../../../../.
 import { ChatContextKeys } from '../../../common/actions/chatContextKeys.js';
 import { type ContextKeyValue } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IAgentHostActiveClientService } from '../../../browser/agentSessions/agentHost/agentHostActiveClientService.js';
+import { SyncedCustomizationBundler } from '../../../browser/agentSessions/agentHost/syncedCustomizationBundler.js';
 import { IAgentHostCustomizationService, NullAgentHostCustomizationService } from '../../../browser/agentSessions/agentHost/agentHostCustomizationService.js';
 import { ILanguageModelToolsService, ToolDataSource } from '../../../common/tools/languageModelToolsService.js';
 import { IPromptsService } from '../../../common/promptSyntax/service/promptsService.js';
@@ -812,6 +813,9 @@ function createTestServices(disposables: DisposableStore, workingDirectoryResolv
 					onDidChange: Event.None,
 					isDisabled: () => false,
 					setDisabled: () => { },
+				},
+				bundler: new class extends mock<SyncedCustomizationBundler>() {
+					override getOrigin() { return undefined; }
 				},
 				dispose: () => inner.dispose(),
 			};
