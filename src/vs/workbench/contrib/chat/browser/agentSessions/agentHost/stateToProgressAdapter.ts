@@ -24,7 +24,7 @@ import { MessageAttachmentKind, type FileEdit, type MessageAttachment, type Stri
 import { normalizeFileEdit } from '../../../../../../platform/agentHost/common/fileEditDiff.js';
 import product from '../../../../../../platform/product/common/product.js';
 import { formatCopilotCredits, type ChatExternalEditKind, type ChatMcpAppData, type IChatAgentFeedbackReviewConfirmationData, type IChatExternalEdit, type IChatModifiedFilesConfirmationData, type IChatProgress, type IChatResponseErrorDetails, type IChatSearchToolInvocationData, type IChatSessionCreatedData, type IChatTerminalToolInvocationData, type IChatToolInputInvocationData, type IChatToolInvocationSerialized, type IChatUsage, type IChatUsagePromptTokenDetail, ToolConfirmKind, AgentFeedbackReviewCommandId } from '../../../common/chatService/chatService.js';
-import { type IChatSessionHistoryItem } from '../../../common/chatSessionsService.js';
+import { isTerminalCommandPrompt, type IChatSessionHistoryItem } from '../../../common/chatSessionsService.js';
 import { type IQuotaSnapshot } from '../../../../../services/chat/common/chatEntitlementService.js';
 import { ChatToolInvocation } from '../../../common/model/chatProgressTypes/chatToolInvocation.js';
 import { type IChatRequestVariableData } from '../../../common/model/chatModel.js';
@@ -479,7 +479,7 @@ export function usageInfoToQuotas(usage: UsageInfo | undefined): IAgentHostQuota
  * The `lookup` callback is responsible for any session-level fallback (e.g.
  * `summary.model?.id` when usage hasn't reported a model yet).
  */
-export function turnsToHistory(backendSession: URI, turns: readonly Turn[], participantId: string, connectionAuthority: string, lookup?: TurnModelLookup, errorContext?: IChatErrorContext): IChatSessionHistoryItem[] {
+export function turnsToHistory(backendSession: URI, turns: readonly Turn[], participantId: string, connectionAuthority: string, lookup?: TurnModelLookup, errorContext?: IChatErrorContext, terminalCommandPrefix?: string): IChatSessionHistoryItem[] {
 	const history: IChatSessionHistoryItem[] = [];
 	for (const turn of turns) {
 		const rawModelId = turn.usage?.model;
@@ -489,6 +489,10 @@ export function turnsToHistory(backendSession: URI, turns: readonly Turn[], part
 		// Request
 		const variableData = messageToVariableData(turn.message, connectionAuthority);
 		const isSystemInitiated = turn.message.origin.kind === MessageKind.SystemNotification;
+		// A message runs as a terminal command when it starts with the host's
+		// advertised prefix and has a non-empty command after it (mirroring the
+		// host-side bang parser, where a lone `!` is forwarded to the agent).
+		const isTerminalRequest = isTerminalCommandPrompt(turn.message.text, terminalCommandPrefix);
 		history.push({
 			id: turn.id,
 			type: 'request',
@@ -498,6 +502,9 @@ export function turnsToHistory(backendSession: URI, turns: readonly Turn[], part
 			variableData,
 			...(isSystemInitiated ? {
 				isSystemInitiated: true,
+			} : {}),
+			...(isTerminalRequest ? {
+				isTerminalRequest: true,
 			} : {}),
 		});
 
