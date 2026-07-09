@@ -32,7 +32,7 @@ SDK Native (tracer B, same traceId):
   invoke_agent → chat → execute_tool → invoke_agent (subagent) → permission → ...
 
 Bridge: SDK Provider B → MultiSpanProcessor._spanProcessors.push(bridge)
-  → onEnd(ReadableSpan) → ICompletedSpanData + CHAT_SESSION_ID → IOTelService.injectCompletedSpan
+  → onEnd(ReadableSpan) → ICompletedSpanData + CHAT_SESSION_ID + gen_ai.conversation.id → IOTelService.injectCompletedSpan
   → onDidCompleteSpan → Debug Panel + File Logger
 ```
 
@@ -405,6 +405,7 @@ Notes:
 - On `chat` spans, `gen_ai.conversation.id` holds the session id — **not** the per-turn request id. The request id lives on `gen_ai.response.id` / telemetry events.
 - BYOK `chat` spans (`anthropicProvider.ts`, `geminiNativeProvider.ts`) read the session id from the in-scope `CapturingToken.chatSessionId` and emit `gen_ai.conversation.id` + `copilot_chat.session_id` + `copilot_chat.chat_session_id`.
 - `embeddings` spans are intentionally not session-scoped and carry no session id.
+- Copilot CLI in-process SDK-native spans are enriched by the bridge (`copilotCliBridgeSpanProcessor.ts`), which injects `copilot_chat.chat_session_id` and `gen_ai.conversation.id` (session id) for any span that lacks them, keyed by a traceId → session map. The runtime already stamps `gen_ai.conversation.id` on `invoke_agent` / `chat` spans; the bridge covers the rest (e.g. `execute_tool`).
 
 ---
 

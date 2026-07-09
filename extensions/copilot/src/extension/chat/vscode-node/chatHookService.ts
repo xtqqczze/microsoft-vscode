@@ -160,10 +160,10 @@ export class ChatHookService implements IChatHookService {
 						kind: SpanKind.INTERNAL,
 						attributes: {
 							[GenAiAttr.OPERATION_NAME]: GenAiOperationName.EXECUTE_HOOK,
-							[GenAiAttr.CONVERSATION_ID]: chatSessionId,
-							[CopilotChatAttr.SESSION_ID]: chatSessionId,
 							[CopilotChatAttr.HOOK_TYPE]: hookType,
 							'copilot_chat.hook_command': hookCommand.command,
+							...(chatSessionId ? { [GenAiAttr.CONVERSATION_ID]: chatSessionId } : {}),
+							...(chatSessionId ? { [CopilotChatAttr.SESSION_ID]: chatSessionId } : {}),
 							...(chatSessionId ? { [CopilotChatAttr.CHAT_SESSION_ID]: chatSessionId } : {}),
 							...(hookToolNamesJson ? { [GitHubCopilotAttr.HOOK_TOOL_NAMES]: hookToolNamesJson } : {}),
 						},
