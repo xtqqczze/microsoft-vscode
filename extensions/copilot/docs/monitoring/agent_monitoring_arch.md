@@ -399,13 +399,20 @@ return this._otel.startActiveSpan('invoke_agent child', { parentTraceContext: pa
 
 ## Session Correlation
 
-`gen_ai.conversation.id` carries the **VS Code chat session id** on every exported span (`invoke_agent`, `chat`, `execute_tool`, `execute_hook`) so a vendor-agnostic OTLP backend can group all spans of a session on the standard GenAI key without a traceId → root join. The vendor keys `copilot_chat.session_id` / `copilot_chat.chat_session_id` are dual-emitted for the Agent Debug Log and SQLite span store (`COALESCE(conversation_id, chat_session_id)`).
+For **extension-emitted** spans (`invoke_agent`, `chat`, `execute_tool`, `execute_hook` produced by the foreground agent, Claude agent, BYOK providers, and `chatMLFetcher`), `gen_ai.conversation.id` carries the **VS Code chat session id** on every exported span, so a vendor-agnostic OTLP backend can group all spans of a session on the standard GenAI key without a traceId → root join. The vendor keys `copilot_chat.session_id` / `copilot_chat.chat_session_id` are dual-emitted for the Agent Debug Log and SQLite span store (`COALESCE(conversation_id, chat_session_id)`).
 
 Notes:
 - On `chat` spans, `gen_ai.conversation.id` holds the session id — **not** the per-turn request id. The request id lives on `gen_ai.response.id` / telemetry events.
+- `gen_ai.conversation.id` is only present when a session id is available; the foreground `chat`/tool/hook paths omit it when there is no active chat session, so downstream consumers must treat it as conditional.
 - BYOK `chat` spans (`anthropicProvider.ts`, `geminiNativeProvider.ts`) read the session id from the in-scope `CapturingToken.chatSessionId` and emit `gen_ai.conversation.id` + `copilot_chat.session_id` + `copilot_chat.chat_session_id`.
 - `embeddings` spans are intentionally not session-scoped and carry no session id.
-- Copilot CLI in-process SDK-native spans are enriched by the bridge (`copilotCliBridgeSpanProcessor.ts`), which injects `copilot_chat.chat_session_id` and `gen_ai.conversation.id` (session id) for any span that lacks them, keyed by a traceId → session map. The runtime already stamps `gen_ai.conversation.id` on `invoke_agent` / `chat` spans; the bridge covers the rest (e.g. `execute_tool`).
+
+### Copilot CLI in-process (SDK-native spans)
+
+These spans are produced by the Copilot runtime SDK, not the extension, so there are **two independent export paths** with different correlation coverage:
+
+- **Debug panel copy** (via the bridge → `injectCompletedSpan` → `onDidCompleteSpan`): `copilotCliBridgeSpanProcessor.ts` injects `copilot_chat.chat_session_id` **and** `gen_ai.conversation.id` (session id) onto the copied span for any span that lacks them, keyed by a traceId → session map. This affects only the debug-panel / file-logger view.
+- **SDK's own OTLP export** (via the runtime's `BatchSpanProcessor`): the bridge **cannot** mutate these spans. Their `gen_ai.conversation.id` is whatever the runtime stamps — currently `invoke_agent` and `chat` (and `execute_tool` once [github/copilot-agent-runtime#12383](https://github.com/github/copilot-agent-runtime/pull/12383) lands). Closing this gap for other CLI child spans must happen in the runtime.
 
 ---
 

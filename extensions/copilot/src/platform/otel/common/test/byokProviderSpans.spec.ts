@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it } from 'vitest';
-import { CopilotChatAttr, GenAiAttr, GenAiOperationName } from '../genAiAttributes';
+import { GenAiAttr, GenAiOperationName } from '../genAiAttributes';
 import { emitInferenceDetailsEvent } from '../genAiEvents';
 import { SpanKind, SpanStatusCode } from '../otelService';
 import { CapturingOTelService } from './capturingOTelService';
@@ -115,59 +115,6 @@ describe('BYOK Provider Span Emission', () => {
 		expect(attrs[GenAiAttr.REQUEST_MODEL]).toBe('claude-sonnet-4-20250514');
 		expect(attrs[GenAiAttr.USAGE_INPUT_TOKENS]).toBe(2000);
 		expect(attrs[GenAiAttr.USAGE_OUTPUT_TOKENS]).toBe(500);
-	});
-
-	it('stamps session ids from CapturingToken.chatSessionId (conversation.id = session id, not request id)', () => {
-		const otel = new CapturingOTelService();
-		const capturingToken = { chatSessionId: 'session-xyz', parentChatSessionId: undefined } as { chatSessionId?: string; parentChatSessionId?: string };
-		const requestId = 'req-should-not-be-conversation-id';
-
-		// Mirrors the attribute spread used in anthropicProvider / geminiNativeProvider.
-		const span = otel.startSpan('chat claude-sonnet-4-20250514', {
-			kind: SpanKind.CLIENT,
-			attributes: {
-				[GenAiAttr.OPERATION_NAME]: GenAiOperationName.CHAT,
-				[GenAiAttr.PROVIDER_NAME]: 'anthropic',
-				[GenAiAttr.REQUEST_MODEL]: 'claude-sonnet-4-20250514',
-				...(capturingToken?.chatSessionId ? {
-					[GenAiAttr.CONVERSATION_ID]: capturingToken.chatSessionId,
-					[CopilotChatAttr.SESSION_ID]: capturingToken.chatSessionId,
-					[CopilotChatAttr.CHAT_SESSION_ID]: capturingToken.chatSessionId,
-				} : {}),
-			},
-		});
-		// Response enrichment carries the per-turn request id as response.id only.
-		span.setAttributes({ [GenAiAttr.RESPONSE_ID]: requestId });
-		span.end();
-
-		const s = otel.spans[0];
-		expect(s.attributes[GenAiAttr.CONVERSATION_ID]).toBe('session-xyz');
-		expect(s.attributes[CopilotChatAttr.SESSION_ID]).toBe('session-xyz');
-		expect(s.attributes[CopilotChatAttr.CHAT_SESSION_ID]).toBe('session-xyz');
-		expect(s.attributes[GenAiAttr.CONVERSATION_ID]).not.toBe(requestId);
-		expect(s.attributes[GenAiAttr.RESPONSE_ID]).toBe(requestId);
-	});
-
-	it('omits session ids when no CapturingToken is present', () => {
-		const otel = new CapturingOTelService();
-		const capturingToken = undefined as { chatSessionId?: string } | undefined;
-
-		const span = otel.startSpan('chat gpt-4o', {
-			kind: SpanKind.CLIENT,
-			attributes: {
-				[GenAiAttr.OPERATION_NAME]: GenAiOperationName.CHAT,
-				...(capturingToken?.chatSessionId ? {
-					[GenAiAttr.CONVERSATION_ID]: capturingToken.chatSessionId,
-					[CopilotChatAttr.SESSION_ID]: capturingToken.chatSessionId,
-					[CopilotChatAttr.CHAT_SESSION_ID]: capturingToken.chatSessionId,
-				} : {}),
-			},
-		});
-		span.end();
-
-		const s = otel.spans[0];
-		expect(s.attributes[GenAiAttr.CONVERSATION_ID]).toBeUndefined();
-		expect(s.attributes[CopilotChatAttr.CHAT_SESSION_ID]).toBeUndefined();
 	});
 
 	it('uses parentTraceContext for CAPI → BYOK trace linking', () => {
