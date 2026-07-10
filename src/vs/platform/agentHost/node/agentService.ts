@@ -312,6 +312,7 @@ export class AgentService extends Disposable implements IAgentService {
 		private readonly _telemetryService: ITelemetryService = NullTelemetryService,
 		_fileMonitorService?: IAgentHostFileMonitorService,
 		copilotApiService?: ICopilotApiService,
+		fetchFn?: typeof globalThis.fetch,
 	) {
 		super();
 		this._logService.info('AgentService initialized');
@@ -362,9 +363,9 @@ export class AgentService extends Disposable implements IAgentService {
 				reason: AuthRequiredReason.Required,
 			});
 		}));
-		const agentHostOctoKitService = instantiationService.createInstance(AgentHostOctoKitService, undefined);
+		const agentHostOctoKitService = instantiationService.createInstance(AgentHostOctoKitService, fetchFn);
 		services.set(IAgentHostOctoKitService, agentHostOctoKitService);
-		const effectiveCopilotApiService = copilotApiService ?? instantiationService.createInstance(CopilotApiService, undefined);
+		const effectiveCopilotApiService = copilotApiService ?? instantiationService.createInstance(CopilotApiService, fetchFn);
 		services.set(ICopilotApiService, effectiveCopilotApiService);
 
 		this._gitStateService = this._register(instantiationService.createInstance(AgentHostGitStateService, this._stateManager));

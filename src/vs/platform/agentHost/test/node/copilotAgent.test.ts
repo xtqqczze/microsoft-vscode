@@ -27,6 +27,7 @@ import { InstantiationService } from '../../../instantiation/common/instantiatio
 import { ServiceCollection } from '../../../instantiation/common/serviceCollection.js';
 import { ILogService, NullLogService } from '../../../log/common/log.js';
 import { IAgentHostProxyResolver } from '../../node/agentHostProxyResolver.js';
+import type { IAgentHostClientProxyConnection } from '../../common/agentHostClientProxyChannel.js';
 import { ITelemetryService } from '../../../telemetry/common/telemetry.js';
 import { NullTelemetryService } from '../../../telemetry/common/telemetryUtils.js';
 import { CopilotCliConfigKey } from '../../common/copilotCliConfig.js';
@@ -445,13 +446,15 @@ class MockAgentHostOTelService implements IAgentHostOTelService {
 class TestProxyResolver implements IAgentHostProxyResolver {
 	declare readonly _serviceBrand: undefined;
 
-	register(): IDisposable {
+	register(_clientId: string, _connection: IAgentHostClientProxyConnection): IDisposable {
 		return Disposable.None;
 	}
 
-	async resolveProxy(): Promise<string | undefined> {
+	async resolveProxy(_url: string): Promise<string | undefined> {
 		return undefined;
 	}
+
+	readonly fetch: typeof globalThis.fetch = (input, init) => globalThis.fetch(input, init);
 }
 
 class ResumePathCopilotAgent extends CopilotAgent {

@@ -32,6 +32,7 @@ export interface IAgentHostTelemetryServiceOptions {
 	readonly logService: ILogService;
 	readonly disposables: DisposableStore;
 	readonly disableTelemetry?: boolean;
+	readonly fetchFn?: typeof globalThis.fetch;
 }
 
 export interface IAgentHostTelemetryService extends ITelemetryService, IAgentHostRestrictedTelemetry {
@@ -220,7 +221,7 @@ export async function createAgentHostTelemetryService(options: IAgentHostTelemet
 		piiPaths: getPiiPathsFromEnvironment(environmentService),
 	}, configurationService, productService);
 
-	const restricted = new AgentHostRestrictedTelemetrySender(commonProperties, logService);
+	const restricted = new AgentHostRestrictedTelemetrySender(commonProperties, logService, undefined, undefined, options.fetchFn);
 
 	return disposables.add(new AgentHostTelemetryService(telemetryService, restricted));
 }
