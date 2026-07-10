@@ -142,9 +142,11 @@ const singlePaneChangesEditorTitleVisible = ContextKeyExpr.and(
 
 /**
  * Anchor action hosting the Create Pull Request button bar ({@link ChangesActionsBar})
- * in the single-pane title bar (right side — the session actions area). The custom action
- * view item is registered for {@link Menus.TitleBarSessionMenu} via IActionViewItemService
- * in changesView.ts. The bar hides itself when its underlying menu has no actions.
+ * in the single-pane editor tabs title (the editor-actions area of the docked tab bar).
+ * The custom action view item is provided by the Changes editor pane
+ * ({@link SessionChangesEditor.getActionViewItem}) when the Changes editor is active,
+ * so the anchor is gated on the same. The bar hides itself when its underlying menu has
+ * no actions.
  */
 class ChangesHeaderActionsAction extends Action2 {
 	constructor() {
@@ -153,13 +155,11 @@ class ChangesHeaderActionsAction extends Action2 {
 			title: localize2('changesView.headerActions', "Changes Actions"),
 			f1: false,
 			menu: {
-				id: Menus.TitleBarSessionMenu,
+				id: Menus.SessionsEditorTitle,
 				group: 'navigation',
 				order: 5,
 				when: ContextKeyExpr.and(
-					IsSessionsWindowContext,
-					IsAuxiliaryWindowContext.toNegated(),
-					SinglePaneLayoutEnabledContext,
+					singlePaneChangesEditorTitle,
 					SessionHasChangesContext
 				)
 			},

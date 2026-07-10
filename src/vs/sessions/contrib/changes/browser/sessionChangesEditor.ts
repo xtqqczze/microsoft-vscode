@@ -37,8 +37,11 @@ import { Menus } from '../../../browser/menus.js';
 import { IAgentWorkbenchLayoutService } from '../../../browser/workbench.js';
 import { ActiveSessionContextKeys } from '../common/changes.js';
 import { IChangesViewService } from '../common/changesViewService.js';
-import { ChangesActionsBar } from './changesView.js';
+import { ChangesActionsBar, ChangesActionsBarActionViewItem, CHANGES_HEADER_ACTIONS_ID } from './changesView.js';
 import { SessionChangesEditorInput } from './sessionChangesEditorInput.js';
+import { IAction } from '../../../../base/common/actions.js';
+import { IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
+import { IActionViewItem } from '../../../../base/browser/ui/actionbar/actionbar.js';
 
 const HEADER_HEIGHT = 35;
 
@@ -208,6 +211,17 @@ export class SessionChangesEditor extends AbstractEditorWithViewState<IMultiDiff
 			return undefined;
 		}
 		return { instantiationService: this._scopedInstantiationService };
+	}
+
+	/**
+	 * In single-pane, render the Create Pull Request button bar ({@link ChangesActionsBar})
+	 * as the editor tabs title anchor action ({@link CHANGES_HEADER_ACTIONS_ID}).
+	 */
+	override getActionViewItem(action: IAction, options: IBaseActionViewItemOptions): IActionViewItem | undefined {
+		if (this._singlePane && action.id === CHANGES_HEADER_ACTIONS_ID) {
+			return this.instantiationService.createInstance(ChangesActionsBarActionViewItem, action, options);
+		}
+		return super.getActionViewItem(action, options);
 	}
 
 	override async setInput(input: SessionChangesEditorInput, options: IMultiDiffEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
