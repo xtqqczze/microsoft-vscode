@@ -177,7 +177,7 @@ The provider ships a rich set of session-scoped UI in `browser/`:
 
 | File | Responsibility |
 |------|----------------|
-| `agentHostSessionConfigPicker.ts` | The per-session config picker (isolation, branch, and host-declared dynamic properties) backed by the dynamic-session-config API; includes `media/agentHostSessionConfigPicker.css`. |
+| `agentHostSessionConfigPicker.ts` | The per-session config picker (isolation, branch, and host-declared dynamic properties) backed by the dynamic-session-config API; includes `media/agentHostSessionConfigPicker.css`. On desktop the `isolation` property renders as a "Worktree" checkbox (checked = worktree, unchecked = folder) instead of a dropdown; the phone layout keeps the chip so it can route to the unified repo sheet. |
 | `agentHostAgentPicker.ts` | Custom-agent picker for a session. |
 | `agentHostModePicker.ts` | Agent mode enum picker (extends a shared `AgentHostSessionEnumPicker`), rendered immediately before approvals in the secondary toolbar for new and active sessions. |
 | `agentHostModelPicker.ts` | `getAgentHostModels` — filters language models by the session resource scheme. |
