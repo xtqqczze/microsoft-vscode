@@ -336,9 +336,9 @@ just scaled.
 <a id="one-stroke"></a>
 ### One stroke
 
-The system has a single border thickness: **1px** (`--vscode-strokeThickness`).
-- **Decision rule:** borders and separators are a **yes/no** decision, not a width
-  to tune. (And often the answer is *no* - see *Quiet at rest*.)
+The standard border/separator stroke is **1px** (`--vscode-strokeThickness`).
+- **Decision rule:** whether an ordinary border is present is a **yes/no** decision.
+  Preserve thicker semantic or accessibility strokes, such as focus indicators.
 - **Serves:** *Quiet at rest* (1), *Sameness signals sameness* (6).
 
 <a id="theme-color"></a>
