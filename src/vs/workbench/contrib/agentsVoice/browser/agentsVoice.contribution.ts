@@ -462,9 +462,9 @@ configurationRegistry.registerConfiguration({
 			scope: ConfigurationScope.APPLICATION,
 			included: false,
 		},
-		'agents.voice.textToSpeech': {
+		'agents.voice.speakResponses': {
 			type: 'boolean',
-			description: nls.localize('agents.voice.textToSpeech', "When enabled, the assistant reads responses aloud. When disabled, responses appear as text transcripts only."),
+			markdownDescription: nls.localize('agents.voice.speakResponses', "When enabled, the assistant reads responses aloud. When disabled, responses are not spoken; enable `#agents.voice.showTranscript#` to read them as a text transcript instead."),
 			default: true,
 			scope: ConfigurationScope.APPLICATION,
 		},
@@ -484,7 +484,7 @@ configurationRegistry.registerConfiguration({
 		},
 		'agents.voice.showTranscript': {
 			type: 'boolean',
-			description: nls.localize('agents.voice.showTranscript', "Show the voice transcript overlay in the chat input area while voice mode is active."),
+			markdownDescription: nls.localize('agents.voice.showTranscript', "Show the voice transcript overlay in the chat input area while voice mode is active. Enable this to read responses as text when `#agents.voice.speakResponses#` is disabled."),
 			default: false,
 			scope: ConfigurationScope.APPLICATION,
 		},

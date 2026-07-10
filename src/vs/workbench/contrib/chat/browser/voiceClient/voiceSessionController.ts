@@ -2703,8 +2703,8 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			this.voicePlaybackService.notifyPlaybackStart(sessionResource, transcript);
 		}
 
-		const ttsEnabled = this.configurationService.getValue<boolean>('agents.voice.textToSpeech') !== false;
-		if (ttsEnabled && audio) {
+		const speakResponsesEnabled = this.configurationService.getValue<boolean>('agents.voice.speakResponses') !== false;
+		if (speakResponsesEnabled && audio) {
 			// Claim the playback slot only when we actually have audio to play.
 			// A transcript-only frame (empty audio) must NOT claim it, or the
 			// slot would stay pinned to a session that never starts playback
@@ -2719,7 +2719,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			// Hands-free: keep the mic open so the user can barge in.
 			this._startBargeInMonitor();
 			this.ttsPlaybackService.playAudioChunk(audio, isFinal, this._window!);
-		} else if (!ttsEnabled) {
+		} else if (!speakResponsesEnabled) {
 			this._replyPlayedSinceSend = true;
 			if (isFinal) {
 				this._currentPlaybackSessionId = null;
