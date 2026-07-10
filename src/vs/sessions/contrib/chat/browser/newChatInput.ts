@@ -680,12 +680,17 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 
 		// Voice controls (mic/stop/settings/disconnect). The hand-built toolbar
 		// can't use the shared `MenuId.ChatExecute`, so a dedicated menu is used.
+		// Keep the session picker usable when optional voice initialization fails.
 		const voiceContainer = dom.append(toolbar, dom.$('.sessions-chat-voice-toolbar'));
-		this._register(this.instantiationService.createInstance(NewChatVoiceController, {
-			toolbarContainer: voiceContainer,
-			inputContainer: container,
-			composer: this,
-		}));
+		try {
+			this._register(this.instantiationService.createInstance(NewChatVoiceController, {
+				toolbarContainer: voiceContainer,
+				inputContainer: container,
+				composer: this,
+			}));
+		} catch (error) {
+			this.logService.error('Failed to create new-session voice controls:', error);
+		}
 
 		this._loadingSpinner = dom.append(toolbar, dom.$('.sessions-chat-loading-spinner'));
 		const loadingIcon = dom.append(this._loadingSpinner, renderIcon(ThemeIcon.modify(Codicon.loading, 'spin')));
