@@ -6,14 +6,17 @@
 import { expect, suite, test } from 'vitest';
 import { DocumentId } from '../../../../platform/inlineEdits/common/dataTypes/documentId';
 import { RootedEdit } from '../../../../platform/inlineEdits/common/dataTypes/edit';
+import { LanguageContextResponse } from '../../../../platform/inlineEdits/common/dataTypes/languageContext';
 import { DEFAULT_OPTIONS, IncludeLineNumbersOption, PromptOptions, RecentFileClippingStrategy } from '../../../../platform/inlineEdits/common/dataTypes/xtabPromptOptions';
 import { IXtabHistoryEditEntry, IXtabHistoryVisibleRangesEntry } from '../../../../platform/inlineEdits/common/workspaceEditTracker/nesXtabHistoryTracker';
+import { ContextKind } from '../../../../platform/languageServer/common/languageContextService';
 import { splitLines } from '../../../../util/vs/base/common/strings';
 import { StringEdit } from '../../../../util/vs/editor/common/core/edits/stringEdit';
 import { OffsetRange } from '../../../../util/vs/editor/common/core/ranges/offsetRange';
 import { StringText } from '../../../../util/vs/editor/common/core/text/abstractText';
+import { Uri } from '../../../../vscodeTypes';
 import { LineRange0Based } from '../../common/lineRange';
-import { appendNeighborFileSnippets, buildCodeSnippetsUsingPagedClipping, computeFocalPageCost, historyEntriesToCodeSnippet, selectFocalRangesWithinSpanCap } from '../../common/recentFilesForPrompt';
+import { appendLanguageContextSnippets, appendNeighborFileSnippets, buildCodeSnippetsUsingPagedClipping, computeFocalPageCost, historyEntriesToCodeSnippet, selectFocalRangesWithinSpanCap } from '../../common/recentFilesForPrompt';
 import { INeighborFileSnippet } from '../../common/similarFilesContextService';
 
 function nLines(n: number): StringText {
@@ -825,6 +828,39 @@ suite('historyEntriesToCodeSnippet', () => {
 			new OffsetRange(0, 2),  // newerEntry's "XX"
 			new OffsetRange(2, 2),  // olderEntry's deletion point, shifted
 		]);
+	});
+});
+
+suite('appendLanguageContextSnippets', () => {
+
+	test('does not add line numbers without a source range', () => {
+		const languageContext: LanguageContextResponse = {
+			start: 0,
+			end: 0,
+			items: [{
+				context: {
+					kind: ContextKind.Snippet,
+					priority: 1,
+					uri: Uri.parse('file:///src/context.ts'),
+					value: 'first line\nsecond line',
+				},
+				timeStamp: 0,
+				onTimeout: false,
+			}],
+		};
+		const snippets: string[] = [];
+
+		appendLanguageContextSnippets(languageContext, snippets, 100, computeTokens);
+
+		expect(snippets).toMatchInlineSnapshot(`
+			[
+			  "<|recently_viewed_code_snippet|>
+			code_snippet_file_path: /src/context.ts
+			first line
+			second line
+			<|/recently_viewed_code_snippet|>",
+			]
+		`);
 	});
 });
 
