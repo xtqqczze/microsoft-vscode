@@ -33,6 +33,7 @@ import { CodexProxyService, ICodexProxyService } from './codex/codexProxyService
 import { ByokLmProxyService, IByokLmProxyService } from './copilot/byokLmProxyService.js';
 import { ByokLmBridgeRegistry, IByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
 import { AgentHostProxyResolver, IAgentHostProxyResolver } from './agentHostProxyResolver.js';
+import { INetworkDiagnosticsService, NetworkDiagnosticsService } from './networkDiagnosticsService.js';
 import { AgentSdkDownloader, IAgentSdkDownloader, type IAgentSdkDownloadProgress } from './agentSdkDownloader.js';
 import { IAgentHostOTelService } from '../common/otel/agentHostOTelService.js';
 import { AgentHostOTelService } from './otel/agentHostOTelService.js';
@@ -200,6 +201,9 @@ async function startAgentHost(): Promise<void> {
 		const agentHostOTelService = disposables.add(instantiationService.createInstance(AgentHostOTelService));
 		diServices.set(IAgentHostOTelService, agentHostOTelService);
 		agentService = new AgentService(logService, fileService, sessionDataService, productService, gitService, checkpointService, rootConfigResource, telemetryService, fileMonitorService, undefined);
+		const networkDiagnosticsService = instantiationService.createInstance(NetworkDiagnosticsService);
+		diServices.set(INetworkDiagnosticsService, networkDiagnosticsService);
+		agentService.setNetworkDiagnosticsService(networkDiagnosticsService);
 		diServices.set(IAgentService, agentService);
 		const pluginManager = new AgentPluginManager(URI.file(environmentService.userDataPath), fileService, logService);
 		diServices.set(IAgentPluginManager, pluginManager);

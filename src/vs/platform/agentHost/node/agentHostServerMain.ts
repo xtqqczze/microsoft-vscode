@@ -37,6 +37,7 @@ import { registerAgentHostNetworkServices } from './agentHostBootstrap.js';
 import { BANG_COMMAND_PREFIX } from './agentHostBangCommand.js';
 import { CopilotAgent } from './copilot/copilotAgent.js';
 import { AgentHostProxyResolver, IAgentHostProxyResolver } from './agentHostProxyResolver.js';
+import { INetworkDiagnosticsService, NetworkDiagnosticsService } from './networkDiagnosticsService.js';
 import { IByokLmBridgeRegistry, NullByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
 import { IByokLmProxyService, NullByokLmProxyService } from './copilot/byokLmProxyService.js';
 import { CopilotBranchNameGenerator, ICopilotBranchNameGenerator } from './copilot/copilotBranchNameGenerator.js';
@@ -297,7 +298,11 @@ async function main(): Promise<void> {
 		// to satisfy CopilotAgent / CopilotSessionLauncher DI.
 		diServices.set(IByokLmBridgeRegistry, new NullByokLmBridgeRegistry());
 		diServices.set(IByokLmProxyService, new NullByokLmProxyService());
-		diServices.set(IAgentHostProxyResolver, instantiationService.createInstance(AgentHostProxyResolver));
+		const proxyResolver = instantiationService.createInstance(AgentHostProxyResolver);
+		diServices.set(IAgentHostProxyResolver, proxyResolver);
+		const networkDiagnosticsService = instantiationService.createInstance(NetworkDiagnosticsService);
+		diServices.set(INetworkDiagnosticsService, networkDiagnosticsService);
+		agentService.setNetworkDiagnosticsService(networkDiagnosticsService);
 		const copilotAgent = disposables.add(instantiationService.createInstance(CopilotAgent));
 		agentService.registerProvider(copilotAgent);
 		log('CopilotAgent registered');
