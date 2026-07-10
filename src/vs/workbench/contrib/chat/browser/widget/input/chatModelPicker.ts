@@ -76,6 +76,10 @@ export function getControlModelsForEntitlement(manifest: IModelsControlManifest,
 	return isProUser(entitlement) && entitlement !== ChatEntitlement.EDU ? manifest.paid : manifest.free;
 }
 
+export function getModelPickerIcon(model: ILanguageModelChatMetadataAndIdentifier, useGenericIcon = false): ThemeIcon {
+	return model.metadata.statusIcon ?? getModelProviderIcon(model, useGenericIcon);
+}
+
 /**
  * Section identifiers for collapsible groups in the model picker.
  */
@@ -1521,7 +1525,7 @@ export class ModelPickerWidget extends Disposable {
 			return;
 		}
 
-		const { name, statusIcon } = this._selectedModel?.metadata || {};
+		const { name } = this._selectedModel?.metadata || {};
 
 		// Untrusted workspace: present a normal "Models" placeholder (no badge)
 		// rather than a dead-end label; the hover and dropdown carry the Restricted
@@ -1548,13 +1552,10 @@ export class ModelPickerWidget extends Disposable {
 
 		// --- Name section ---
 		const nameChildren: (HTMLElement | string)[] = [];
-		const modelIcon = this._selectedModel ? getModelProviderIcon(this._selectedModel, this._delegate.useGenericModelIcon?.()) : undefined;
+		const modelIcon = this._selectedModel ? getModelPickerIcon(this._selectedModel, this._delegate.useGenericModelIcon?.()) : undefined;
 		const compact = this._compact?.get() ?? false;
 		if (modelIcon && !noModelsAvailable) {
 			nameChildren.push(renderIcon(modelIcon));
-		}
-		if (statusIcon && !noModelsAvailable) {
-			nameChildren.push(renderIcon(statusIcon));
 		}
 		const modelLabel = unavailable
 			? localize('chat.modelPicker.modelsLabel', "Models")
