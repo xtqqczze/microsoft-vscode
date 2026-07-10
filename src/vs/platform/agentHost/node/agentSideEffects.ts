@@ -241,6 +241,25 @@ export class AgentSideEffects extends Disposable {
 		}
 
 		const customizations = await agent.getSessionCustomizations(URI.parse(session));
+
+		// Skip the dispatch when the resolved customizations match what the
+		// session state already holds. A single edit under a shared `~/.claude`
+		// tree fans out to every open session (and, via the agent-level
+		// `onDidCustomizationsChange`, is republished once per session), so
+		// without this guard a single change emitted O(N^2) identical
+		// `SessionCustomizationsChanged` envelopes. Comparing against the
+		// authoritative session state (rather than a side cache) keeps this
+		// correct across idle-eviction + restore: a restored session's state
+		// starts without customizations, so the first successful refresh always
+		// dispatches even if the resolved set matches the prior incarnation.
+		// It also needs no cleanup on session teardown. `undefined` (never
+		// published) never equals a resolved array, so the initial publish
+		// always goes through.
+		const current = this._stateManager.getSessionState(session)?.customizations;
+		if (current && equals(current, customizations)) {
+			return;
+		}
+
 		this._stateManager.dispatchServerAction(session, {
 			type: ActionType.SessionCustomizationsChanged,
 			customizations: [...customizations],

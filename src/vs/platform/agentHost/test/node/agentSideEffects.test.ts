@@ -5,6 +5,7 @@
 
 import assert from 'assert';
 import { VSBuffer } from '../../../../base/common/buffer.js';
+import { timeout } from '../../../../base/common/async.js';
 import { Event } from '../../../../base/common/event.js';
 import { DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../base/common/network.js';
@@ -1099,6 +1100,79 @@ suite('AgentSideEffects', () => {
 				action: { type: ActionType.ChatResponsePart, turnId: 'turn-1', part: { kind: ResponsePartKind.Markdown, id: 'msg-2', content: 'after' } },
 			});
 			assert.strictEqual(envelopes.filter(e => e.action.type === ActionType.ChatResponsePart).length, 1);
+		});
+
+		test('customizations change publishes once, then dedupes identical re-fetches', async () => {
+			setupSession();
+
+			// Return a freshly-built array of freshly-built objects on every
+			// fetch (matching real providers, which re-scan disk each time) so
+			// the dedup is proven to rely on structural equality, not reference
+			// identity.
+			const makeCustomizations = (): Customization[] => [
+				{ type: CustomizationType.Plugin, id: customizationId('file:///plugin-a'), uri: 'file:///plugin-a', name: 'Plugin A', enabled: true, load: { kind: CustomizationLoadStatus.Loaded } },
+			];
+			let fetchCalls = 0;
+			agent.getSessionCustomizations = async () => { fetchCalls++; return makeCustomizations(); };
+
+			const changed: ActionEnvelope[] = [];
+			disposables.add(stateManager.onDidEmitEnvelope(e => {
+				if (e.action.type === ActionType.SessionCustomizationsChanged) {
+					changed.push(e);
+				}
+			}));
+			disposables.add(sideEffects.registerProgressListener(agent));
+
+			// First change: fetch + publish.
+			agent.fireCustomizationsChange();
+			await waitForState(stateManager, () => changed.length >= 1 || undefined);
+			assert.strictEqual(changed.length, 1);
+
+			// Subsequent changes that resolve to structurally-equal customizations
+			// (e.g. the O(N^2) fan-out from a shared `~/.claude` edit) must not
+			// re-publish, even though each fetch returns a brand-new array.
+			agent.fireCustomizationsChange();
+			agent.fireCustomizationsChange();
+			const deadline = Date.now() + 5000;
+			while (fetchCalls < 3 && Date.now() < deadline) {
+				await timeout(5);
+			}
+			assert.strictEqual(changed.length, 1, 'identical customizations must not re-publish');
+			assert.ok(fetchCalls >= 3, 'each change still re-fetches to compare');
+		});
+
+		test('re-publishes after session eviction + restore even when customizations are unchanged', async () => {
+			setupSession();
+
+			const makeCustomizations = (): Customization[] => [
+				{ type: CustomizationType.Plugin, id: customizationId('file:///plugin-a'), uri: 'file:///plugin-a', name: 'Plugin A', enabled: true, load: { kind: CustomizationLoadStatus.Loaded } },
+			];
+			agent.getSessionCustomizations = async () => makeCustomizations();
+
+			const changed: ActionEnvelope[] = [];
+			disposables.add(stateManager.onDidEmitEnvelope(e => {
+				if (e.action.type === ActionType.SessionCustomizationsChanged) {
+					changed.push(e);
+				}
+			}));
+			disposables.add(sideEffects.registerProgressListener(agent));
+
+			// Initial publish populates the session state's customizations.
+			agent.fireCustomizationsChange();
+			await waitForState(stateManager, () => changed.length >= 1 || undefined);
+			assert.strictEqual(changed.length, 1);
+
+			// Idle-evict then restore the same session URI: the restored state
+			// starts without customizations. Because dedup compares against the
+			// authoritative session state (not a stale side cache), the next
+			// refresh must publish again even though the resolved set is
+			// structurally identical to the prior incarnation's.
+			stateManager.removeSession(sessionUri.toString());
+			setupSession();
+
+			agent.fireCustomizationsChange();
+			await waitForState(stateManager, () => changed.length >= 2 || undefined);
+			assert.strictEqual(changed.length, 2, 'restored session must receive its customizations');
 		});
 	});
 
