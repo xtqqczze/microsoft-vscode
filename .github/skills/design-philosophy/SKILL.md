@@ -414,7 +414,7 @@ the fix lands everywhere, not just here. The number is a symptom.
 | "font-weight 500 here" | "**500 is off the ramp** - snap to `semiBold` (600)" | 6 · Sameness |
 | "shrink this icon a touch" | "this icon should be the **compact (12px) size + `*Compact` glyph**" | 4 · One thing leads |
 | "this icon is 14px" | "codicons are **16 or 12 only** - pick base or compact" | 6 · Sameness |
-| "this border is too thick" | "borders are **one stroke (1px)** - this should/shouldn't have one" | 1 · Quiet at rest |
+| "this ordinary border is too thick" | "standard borders are **one stroke (1px)** - this should/shouldn't have one; preserve thicker focus/semantic strokes" | 1 · Quiet at rest |
 | "change this grey hex" | "this is the **wrong theme token** / it **vanishes in light/HC**" | 6 · Sameness |
 | "the command center has a box around it" | "chrome should be **quiet at rest, reveal on hover**" | 1 · Quiet at rest |
 | "the focus outline shows when I click" | "the ring is **keyboard-focus only** (`:focus-visible`)" | 1 · Quiet at rest |
