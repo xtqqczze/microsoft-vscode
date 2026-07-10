@@ -2948,12 +2948,9 @@ export class CopilotAgentSession extends Disposable {
 			if (e.data.mcpToolName) {
 				meta.mcpToolName = e.data.mcpToolName;
 			}
-			// TODO(sdk-gap): the Copilot SDK doesn't yet surface MCP App
-			// `_meta.ui.resourceUri` on `tool.execution_start`; we attach
-			// it on `tool.execution_complete` below so the App webview
-			// mounts on completion. Drop-in once the SDK exposes it here:
-			//   const resourceUri = e.data.toolDescription?._meta?.ui?.resourceUri;
-			//   if (resourceUri) { meta.ui = { resourceUri }; }
+			// eslint-disable-next-line local/code-no-untyped-meta-access -- Copilot SDK's own typed `_meta`, not the AHP protocol bag.
+			const resourceUri = e.data.toolDescription?._meta?.ui?.resourceUri;
+			this._setToolCallUiMeta(meta, resourceUri, e.data.mcpServerName);
 
 			// Stash the start-time meta on the tracked tool call so the
 			// `tool.execution_complete` emission below can merge any
@@ -3115,23 +3112,6 @@ export class CopilotAgentSession extends Disposable {
 				}
 			}
 
-			// eslint-disable-next-line local/code-no-untyped-meta-access -- Copilot SDK's own typed `_meta`, not the AHP protocol bag.
-			const resourceUri = e.data.toolDescription?._meta?.ui?.resourceUri;
-			let completeMeta: IToolCallMeta | undefined = tracked.meta;
-			if (resourceUri) {
-				const ui: Mutable<IToolCallUiMeta> = { resourceUri };
-				if (tracked.mcpServerName) {
-					const channel = this._mcpCustomizations.channelForServer(tracked.mcpServerName);
-					if (channel !== undefined) {
-						ui.channel = channel;
-					}
-				}
-				// Merge the `ui` namespace on top of whatever meta we
-				// emitted at start time (`toolKind`, `subagentDescription`,
-				// `toolArguments`, …). Reducers replace the whole `_meta`
-				// blob, so we must do the merge here.
-				completeMeta = { ...(tracked.meta ?? {}), ui };
-			}
 			this._emitAction({
 				type: ActionType.ChatToolCallComplete,
 				turnId: this._turnId,
@@ -3142,7 +3122,7 @@ export class CopilotAgentSession extends Disposable {
 					content: content.length > 0 ? content : undefined,
 					error: e.data.error,
 				},
-				_meta: completeMeta ? toToolCallMeta(completeMeta) : undefined,
+				_meta: tracked.meta ? toToolCallMeta(tracked.meta) : undefined,
 			}, parentToolCallId);
 		}));
 
@@ -3519,6 +3499,20 @@ export class CopilotAgentSession extends Disposable {
 		const sdkServers = servers
 			.map(s => this._toSdkMcpServer(s.name, s.status, s.error));
 		this._mcpCustomizations.applyAll(sdkServers);
+	}
+
+	private _setToolCallUiMeta(meta: Mutable<IToolCallMeta>, resourceUri: string | undefined, mcpServerName: string | undefined): void {
+		if (!resourceUri) {
+			return;
+		}
+		const ui: Mutable<IToolCallUiMeta> = { resourceUri };
+		if (mcpServerName) {
+			const channel = this._mcpCustomizations.channelForServer(mcpServerName);
+			if (channel !== undefined) {
+				ui.channel = channel;
+			}
+		}
+		meta.ui = ui;
 	}
 
 	/**
