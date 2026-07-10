@@ -864,6 +864,27 @@ suite('stateToProgressAdapter', () => {
 			});
 		});
 
+		test('does not set MCP App toolSpecificData for a streaming MCP tool call', () => {
+			// A `Streaming` call is created in the UI's `Executing` state before
+			// it may transition to confirmation, so the App must not mount yet.
+			const invocation = toolCallStateToInvocation({
+				toolCallId: 'tc-1',
+				toolName: 'test_tool',
+				displayName: 'Test Tool',
+				invocationMessage: 'Running test tool...',
+				status: ToolCallStatus.Streaming,
+				contributor: { kind: ToolCallContributorKind.MCP, customizationId: 'docs-customization' },
+				_meta: {
+					ui: {
+						resourceUri: 'ui://docs/app',
+						channel: 'mcp://copilot/test-session-1/docs',
+					},
+				},
+			});
+
+			assert.strictEqual(invocation.toolSpecificData, undefined);
+		});
+
 		test('synthesizes subagent chatResource from the tool call id when no discovery content block is present', () => {
 			// A background subagent's `subagent_started` can arrive after its
 			// spawning tool call has already completed, so the running-only

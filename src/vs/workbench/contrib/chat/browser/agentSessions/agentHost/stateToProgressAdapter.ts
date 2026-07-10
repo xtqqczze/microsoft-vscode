@@ -1832,7 +1832,7 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 		};
 	} else if (getToolKind(tc) === 'search') {
 		invocation.toolSpecificData = { kind: 'search' };
-	} else {
+	} else if (tc.status !== ToolCallStatus.Streaming) {
 		invocation.toolSpecificData = buildMcpAppToolInputData(tc, sessionResource);
 	}
 
