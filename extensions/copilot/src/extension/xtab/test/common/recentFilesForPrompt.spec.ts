@@ -835,7 +835,7 @@ suite('appendNeighborFileSnippets', () => {
 		return { uri, relativePath: uri, snippet, lineRange: new LineRange0Based(startLine, startLine + lineCount), score };
 	}
 
-	test('appends snippets formatted like recent files', () => {
+	test('uses the original source line range when adding line numbers', () => {
 		const snippets: string[] = [];
 		const docsInPrompt = new Set<DocumentId>();
 		appendNeighborFileSnippets(
@@ -856,6 +856,27 @@ suite('appendNeighborFileSnippets', () => {
 			]
 		`);
 		expect(docsInPrompt.has(DocumentId.create('file:///src/n1.ts'))).toBe(true);
+	});
+
+	test('uses the original source line range without spacing after line numbers', () => {
+		const snippets: string[] = [];
+		appendNeighborFileSnippets(
+			[makeNeighbor('file:///src/n1.ts', 'a\nb', 12)],
+			snippets,
+			new Set<DocumentId>(),
+			/*tokenBudget*/ 100,
+			computeTokens,
+			IncludeLineNumbersOption.WithoutSpace,
+		);
+		expect(snippets).toMatchInlineSnapshot(`
+			[
+			  "<|recently_viewed_code_snippet|>
+			code_snippet_file_path: /src/n1.ts
+			12|a
+			13|b
+			<|/recently_viewed_code_snippet|>",
+			]
+		`);
 	});
 
 	test('skips oversize snippets but keeps trying smaller ones', () => {
