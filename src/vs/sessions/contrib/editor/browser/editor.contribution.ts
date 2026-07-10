@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/editorTabs.css';
+import './diffEditor.sessions.contribution.js';
 import { NewBrowserTabAction, NewChangesTabAction, NewFileTabAction, NewSearchTabAction } from './addTabActions.js';
 import { localize2 } from '../../../../nls.js';
 import { Codicon } from '../../../../base/common/codicons.js';
