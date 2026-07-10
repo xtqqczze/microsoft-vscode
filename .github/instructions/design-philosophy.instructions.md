@@ -6,8 +6,8 @@ applyTo: "src/vs/**/browser/**/*.{ts,css}"
 # Design philosophy
 
 When you touch a visual surface, reason about it in **design terms, not pixels**.
-Every size, radius, weight, and color is a **named token with a role** - a raw
-`px`/hex value is only ever a stand-in for the token it lands on.
+Design-system spacing, radii, type roles, and colors use named tokens/ramps where
+available. Raw literals remain valid for structural measurements or when no token exists.
 
 Work in three layers - name the **feeling**, find the **principle** it breaks,
 then reach for the **move** that restores it:
