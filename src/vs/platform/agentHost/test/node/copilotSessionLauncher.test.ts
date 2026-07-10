@@ -183,6 +183,26 @@ suite('resolveByokSessionConfig', () => {
 		assert.deepStrictEqual(config.models, [{ id: 'claude', provider: 'acme' }]);
 	});
 
+	test('resume falls back to a live enumeration when the warm cache is empty', async () => {
+		const registry = new ByokLmBridgeRegistry();
+		let models: IByokLmModelInfo[] = [];
+		const registration = registry.register('client-1', connectionOf(async () => models));
+		const proxy = countingProxy();
+
+		// Warm the cache while the window reports no models yet: serving, but empty.
+		await registry.listModels();
+		assert.notStrictEqual(registry.getServingConnection(), undefined);
+		assert.deepStrictEqual([...registry.getModels()], []);
+
+		// The window now has models; resume must re-enumerate to surface them
+		// rather than trust the stale empty cache.
+		models = [{ vendor: 'acme', id: 'claude' }];
+		const config = await resolveByokSessionConfig(sessionId, registry, proxy.startProxy, log, /*preferCache*/ true);
+		registration.dispose();
+
+		assert.deepStrictEqual(config.models, [{ id: 'claude', provider: 'acme' }]);
+	});
+
 	test('create enumerates live even when the cache is warm', async () => {
 		const registry = new ByokLmBridgeRegistry();
 		let calls = 0;

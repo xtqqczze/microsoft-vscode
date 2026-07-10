@@ -301,10 +301,9 @@ export function getCopilotContextTier(model: ModelSelection | undefined, longCon
  * unit-testable without instantiating the launcher; the launcher passes a
  * `startProxy` thunk that memoizes the single shared proxy handle.
  *
- * `preferCache` (resume) reads the registry's warm cache to avoid a renderer
- * round-trip on the critical path, but only once a window has answered
- * (`getServingConnection()`); a still-cold cache falls back to a live
- * enumeration. `create` always enumerates live.
+ * `preferCache` (resume) reads the registry's warm cache to skip a renderer
+ * round-trip, but only when that cache is already populated; an empty cache
+ * falls back to a live enumeration. `create` always enumerates live.
  */
 export async function resolveByokSessionConfig(
 	sessionId: string,
@@ -321,11 +320,10 @@ export async function resolveByokSessionConfig(
 	// connection by the proxy (`getServingConnection`).
 	let byokModels: IByokLmModelInfo[];
 	try {
-		if (preferCache && bridgeRegistry.getServingConnection()) {
-			// Warm cache: read synchronously instead of a renderer round-trip.
-			byokModels = [...bridgeRegistry.getModels()];
+		const cached = preferCache ? bridgeRegistry.getModels() : undefined;
+		if (cached && cached.length > 0) {
+			byokModels = [...cached];
 		} else {
-			// Create, or a cold cache on resume: enumerate live.
 			byokModels = await bridgeRegistry.listModels();
 		}
 	} catch (err) {
