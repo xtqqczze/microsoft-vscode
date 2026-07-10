@@ -272,7 +272,7 @@ ramp where one exists. Raw literals remain valid for structural measurements.
   expressing and reason about *that* - not the literal.
 - **Serves:** *Sameness signals sameness* (6).
 
-> A `12px` corner isn't "12px." It's an **Outer surface radius** that someone
+> An `8px` corner isn't "8px." It's an **Outer surface radius** that someone
 > typed as a literal. Name the role and the fix follows.
 
 <a id="elevation-tiers"></a>
