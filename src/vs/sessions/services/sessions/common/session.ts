@@ -267,6 +267,9 @@ export interface ISessionChangeset {
 	readonly originalCheckpointRef: IObservable<string | undefined>;
 	/** Reference to the modified checkpoint for this changeset. */
 	readonly modifiedCheckpointRef: IObservable<string | undefined>;
+	/** The capabilities of this changeset. */
+	readonly capabilities?: ISessionChangesetCapabilities;
+
 	/**
 	 * Invoke an operation declared in {@link operations}. `target` must be
 	 * provided for resource-scoped operations and omitted for changeset-
@@ -274,6 +277,11 @@ export interface ISessionChangeset {
 	 * the corresponding {@link ISessionChangesetOperation.scopes}.
 	 */
 	invokeOperation(operationId: string, target?: ISessionChangesetOperationTarget): Promise<void>;
+
+	/**
+	 * Sets the review state for a list of resources when the changeset supports review.
+	 */
+	setReviewState?(resources: readonly URI[], reviewed: boolean): void;
 }
 
 export type ISessionChangesetOperationTarget =
@@ -324,6 +332,11 @@ export interface ISessionChangesetOperation {
 	 * with the target resource's basename when applicable.
 	 */
 	readonly confirmation?: string | IMarkdownString;
+}
+
+export interface ISessionChangesetCapabilities {
+	/** Whether the changeset supports review workflow. */
+	readonly review?: boolean;
 }
 
 /**
