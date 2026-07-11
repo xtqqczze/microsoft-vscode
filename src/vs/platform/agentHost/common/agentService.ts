@@ -701,6 +701,9 @@ export type AgentProvider = string;
 /** Well-known agent provider id for the Claude agent-host backend. */
 export const CLAUDE_AGENT_PROVIDER_ID = 'claude' as const;
 
+/** Well-known agent provider id for the Codex agent-host backend. */
+export const CODEX_AGENT_PROVIDER_ID = 'codex' as const;
+
 /**
  * Static capability facts an agent backend advertises about itself. Each flag
  * is opt-in (absent means unsupported) so single-chat agents (e.g. Codex) can omit
