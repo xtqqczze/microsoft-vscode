@@ -83,6 +83,7 @@ export class AgentHostProxyResolver implements IAgentHostProxyResolver {
 			const config = <T>(key: string): T | undefined => this._configurationService.getValue<T>(key);
 			const systemCertificatesV2 = () => config<boolean>('http.experimental.systemCertificatesV2') ?? false;
 			const systemCertificates = () => !!config<boolean>('http.systemCertificates');
+			// TODO @chrmarti: Add lookupProxyAuthorization.
 			const params: ProxyAgentParams = {
 				// The host proxy resolution runs in VS Code: reverse-call a connected
 				// renderer, whose IRequestService.resolveProxy hits the Electron

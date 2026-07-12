@@ -16,6 +16,11 @@ import { IRequestService } from '../../request/common/request.js';
 import { AgentHostProxyResolver, IAgentHostProxyResolver } from './agentHostProxyResolver.js';
 import { AgentHostRequestService } from './agentHostRequestService.js';
 
+export interface IAgentHostNetworkServices {
+	readonly proxyResolver: IAgentHostProxyResolver;
+	readonly requestService: IRequestService;
+}
+
 /**
  * Register `IPolicyService`, `IConfigurationService`, `IAgentHostProxyResolver`,
  * and `IRequestService` into the agent host's DI container — the services that
@@ -42,7 +47,7 @@ export async function registerAgentHostNetworkServices(
 	environmentService: INativeEnvironmentService,
 	logService: ILogService,
 	disposables: DisposableStore,
-): Promise<IAgentHostProxyResolver> {
+): Promise<IAgentHostNetworkServices> {
 	const policyService = new NullPolicyService();
 	diServices.set(IPolicyService, policyService);
 	const settingsResource = joinPath(environmentService.userRoamingDataHome, 'settings.json');
@@ -51,6 +56,7 @@ export async function registerAgentHostNetworkServices(
 	diServices.set(IConfigurationService, configurationService);
 	const proxyResolver = new AgentHostProxyResolver(configurationService, logService);
 	diServices.set(IAgentHostProxyResolver, proxyResolver);
-	diServices.set(IRequestService, disposables.add(new AgentHostRequestService(configurationService, environmentService, logService, proxyResolver)));
-	return proxyResolver;
+	const requestService = disposables.add(new AgentHostRequestService(configurationService, environmentService, logService, proxyResolver));
+	diServices.set(IRequestService, requestService);
+	return { proxyResolver, requestService };
 }
