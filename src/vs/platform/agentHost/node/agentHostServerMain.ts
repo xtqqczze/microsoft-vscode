@@ -252,6 +252,9 @@ async function main(): Promise<void> {
 	const agentService = new AgentService(logService, fileService, sessionDataService, productService, gitService, checkpointService, rootConfigResource, telemetryService, fileMonitorService, undefined, fetchFn);
 	disposables.add(agentService);
 	diServices.set(IAgentService, agentService);
+	const networkDiagnosticsService = instantiationService.createInstance(NetworkDiagnosticsService);
+	diServices.set(INetworkDiagnosticsService, networkDiagnosticsService);
+	agentService.setNetworkDiagnosticsService(networkDiagnosticsService);
 
 	// Register agents
 	let sdkDownloadProgress: Event<IAgentSdkDownloadProgress> | undefined;
@@ -296,9 +299,6 @@ async function main(): Promise<void> {
 		// to satisfy CopilotAgent / CopilotSessionLauncher DI.
 		diServices.set(IByokLmBridgeRegistry, new NullByokLmBridgeRegistry());
 		diServices.set(IByokLmProxyService, new NullByokLmProxyService());
-		const networkDiagnosticsService = instantiationService.createInstance(NetworkDiagnosticsService);
-		diServices.set(INetworkDiagnosticsService, networkDiagnosticsService);
-		agentService.setNetworkDiagnosticsService(networkDiagnosticsService);
 		const copilotAgent = disposables.add(instantiationService.createInstance(CopilotAgent));
 		agentService.registerProvider(copilotAgent);
 		log('CopilotAgent registered');
