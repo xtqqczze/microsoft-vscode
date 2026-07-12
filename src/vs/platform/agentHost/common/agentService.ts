@@ -1560,6 +1560,15 @@ export interface IAgent {
 	getProtectedResources(): ProtectedResourceMetadata[];
 
 	/**
+	 * Endpoints this provider uses and recommends probing in network
+	 * diagnostics. Optional.
+	 */
+	getNetworkDiagnosticsEndpoints?(): Promise<readonly IAgentHostNetworkEndpoint[]>;
+
+	/** Authenticated account name to display in network diagnostics, when known. */
+	getNetworkDiagnosticsAccount?(): Promise<string | undefined>;
+
+	/**
 	 * Fires when the agent's host-owned customizations change
 	 * (loading state, resolution results, etc.), so infrastructure
 	 * can republish {@link AgentInfo} and session customization state.

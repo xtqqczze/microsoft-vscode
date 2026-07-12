@@ -215,6 +215,8 @@ class TestCopilotApiService implements ICopilotApiService {
 	readonly utilityCalls: { token: string; request: ICopilotUtilityChatCompletionRequest; options?: ICopilotApiServiceRequestOptions }[] = [];
 	response = 'generated-branch-name';
 	error: Error | undefined;
+	apiEndpoint: string | undefined;
+	userLogin: string | undefined;
 
 	messages(_githubToken: string, _request: Anthropic.MessageCreateParamsStreaming, _options?: ICopilotApiServiceRequestOptions): AsyncGenerator<Anthropic.MessageStreamEvent>;
 	messages(_githubToken: string, _request: Anthropic.MessageCreateParamsNonStreaming, _options?: ICopilotApiServiceRequestOptions): Promise<Anthropic.Message>;
@@ -225,7 +227,8 @@ class TestCopilotApiService implements ICopilotApiService {
 	async models(): Promise<CCAModel[]> { return []; }
 	async responses(): Promise<Response> { throw new Error('not used'); }
 	async resolveRestrictedTelemetryContext() { return { restrictedTelemetryEnabled: false, trackingId: undefined, telemetryEndpoint: undefined }; }
-	async resolveApiEndpoint() { return undefined; }
+	async resolveApiEndpoint() { return this.apiEndpoint; }
+	async resolveUserLogin() { return this.userLogin; }
 	async utilityChatCompletion(githubToken: string, request: ICopilotUtilityChatCompletionRequest, options?: ICopilotApiServiceRequestOptions): Promise<string> {
 		this.utilityCalls.push({ token: githubToken, request, options });
 		if (this.error) {
@@ -553,7 +556,7 @@ class TestableCopilotAgent extends CopilotAgent {
 	}
 }
 
-function createTestAgentContext(disposables: Pick<DisposableStore, 'add'>, options?: { sessionDataService?: ISessionDataService; copilotClient?: ITestCopilotClient; useRealResumePath?: boolean; gitService?: TestAgentHostGitService; environmentServiceRegistration?: 'native' | 'none'; pluginManager?: IAgentPluginManager; fileService?: FileService; copilotApiService?: ICopilotApiService; userHome?: URI }): { agent: CopilotAgent; instantiationService: IInstantiationService; configurationService: IAgentConfigurationService; fileService: FileService } {
+function createTestAgentContext(disposables: Pick<DisposableStore, 'add'>, options?: { sessionDataService?: ISessionDataService; copilotClient?: ITestCopilotClient; useRealResumePath?: boolean; gitService?: TestAgentHostGitService; environmentServiceRegistration?: 'native' | 'none'; pluginManager?: IAgentPluginManager; fileService?: FileService; copilotApiService?: ICopilotApiService; gitHubEndpointService?: IAgentHostGitHubEndpointService; userHome?: URI }): { agent: CopilotAgent; instantiationService: IInstantiationService; configurationService: IAgentConfigurationService; fileService: FileService } {
 	const services = new ServiceCollection();
 	const logService = new NullLogService();
 	const fileService = options?.fileService ?? disposables.add(new FileService(logService));
@@ -562,7 +565,7 @@ function createTestAgentContext(disposables: Pick<DisposableStore, 'add'>, optio
 	services.set(ILogService, logService);
 	services.set(IFileService, fileService);
 	services.set(IAgentConfigurationService, configService);
-	services.set(IAgentHostGitHubEndpointService, createTestGitHubEndpointService());
+	services.set(IAgentHostGitHubEndpointService, options?.gitHubEndpointService ?? createTestGitHubEndpointService());
 	services.set(ISessionDataService, options?.sessionDataService ?? createNullSessionDataService());
 	services.set(IAgentPluginManager, options?.pluginManager ?? new TestAgentPluginManager());
 	services.set(IAgentHostGitService, options?.gitService ?? new TestAgentHostGitService());
@@ -596,7 +599,7 @@ function createTestAgentContext(disposables: Pick<DisposableStore, 'add'>, optio
 	return { agent, instantiationService, configurationService: configService, fileService };
 }
 
-function createTestAgent(disposables: Pick<DisposableStore, 'add'>, options?: { sessionDataService?: ISessionDataService; copilotClient?: ITestCopilotClient; useRealResumePath?: boolean; gitService?: TestAgentHostGitService; environmentServiceRegistration?: 'native' | 'none'; pluginManager?: IAgentPluginManager; fileService?: FileService; copilotApiService?: ICopilotApiService; userHome?: URI }): CopilotAgent {
+function createTestAgent(disposables: Pick<DisposableStore, 'add'>, options?: { sessionDataService?: ISessionDataService; copilotClient?: ITestCopilotClient; useRealResumePath?: boolean; gitService?: TestAgentHostGitService; environmentServiceRegistration?: 'native' | 'none'; pluginManager?: IAgentPluginManager; fileService?: FileService; copilotApiService?: ICopilotApiService; gitHubEndpointService?: IAgentHostGitHubEndpointService; userHome?: URI }): CopilotAgent {
 	return createTestAgentContext(disposables, options).agent;
 }
 
@@ -870,6 +873,30 @@ suite('CopilotAgent', () => {
 			await generator.generateBranchName({ sessionId: '12345678-aaaa-bbbb-cccc-123456789abc', message: '!!! ??? ...', githubToken: 'token' }),
 			'agents/12345678-aaaa-bbbb-cccc-123456789abc',
 		);
+	});
+
+	test('contributes GHE-aware GitHub and discovered CAPI diagnostics endpoints', async () => {
+		const endpointService = createTestGitHubEndpointService('https://github.example.com');
+		const copilotApiService = new TestCopilotApiService();
+		copilotApiService.apiEndpoint = 'https://copilot.example.com';
+		copilotApiService.userLogin = 'octocat';
+		const agent = createTestAgent(disposables, { copilotApiService, gitHubEndpointService: endpointService });
+		try {
+			await agent.authenticate(endpointService.getCopilotResource().resource, 'token');
+
+			assert.deepStrictEqual({
+				endpoints: await agent.getNetworkDiagnosticsEndpoints(),
+				account: await agent.getNetworkDiagnosticsAccount(),
+			}, {
+				endpoints: [
+					{ name: 'GitHub API', url: endpointService.getApiBaseUri() },
+					{ name: 'Copilot API (CAPI)', url: 'https://copilot.example.com/_ping' },
+				],
+				account: 'octocat',
+			});
+		} finally {
+			await disposeAgent(agent);
+		}
 	});
 
 	test('returns empty models and lists sessions before authentication', async () => {

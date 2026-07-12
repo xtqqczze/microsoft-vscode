@@ -11,7 +11,7 @@ import { createDecorator } from '../../instantiation/common/instantiation.js';
 import { ILogService } from '../../log/common/log.js';
 import { IProductService } from '../../product/common/productService.js';
 import { IRequestService, NO_FETCH_TELEMETRY } from '../../request/common/request.js';
-import { IAgentHostDnsResult, IAgentHostNetworkDiagnosticsInfo, IAgentHostNetworkFetchResult } from '../common/agentService.js';
+import { IAgentHostDnsResult, IAgentHostNetworkDiagnosticsInfo, IAgentHostNetworkEndpoint, IAgentHostNetworkFetchResult } from '../common/agentService.js';
 import { IAgentHostProxyResolver } from './agentHostProxyResolver.js';
 
 export const INetworkDiagnosticsService = createDecorator<INetworkDiagnosticsService>('networkDiagnosticsService');
@@ -27,7 +27,7 @@ export interface INetworkDiagnosticsService {
 	readonly _serviceBrand: undefined;
 
 	/** Host-level network context: version, OS/arch, account, proxy settings/env, and endpoints worth probing. */
-	getInfo(): Promise<IAgentHostNetworkDiagnosticsInfo>;
+	getInfo(endpoints: readonly IAgentHostNetworkEndpoint[], account?: string): Promise<IAgentHostNetworkDiagnosticsInfo>;
 
 	/** Probe connectivity from the agent host process to a single `url`. */
 	fetch(url: string): Promise<IAgentHostNetworkFetchResult>;
@@ -60,7 +60,7 @@ export class NetworkDiagnosticsService implements INetworkDiagnosticsService {
 		@ILogService private readonly _logService: ILogService,
 	) { }
 
-	async getInfo(): Promise<IAgentHostNetworkDiagnosticsInfo> {
+	async getInfo(endpoints: readonly IAgentHostNetworkEndpoint[], account?: string): Promise<IAgentHostNetworkDiagnosticsInfo> {
 		const proxyEnv: Record<string, string> = {};
 		for (const key of PROXY_ENV_KEYS) {
 			const value = process.env[key];
@@ -82,21 +82,10 @@ export class NetworkDiagnosticsService implements INetworkDiagnosticsService {
 			version: this._productService.version,
 			os: process.platform,
 			arch: process.arch,
-			// TODO@chrmarti: resolve the GitHub login. It is not carried by the Copilot
-			// token, so it needs a `GET /user` call (or plumbing from the workbench auth
-			// session) — left undefined until that source is wired.
+			account,
 			proxySettings,
 			proxyEnv,
-			// TODO@chrmarti: source these per-provider — add an optional
-			// `IAgent.getNetworkDiagnosticsEndpoints?()` and aggregate across registered
-			// providers (dedup by URL), mirroring `getProtectedResources()`. That lets
-			// CopilotAgent contribute its GHE-aware API base (via
-			// IAgentHostGitHubEndpointService) + CAPI instead of these hardcoded
-			// github.com literals (wrong under GitHub Enterprise).
-			endpoints: [
-				{ name: 'GitHub API', url: 'https://api.github.com' },
-				{ name: 'Copilot API (CAPI)', url: 'https://api.githubcopilot.com' },
-			],
+			endpoints,
 		};
 	}
 
