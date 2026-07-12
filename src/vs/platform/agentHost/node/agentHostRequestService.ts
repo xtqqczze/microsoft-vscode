@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { newWriteableBufferStream, VSBuffer, VSBufferWriteableStream } from '../../../base/common/buffer.js';
+import { timeout } from '../../../base/common/async.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
-import { CancellationError } from '../../../base/common/errors.js';
+import { CancellationError, isCancellationError } from '../../../base/common/errors.js';
 import { IDisposable } from '../../../base/common/lifecycle.js';
 import { IHeaders, IRequestContext, IRequestOptions } from '../../../base/parts/request/common/request.js';
 import { IConfigurationService } from '../../configuration/common/configuration.js';
@@ -13,6 +14,26 @@ import { INativeEnvironmentService } from '../../environment/common/environment.
 import { ILogService } from '../../log/common/log.js';
 import { RequestService } from '../../request/node/requestService.js';
 import { IAgentHostProxyResolver } from './agentHostProxyResolver.js';
+
+const TRANSIENT_ERROR_CODES = new Set([
+	'EAI_AGAIN',
+	'ECONNREFUSED',
+	'EHOSTDOWN',
+	'EHOSTUNREACH',
+	'ENETDOWN',
+	'ENETUNREACH',
+	'EPROTO',
+]);
+
+const IDEMPOTENT_HTTP_METHODS_REGEX = /^(GET|HEAD|OPTIONS)$/i;
+
+function isTransientError(error: unknown): boolean {
+	if (error instanceof Error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		return !!code && TRANSIENT_ERROR_CODES.has(code);
+	}
+	return false;
+}
 
 /**
  * Request service implemented on the agent host's `@vscode/proxy-agent`
@@ -40,6 +61,29 @@ export class AgentHostRequestService extends RequestService {
 	}
 
 	private async _request(options: IRequestOptions, token: CancellationToken): Promise<IRequestContext> {
+		const maxRetries = 3;
+		let lastError: Error | undefined;
+		const isIdempotent = IDEMPOTENT_HTTP_METHODS_REGEX.test(options.type || 'GET');
+
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			try {
+				return await this._requestAttempt(options, token);
+			} catch (error) {
+				lastError = error as Error;
+				if (isCancellationError(error)) {
+					throw error;
+				}
+				if (!isIdempotent || !isTransientError(error) || attempt === maxRetries) {
+					throw error;
+				}
+				await timeout(100 * attempt, token);
+			}
+		}
+
+		throw lastError;
+	}
+
+	private async _requestAttempt(options: IRequestOptions, token: CancellationToken): Promise<IRequestContext> {
 		if (token.isCancellationRequested) {
 			throw new CancellationError();
 		}

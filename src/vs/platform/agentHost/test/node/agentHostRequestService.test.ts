@@ -105,4 +105,48 @@ suite('AgentHostRequestService', () => {
 
 		await assert.rejects(request, isCancellationError);
 	});
+
+	test('retries idempotent requests on transient errors', async () => {
+		const proxyResolver = new TestProxyResolver();
+		let attempts = 0;
+		proxyResolver.fetchImpl = async () => {
+			attempts++;
+			if (attempts < 3) {
+				const error = new Error('Connection refused') as NodeJS.ErrnoException;
+				error.code = 'ECONNREFUSED';
+				throw error;
+			}
+			return new Response('ok');
+		};
+		const service = createService(proxyResolver);
+
+		const context = await service.request({
+			url: 'https://example.com/retry',
+			type: 'GET',
+			callSite: 'agentHostRequestService.test.retry',
+		}, CancellationToken.None);
+		const body = (await streamToBuffer(context.stream)).toString();
+
+		assert.deepStrictEqual({ attempts, body }, { attempts: 3, body: 'ok' });
+	});
+
+	test('does not retry non-idempotent requests', async () => {
+		const proxyResolver = new TestProxyResolver();
+		let attempts = 0;
+		proxyResolver.fetchImpl = async () => {
+			attempts++;
+			const error = new Error('Connection refused') as NodeJS.ErrnoException;
+			error.code = 'ECONNREFUSED';
+			throw error;
+		};
+		const service = createService(proxyResolver);
+
+		await assert.rejects(() => service.request({
+			url: 'https://example.com/no-retry',
+			type: 'POST',
+			callSite: 'agentHostRequestService.test.noRetry',
+		}, CancellationToken.None), /Connection refused/);
+
+		assert.strictEqual(attempts, 1);
+	});
 });
