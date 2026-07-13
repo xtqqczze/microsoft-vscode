@@ -27,7 +27,7 @@ import { IDiffComputeService } from '../../common/diffComputeService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import { ActionType, type ChatDeltaAction, type ChatErrorAction, type ChatInputRequestedAction, type ChatResponsePartAction, type ChatToolCallCompleteAction, type ChatToolCallReadyAction, type ChatToolCallStartAction, type ChatTurnCompleteAction, type ChatUsageAction, type SessionAction } from '../../common/state/sessionActions.js';
 import { MessageAttachmentKind, MessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, buildDefaultChatUri, readUsageInfoMeta, type ToolDefinition, type ToolResultContent, type ToolResultFileEditContent, type UsageInfoMeta } from '../../common/state/sessionState.js';
-import { McpAuthRequiredReason, McpServerStatus } from '../../common/state/protocol/channels-session/state.js';
+import { CustomizationType, McpAuthRequiredReason, McpServerStatus } from '../../common/state/protocol/channels-session/state.js';
 import { CopilotAgentSession } from '../../node/copilot/copilotAgentSession.js';
 import { ActiveClientToolSet } from '../../node/activeClientState.js';
 import { type CopilotSessionLaunchPlan, type IActiveClientSnapshot, type ICopilotSessionLauncher, type ICopilotSessionRuntime } from '../../node/copilot/copilotSessionLauncher.js';
@@ -274,6 +274,7 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 	serverToolHost?: IAgentServerToolHost;
 	/** Platform used to compute the SDK sandbox policy. Defaults to `'linux'` so sandbox tests are deterministic. */
 	platform?: NodeJS.Platform;
+	githubToken?: string;
 }): Promise<{
 	session: CopilotAgentSession;
 	runtime: ICopilotSessionRuntime;
@@ -323,7 +324,7 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 		resolvedAgentName: undefined,
 		snapshot: options?.clientSnapshot ?? { tools: [], plugins: [], mcpServers: {} },
 		shellManager: undefined,
-		githubToken: undefined,
+		githubToken: options?.githubToken,
 		model: undefined,
 	};
 	let launchedRuntime: ICopilotSessionRuntime | undefined;
@@ -4753,21 +4754,50 @@ suite('CopilotAgentSession', () => {
 
 	suite('MCP server inventory', () => {
 
+		test('initial GitHub MCP auth reuses the existing token without requesting the advertised scope catalog', async () => {
+			const { runtime, signals } = await createAgentSession(disposables, { githubToken: 'existing-token' });
+
+			const result = await runtime.handleMcpAuthRequest({
+				requestId: 'faa18cc1-fe2d-492a-8350-9faa4bbb5389',
+				serverName: 'github',
+				serverUrl: 'https://api.githubcopilot.com/mcp/',
+				reason: 'initial',
+				resourceMetadata: JSON.stringify({
+					resource: 'https://api.githubcopilot.com/mcp/',
+					resource_name: 'GitHub MCP Server',
+					authorization_servers: ['https://github.com/login/oauth'],
+					scopes_supported: ['repo', 'read:org', 'read:user', 'user:email', 'read:packages', 'write:packages', 'read:project', 'project', 'gist', 'notifications', 'workflow', 'codespace'],
+				}),
+				wwwAuthenticateParams: {
+					resourceMetadataUrl: 'https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/',
+					error: 'invalid_request',
+				},
+			}, { sessionId: 'test-session-1' });
+
+			assert.deepStrictEqual({
+				result,
+				customizationUpdates: getActions(signals).filter(action => action.type === ActionType.SessionCustomizationUpdated),
+			}, {
+				result: { kind: 'token', accessToken: 'existing-token' },
+				customizationUpdates: [],
+			});
+		});
+
 		test('MCP auth request publishes authRequired state and resolves with authenticate token', async () => {
-			const { session, runtime, waitForSignal } = await createAgentSession(disposables);
+			const { session, runtime, waitForSignal } = await createAgentSession(disposables, { githubToken: 'existing-token' });
 
 			const authPromise = runtime.handleMcpAuthRequest({
 				requestId: 'auth-1',
 				serverName: 'github',
-				serverUrl: 'https://mcp.example.com',
+				serverUrl: 'https://api.githubcopilot.com/mcp',
 				reason: 'upscope',
 				resourceMetadata: JSON.stringify({
-					resource: 'https://mcp.example.com',
-					resource_name: 'Example MCP',
-					authorization_servers: ['https://auth.example.com'],
-					scopes_supported: ['repo'],
+					resource: 'https://api.githubcopilot.com/mcp',
+					resource_name: 'GitHub MCP Server',
+					authorization_servers: ['https://github.com/login/oauth'],
+					scopes_supported: ['repo', 'notifications'],
 				}),
-				wwwAuthenticateParams: { scope: 'repo issues:write', error: 'insufficient_scope' },
+				wwwAuthenticateParams: { scope: 'repo notifications', error: 'insufficient_scope' },
 			}, { sessionId: 'test-session-1' });
 
 			const signal = await waitForSignal(s => isAction(s, ActionType.SessionCustomizationUpdated)) as IAgentActionSignal;
@@ -4783,20 +4813,56 @@ suite('CopilotAgentSession', () => {
 					kind: McpServerStatus.AuthRequired,
 					reason: McpAuthRequiredReason.InsufficientScope,
 					resource: {
-						resource: 'https://mcp.example.com',
-						resource_name: 'Example MCP',
-						authorization_servers: ['https://auth.example.com'],
-						scopes_supported: ['repo'],
+						resource: 'https://api.githubcopilot.com/mcp',
+						resource_name: 'GitHub MCP Server',
+						authorization_servers: ['https://github.com/login/oauth'],
+						scopes_supported: ['repo', 'notifications'],
 					},
-					requiredScopes: ['repo', 'issues:write'],
+					requiredScopes: ['repo', 'notifications'],
 					description: 'insufficient_scope',
 				},
 				channel: undefined,
 				mcpApp: { capabilities: { serverTools: { listChanged: true }, serverResources: {}, sampling: {} } },
 			});
 
-			assert.strictEqual(await session.resolveMcpAuthentication({ resource: 'https://mcp.example.com', scopes: ['repo', 'issues:write'], token: 'token-1' }), true);
+			assert.strictEqual(await session.resolveMcpAuthentication({ resource: 'https://api.githubcopilot.com/mcp', scopes: ['repo', 'notifications'], token: 'token-1' }), true);
 			assert.deepStrictEqual(await authPromise, { kind: 'token', accessToken: 'token-1' });
+		});
+
+		test('initial auth for a server impersonating the GitHub MCP name uses the normal auth flow', async () => {
+			const { session, runtime, waitForSignal } = await createAgentSession(disposables, { githubToken: 'existing-token' });
+
+			const authPromise = runtime.handleMcpAuthRequest({
+				requestId: 'auth-lookalike',
+				serverName: 'github',
+				serverUrl: 'https://mcp.example.com',
+				reason: 'initial',
+				resourceMetadata: JSON.stringify({
+					resource: 'https://mcp.example.com',
+					resource_name: 'Lookalike MCP',
+					authorization_servers: ['https://github.com/login/oauth'],
+					scopes_supported: ['repo'],
+				}),
+			}, { sessionId: 'test-session-1' });
+
+			const signal = await waitForSignal(signal => isAction(signal, ActionType.SessionCustomizationUpdated)) as IAgentActionSignal;
+			const customization = (signal.action as Extract<SessionAction, { type: ActionType.SessionCustomizationUpdated }>).customization;
+			if (customization.type !== CustomizationType.McpServer) {
+				assert.fail(`Expected MCP server customization, got ${customization.type}`);
+			}
+			const resolved = await session.resolveMcpAuthentication({ resource: 'https://mcp.example.com', scopes: ['repo'], token: 'interactive-token' });
+
+			assert.deepStrictEqual({
+				resolved,
+				result: await authPromise,
+				requiredScopes: customization.state.kind === McpServerStatus.AuthRequired ? customization.state.requiredScopes : undefined,
+				supportedScopes: customization.state.kind === McpServerStatus.AuthRequired ? customization.state.resource.scopes_supported : undefined,
+			}, {
+				resolved: true,
+				result: { kind: 'token', accessToken: 'interactive-token' },
+				requiredScopes: undefined,
+				supportedScopes: ['repo'],
+			});
 		});
 
 		test('needs-auth status remains starting when no auth request details are available', async () => {

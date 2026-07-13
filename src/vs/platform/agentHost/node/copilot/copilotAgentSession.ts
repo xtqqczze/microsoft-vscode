@@ -85,6 +85,17 @@ interface IPendingMcpAuthRequest {
 const COPILOT_HOME_DIRECTORY = '.copilot';
 const SESSION_STATE_DIRECTORY = join(COPILOT_HOME_DIRECTORY, 'session-state');
 const EMPTY_TOOL_RESULT_TEXT = '<empty />';
+const DEFAULT_GITHUB_MCP_SERVER_URL = 'https://api.githubcopilot.com/mcp';
+
+function normalizeMcpServerUrl(value: string): string | undefined {
+	if (!URL.canParse(value)) {
+		return undefined;
+	}
+	const url = new URL(value);
+	url.hash = '';
+	url.pathname = url.pathname.replace(/\/+$/, '');
+	return url.href;
+}
 
 type IMappedSessionEvents = { turns: Turn[]; subagentTurnsByToolCallId: ReadonlyMap<string, Turn[]> };
 
@@ -1107,8 +1118,13 @@ export class CopilotAgentSession extends Disposable {
 	}
 
 	private async _handleMcpAuthRequest(request: McpAuthRequest): Promise<McpAuthResult | null | undefined> {
+		const githubToken = this._initialGitHubMcpToken(request);
+		if (githubToken) {
+			this._logService.info(`[Copilot:${this.sessionId}] Reusing the existing GitHub token for initial GitHub MCP authentication`);
+			return { kind: 'token', accessToken: githubToken };
+		}
 		const resource = this._protectedResourceFromMcpAuthRequest(request);
-		const requiredScopes = this._requiredScopesFromMcpAuthRequest(request, resource);
+		const requiredScopes = this._scopesFromChallenge(request.wwwAuthenticateParams?.scope);
 		const deferred = new DeferredPromise<McpAuthResult | null | undefined>();
 		this._pendingMcpAuthRequests.set(request.requestId, {
 			serverName: request.serverName,
@@ -1130,6 +1146,15 @@ export class CopilotAgentSession extends Disposable {
 		return deferred.p.finally(() => this._pendingMcpAuthRequests.delete(request.requestId));
 	}
 
+	private _initialGitHubMcpToken(request: McpAuthRequest): string | undefined {
+		if (request.reason !== 'initial' || this._scopesFromChallenge(request.wwwAuthenticateParams?.scope).length !== 0) {
+			return undefined;
+		}
+		const requestUrl = normalizeMcpServerUrl(request.serverUrl);
+		const configuredUrl = normalizeMcpServerUrl(DEFAULT_GITHUB_MCP_SERVER_URL);
+		return requestUrl !== undefined && requestUrl === configuredUrl ? this._launchPlan.githubToken : undefined;
+	}
+
 	private _protectedResourceFromMcpAuthRequest(request: McpAuthRequest): ProtectedResourceMetadata {
 		if (request.resourceMetadata) {
 			try {
@@ -1148,11 +1173,6 @@ export class CopilotAgentSession extends Disposable {
 			resource_name: request.serverName,
 			scopes_supported: scopes.length ? scopes.slice() : undefined,
 		};
-	}
-
-	private _requiredScopesFromMcpAuthRequest(request: McpAuthRequest, resource: ProtectedResourceMetadata): readonly string[] {
-		const challengeScopes = this._scopesFromChallenge(request.wwwAuthenticateParams?.scope);
-		return challengeScopes.length ? challengeScopes : resource.scopes_supported ?? [];
 	}
 
 	private _scopesFromChallenge(scope: string | undefined): readonly string[] {
