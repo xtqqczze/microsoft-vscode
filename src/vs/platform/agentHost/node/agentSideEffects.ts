@@ -165,7 +165,7 @@ export class AgentSideEffects extends Disposable {
 		this._telemetryReporter = new AgentHostTelemetryReporter(this._telemetryService);
 		this._turnTracker = new AgentHostTurnTracker(this._telemetryReporter);
 		this._toolCallTracker = this._register(new AgentHostToolCallTracker(this._telemetryReporter));
-		this._permissionManager = this._register(instantiationService.createInstance(SessionPermissionManager, this._stateManager));
+		this._permissionManager = this._register(instantiationService.createInstance(SessionPermissionManager, this._stateManager, {}));
 		this._localCommands = this._register(instantiationService.createInstance(
 			AgentHostLocalCommands,
 			this._stateManager,
