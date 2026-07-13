@@ -1322,6 +1322,10 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 				if (passiveTools.includes(e.name)) {
 					this.voiceToolDispatchService.dispatchToolCall(e).then(result => {
 						this.voiceClientService.sendToolResult(e.callId, result);
+					}, err => {
+						// Always answer, even on failure, so the backend isn't left waiting on this callId.
+						this.logService.error(`[voice] passive tool ${e.name} dispatch failed`, err);
+						this.voiceClientService.sendToolResult(e.callId, 'error');
 					});
 					return;
 				}
@@ -1353,6 +1357,13 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 					} else {
 						this.voiceClientService.sendToolResult(e.callId, result);
 					}
+					this._voiceState.set('idle', undefined);
+					this._statusText.set('Hold to speak...', undefined);
+					this._sendContext();
+				}, err => {
+					// Always answer, even on failure, so the backend isn't left waiting on this callId.
+					this.logService.error(`[voice] tool ${e.name} dispatch failed`, err);
+					this.voiceClientService.sendToolResult(e.callId, 'error');
 					this._voiceState.set('idle', undefined);
 					this._statusText.set('Hold to speak...', undefined);
 					this._sendContext();
@@ -1631,6 +1642,8 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	 * is sent for the turn.
 	 */
 	private _finishPtt(reason: 'local' | 'auto' = 'local'): void {
+		// End toggle (hands-free) mode on every turn-ending path — even when not held — so an out-of-band finish can't leave a stale toggle that self-kills the next auto-listen.
+		this._pttToggleMode = false;
 		if (!this._pttHeld) { return; }
 		this._clearAutoListenTimer();
 		this._pttHeld = false;
