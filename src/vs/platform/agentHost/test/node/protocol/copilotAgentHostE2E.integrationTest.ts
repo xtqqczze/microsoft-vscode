@@ -50,6 +50,7 @@ const COPILOT_CONFIG: IAgentHostE2EProviderConfig = {
 	// `AGENT_HOST_REPLAY_RECORD=1`. The Copilot CLI is always present (dev dep).
 	enabled: true,
 	supportsWorktreeIsolation: true,
+	supportsHostTerminalTool: true,
 	supportsSubagents: true,
 	supportsPlanMode: true,
 };
