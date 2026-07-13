@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CopilotClient, RuntimeConnection, type CopilotClientOptions } from '@github/copilot-sdk';
+import { CopilotClient, RuntimeConnection, type CopilotClientOptions, type GitHubTelemetryNotification } from '@github/copilot-sdk';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { CancelablePromise, createCancelablePromise, Delayer, disposableTimeout, Limiter, SequencerByKey } from '../../../../base/common/async.js';
@@ -62,6 +62,7 @@ import { buildSessionEventLogFromTurns } from './buildSessionEvents.js';
 import { CopilotAgentSession, type CopilotSdkMode } from './copilotAgentSession.js';
 import { ICopilotSessionContext, projectFromCopilotContext } from './copilotGitProject.js';
 import { parsedPluginsEqual, toChildCustomizations } from './copilotPluginConverters.js';
+import { CopilotGitHubTelemetryForwarder } from './copilotGitHubTelemetryForwarder.js';
 import { CopilotSessionLauncher, ContextSizeConfigKey, ThinkingLevelConfigKey, getCopilotContextTier, resolveCopilotReasoningEffort, type CopilotSessionLaunchPlan, type IActiveClientSnapshot } from './copilotSessionLauncher.js';
 import { ShellManager } from './copilotShellTools.js';
 import { isAgentHostTelemetryService } from '../agentHostTelemetryService.js';
@@ -498,6 +499,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 	private _shutdownPromise: Promise<void> | undefined;
 	private readonly _plugins: PluginController;
 	private readonly _sessionLauncher: CopilotSessionLauncher;
+	private readonly _gitHubTelemetryForwarder: CopilotGitHubTelemetryForwarder;
 	readonly onDidCustomizationsChange: Event<void>;
 	/** Per-session active client state for tools + plugin snapshot tracking. */
 	private readonly _activeClients = new ResourceMap<ActiveClient>();
@@ -524,6 +526,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 		super();
 		this._plugins = this._register(this._instantiationService.createInstance(PluginController));
 		this._sessionLauncher = this._instantiationService.createInstance(CopilotSessionLauncher);
+		this._gitHubTelemetryForwarder = this._instantiationService.createInstance(CopilotGitHubTelemetryForwarder, () => this._restrictedTelemetryEnabled);
 		this._slashCommandProvider = new CopilotSlashCommandProvider(() => this._ensureClient().then(c => c.rpc.commands.list().then(c => c.commands)), this._logService);
 		this.onDidCustomizationsChange = this._plugins.onDidChange;
 		// Mirror the sub-agent fan-out signals onto the first-class spawned-
@@ -1072,6 +1075,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 				telemetry,
 				logLevel: copilotCliLogLevelFor(this._logService.getLevel()),
 				enableRemoteSessions: this._isSessionSyncEnabled(),
+				onGitHubTelemetry: (notification: GitHubTelemetryNotification) => this._gitHubTelemetryForwarder.forward(notification),
 			};
 			const client = this._createCopilotClient(clientOptions);
 			await client.start();
