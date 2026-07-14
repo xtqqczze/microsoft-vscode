@@ -454,6 +454,7 @@ configurationRegistry.registerConfiguration({
 			experiment: {
 				mode: 'auto',
 			},
+			tags: ['experimental', 'advanced'],
 			scope: ConfigurationScope.APPLICATION,
 			restricted: true,
 		},
