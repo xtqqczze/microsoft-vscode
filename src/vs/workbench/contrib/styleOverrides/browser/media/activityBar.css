@@ -331,3 +331,16 @@
 	top: 17px;
 	right: 2px;
 }
+
+.style-override.monaco-workbench .pane-composite-part > .header-or-footer.header > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:focus .active-item-indicator {
+	overflow: visible;
+}
+
+.style-override.monaco-workbench .pane-composite-part > .header-or-footer.header > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:focus .active-item-indicator:before {
+	bottom: 8px;
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.style-override.monaco-workbench .pane-composite-part > .header-or-footer.header > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked:focus .active-item-indicator:before {
+	bottom: 0;
+}
