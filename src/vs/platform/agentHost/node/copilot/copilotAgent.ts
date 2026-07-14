@@ -145,8 +145,8 @@ export type ICopilotPluginInfo = IParsedPlugin & { readonly pluginDir?: URI };
  * worktree to remove and no on-disk state to delete.
  *
  * `model` absorbs {@link CopilotAgent.changeModel} updates that arrive
- * before the first message. The latest session config (isolation / branch /
- * etc.) is read straight from the state manager via
+ * before the first message. The latest provider-owned session config is read
+ * straight from the state manager via
  * {@link IAgentConfigurationService.getSessionConfigValues} at
  * materialization time, so no bespoke forwarding is required for it.
  */
@@ -1671,8 +1671,8 @@ export class CopilotAgent extends Disposable implements IAgent {
 	 * naturally.
 	 *
 	 * The latest model lives on the provisional record (kept in sync via
-	 * {@link changeModel}). The latest session config (isolation / branch /
-	 * etc.) is read straight from the state manager via
+	 * {@link changeModel}). The latest provider-owned session config is read
+	 * straight from the state manager via
 	 * {@link IAgentConfigurationService.getSessionConfigValues} so any
 	 * `SessionConfigChanged` actions that arrived after `createSession` are
 	 * honoured without bespoke forwarding.
