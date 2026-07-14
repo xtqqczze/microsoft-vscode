@@ -69,6 +69,7 @@ export enum ChatConfiguration {
 	ChatViewSessionsOrientation = 'chat.viewSessions.orientation',
 	ChatViewProgressBadgeEnabled = 'chat.viewProgressBadge.enabled',
 	ChatContextUsageEnabled = 'chat.contextUsage.enabled',
+	Verbose = 'chat.verbose',
 	ChatPersistentProgressEnabled = 'chat.persistentProgress.enabled',
 	ProgressBorder = 'chat.progressBorder.enabled',
 	SubagentToolCustomAgents = 'chat.customAgentInSubagent.enabled',
