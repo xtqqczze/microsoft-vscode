@@ -10,9 +10,8 @@ import { tmpdir } from 'os';
 import { join } from '../../../../../base/common/path.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { SubscribeResult } from '../../../common/state/protocol/commands.js';
-import type { ChangesetFileSetAction, SessionAddedNotification } from '../../../common/state/sessionActions.js';
+import type { ChangesetContentChangedAction, SessionAddedParams } from '../../../common/state/sessionActions.js';
 import { PROTOCOL_VERSION } from '../../../common/state/protocol/version/registry.js';
-import type { INotificationBroadcastParams } from '../../../common/state/sessionProtocol.js';
 import {
 	dispatchTurnStarted,
 	getActionEnvelope,
@@ -81,19 +80,19 @@ const hasGit = (() => {
 		await client.call('initialize', { protocolVersions: [PROTOCOL_VERSION], clientId: 'test-git-diffs' });
 
 		const workingDirectory = URI.file(tmpRoot).toString();
-		await client.call('createSession', { session: nextSessionUri(), provider: 'mock', workingDirectory });
+		await client.call('createSession', { channel: nextSessionUri(), provider: 'mock', workingDirectory });
 
 		const addedNotif = await client.waitForNotification(n =>
-			n.method === 'notification' && (n.params as INotificationBroadcastParams).notification.type === 'notify/sessionAdded'
+			n.method === 'root/sessionAdded'
 		);
-		const sessionUri = ((addedNotif.params as INotificationBroadcastParams).notification as SessionAddedNotification).summary.resource;
+		const sessionUri = (addedNotif.params as SessionAddedParams).summary.resource;
 
-		await client.call<SubscribeResult>('subscribe', { resource: sessionUri });
+		await client.call<SubscribeResult>('subscribe', { channel: sessionUri });
 		// Also subscribe to the session changeset URI: `changeset/*` envelopes
 		// are scoped to the changeset URI by `_isRelevantToClient`, so a
 		// session-only subscription will not receive them.
-		const sessionChangesetUri = `${sessionUri}/changeset/session`;
-		await client.call<SubscribeResult>('subscribe', { resource: sessionChangesetUri });
+		const branchChangesetUri = `${sessionUri}/changeset/branch`;
+		await client.call<SubscribeResult>('subscribe', { channel: branchChangesetUri });
 		client.clearReceived();
 
 		// Fire a turn that runs the `terminal-edit:<path>` mock prompt. The mock
@@ -102,19 +101,30 @@ const hasGit = (() => {
 		const editedFile = join(tmpRoot, 'from-terminal.txt');
 		dispatchTurnStarted(client, sessionUri, 'turn-1', `terminal-edit:${editedFile}`, 1);
 
-		// Wait for a `changeset/fileSet` action targeting the edited file.
-		// On macOS, git's `--show-toplevel` resolves symlinks (/var →
-		// /private/var) so the URI may differ in prefix; match by basename.
-		const fileSetNotif = await client.waitForNotification(n => {
-			if (!isActionNotification(n, 'changeset/fileSet')) {
+		// Wait for a `changeset/contentChanged` action whose file list
+		// includes the edited file. On macOS, git's `--show-toplevel`
+		// resolves symlinks (/var → /private/var) so the URI may differ in
+		// prefix; match by basename.
+		const fileUri = (edit: ChangesetContentChangedAction['files'][number]['edit']) =>
+			edit.after?.uri ?? edit.before?.uri;
+		const matchesEditedFile = (action: ChangesetContentChangedAction) =>
+			action.files.some(f => {
+				const u = fileUri(f.edit);
+				return typeof u === 'string' && u.endsWith('/from-terminal.txt');
+			});
+		const contentChangedNotif = await client.waitForNotification(n => {
+			if (!isActionNotification(n, 'changeset/contentChanged')) {
 				return false;
 			}
-			const action = getActionEnvelope(n).action as ChangesetFileSetAction;
-			const u = action.file.edit.after?.uri ?? action.file.edit.before?.uri;
-			return typeof u === 'string' && u.endsWith('/from-terminal.txt');
+			return matchesEditedFile(getActionEnvelope(n).action as ChangesetContentChangedAction);
 		}, 10_000);
-		const action = getActionEnvelope(fileSetNotif).action as ChangesetFileSetAction;
-		assert.ok(action.file.edit.after, 'expected after-side for newly added file');
-		assert.ok(!action.file.edit.before, 'newly added file should have no before-side');
+		const action = getActionEnvelope(contentChangedNotif).action as ChangesetContentChangedAction;
+		const file = action.files.find(f => {
+			const u = fileUri(f.edit);
+			return typeof u === 'string' && u.endsWith('/from-terminal.txt');
+		});
+		assert.ok(file, 'expected the edited file in the changeset content');
+		assert.ok(file.edit.after, 'expected after-side for newly added file');
+		assert.ok(!file.edit.before, 'newly added file should have no before-side');
 	});
 });

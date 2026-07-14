@@ -5,12 +5,15 @@
 
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { URI } from '../../../../base/common/uri.js';
+import type { Mutable } from '../../../../base/common/types.js';
+import { toToolCallMeta, type IToolCallMeta } from '../../common/meta/agentToolCallMeta.js';
 import type { AgentSignal, IAgentSubagentStartedSignal } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import { ResponsePartKind, ToolCallConfirmationReason } from '../../common/state/sessionState.js';
 import type { ClaudeMapperState } from './claudeMapSessionEvents.js';
 import { SUBAGENT_TOOL_NAMES, type SubagentRegistry } from './claudeSubagentRegistry.js';
-import { buildClaudeToolMeta, getClaudeInvocationMessage, getClaudeToolDisplayName, getClaudeToolInputString } from './claudeToolDisplay.js';
+import { buildClaudeToolCallMeta, buildClaudeToolMeta, getClaudeInvocationMessage, getClaudeToolDisplayName, getClaudeToolInputString } from './claudeToolDisplay.js';
+import { stripClientToolNamePrefix } from './clientTools/claudeClientToolMcpServer.js';
 
 /**
  * Phase 12 — SDK tool names that spawn subagent sessions. Re-exported
@@ -36,7 +39,7 @@ export const SUBAGENT_SPAWNING_TOOL_NAMES: ReadonlySet<string> = SUBAGENT_TOOL_N
  */
 export function tagWithParent(
 	signals: AgentSignal[],
-	session: URI,
+	chat: URI,
 	parentToolUseId: string | null,
 	registry: SubagentRegistry,
 ): AgentSignal[] {
@@ -58,11 +61,20 @@ export function tagWithParent(
 	}
 	const started: IAgentSubagentStartedSignal = {
 		kind: 'subagent_started',
-		session,
+		chat,
 		toolCallId: parentToolUseId,
 		agentName: spawn.subagentType ?? 'subagent',
 		agentDisplayName: spawn.subagentType ?? 'Subagent',
 		agentDescription: spawn.description,
+		// The Task tool's short `description` input doubles as the concise
+		// per-task tab title for the subagent's read-only peer chat.
+		taskDescription: spawn.description,
+		// When the spawning Task tool is itself an inner tool of another
+		// subagent, its parent Task (one level up) is the tool call in
+		// whose chat this spawning tool lives. The host uses it to route
+		// the discovery content block to that immediate parent chat, at
+		// any nesting depth.
+		parentToolCallId: registry.getParentSpawn(parentToolUseId)?.toolUseId,
 	};
 	return [started, ...tagged];
 }
@@ -81,7 +93,7 @@ export function tagWithParent(
  */
 export function mapSubagentSystemMessage(
 	message: Extract<SDKMessage, { type: 'system' }>,
-	session: URI,
+	chat: URI,
 	registry: SubagentRegistry,
 ): AgentSignal[] {
 	const sub = (message as { subtype?: string }).subtype;
@@ -108,13 +120,13 @@ export function mapSubagentSystemMessage(
 		}
 		const toolUseId = m.tool_use_id;
 		registry.removeSpawn(toolUseId);
-		return [{ kind: 'subagent_completed', session, toolCallId: toolUseId }];
+		return [{ kind: 'subagent_completed', chat, toolCallId: toolUseId }];
 	}
 	return [];
 }
 
 /**
- * Phase 12 fix — build the `SessionToolCallReady` signal for a top-level
+ * Phase 12 fix — build the `ChatToolCallReady` signal for a top-level
  * Task/Agent tool_use block AND record the spawn's metadata onto the
  * registry. The workbench's
  * [stateToProgressAdapter.ts](../../../../workbench/contrib/chat/browser/agentSessions/agentHost/stateToProgressAdapter.ts)
@@ -136,7 +148,7 @@ export function mapSubagentSystemMessage(
  */
 export function buildTopLevelSubagentReadyAction(
 	block: Extract<import('@anthropic-ai/claude-agent-sdk').SDKAssistantMessage['message']['content'][number], { type: 'tool_use' }>,
-	session: URI,
+	chat: URI,
 	turnId: string,
 	registry: SubagentRegistry,
 ): AgentSignal {
@@ -145,7 +157,10 @@ export function buildTopLevelSubagentReadyAction(
 	const agentName = typeof input?.subagent_type === 'string' ? input.subagent_type : undefined;
 	const inputJson = block.input !== undefined ? safeStringify(block.input) : undefined;
 	registry.recordSpawn(block.id, { subagentType: agentName, description });
-	const meta: Record<string, unknown> = { ...(buildClaudeToolMeta(block.name) ?? { toolKind: 'subagent' }) };
+	const meta: Mutable<IToolCallMeta> = { ...buildClaudeToolCallMeta(block.name) };
+	if (!meta.toolKind) {
+		meta.toolKind = 'subagent';
+	}
 	if (description) {
 		meta.subagentDescription = description;
 	}
@@ -154,16 +169,15 @@ export function buildTopLevelSubagentReadyAction(
 	}
 	return {
 		kind: 'action',
-		session,
+		resource: chat,
 		action: {
-			type: ActionType.SessionToolCallReady,
-			session: session.toString(),
+			type: ActionType.ChatToolCallReady,
 			turnId,
 			toolCallId: block.id,
 			invocationMessage: getClaudeInvocationMessage(block.name, getClaudeToolDisplayName(block.name), block.input),
 			...(inputJson !== undefined ? { toolInput: inputJson } : {}),
 			confirmed: ToolCallConfirmationReason.NotNeeded,
-			_meta: meta,
+			_meta: toToolCallMeta(meta),
 		},
 	};
 }
@@ -177,9 +191,9 @@ export function buildTopLevelSubagentReadyAction(
  * envelopes. So this canonical envelope IS the only signal source for
  * inner content. We emit:
  *
- *   - `text` / `thinking` → `SessionResponsePart` (Markdown / Reasoning)
+ *   - `text` / `thinking` → `ChatResponsePart` (Markdown / Reasoning)
  *     with the full block content.
- *   - `tool_use` → `SessionToolCallStart` + `SessionToolCallReady`
+ *   - `tool_use` → `ChatToolCallStart` + `ChatToolCallReady`
  *     (`confirmed: NotNeeded`, since the SDK runs inner tools in
  *     `bypassPermissions` and the parent's `canUseTool` is skipped),
  *     plus side effects on `state` (cross-message lookup) and
@@ -190,13 +204,12 @@ export function buildTopLevelSubagentReadyAction(
  */
 export function emitInnerAssistantSignals(
 	message: Extract<SDKMessage, { type: 'assistant' }>,
-	session: URI,
+	chat: URI,
 	turnId: string,
 	state: ClaudeMapperState,
 	parentToolUseId: string,
 	registry: SubagentRegistry,
 ): AgentSignal[] {
-	const sessionStr = session.toString();
 	const messageId = message.message.id;
 	const signals: AgentSignal[] = [];
 	for (let index = 0; index < message.message.content.length; index++) {
@@ -204,10 +217,9 @@ export function emitInnerAssistantSignals(
 		if (block.type === 'text') {
 			signals.push({
 				kind: 'action',
-				session,
+				resource: chat,
 				action: {
-					type: ActionType.SessionResponsePart,
-					session: sessionStr,
+					type: ActionType.ChatResponsePart,
 					turnId,
 					part: {
 						kind: ResponsePartKind.Markdown,
@@ -221,10 +233,9 @@ export function emitInnerAssistantSignals(
 		if (block.type === 'thinking') {
 			signals.push({
 				kind: 'action',
-				session,
+				resource: chat,
 				action: {
-					type: ActionType.SessionResponsePart,
-					session: sessionStr,
+					type: ActionType.ChatResponsePart,
 					turnId,
 					part: {
 						kind: ResponsePartKind.Reasoning,
@@ -236,7 +247,11 @@ export function emitInnerAssistantSignals(
 			continue;
 		}
 		if (block.type === 'tool_use') {
-			state.startToolBlock(index, block.id, block.name, turnId);
+			// Strip the in-process MCP server prefix so subagent client-tool
+			// calls render with their real name (matches the top-level stream
+			// mapper). SDK-owned tools and Task/Agent passes through unchanged.
+			const toolName = stripClientToolNamePrefix(block.name);
+			state.startToolBlock(index, block.id, toolName, turnId);
 			// Inner tool input arrives pre-parsed on the synthesized
 			// `assistant` message (not via `input_json_delta` chunks), so
 			// seed the registry directly. Without this the live
@@ -245,31 +260,29 @@ export function emitInnerAssistantSignals(
 			// always computes rich text) drifts from live — violating D6.
 			state.toolCalls.seedParsedInput(block.id, block.input);
 			registry.noteInnerTool(block.id, parentToolUseId);
-			const displayName = getClaudeToolDisplayName(block.name);
-			const meta = buildClaudeToolMeta(block.name);
-			const toolInputStr = getClaudeToolInputString(block.name, block.input);
+			const displayName = getClaudeToolDisplayName(toolName);
+			const meta = buildClaudeToolMeta(toolName);
+			const toolInputStr = getClaudeToolInputString(toolName, block.input);
 			signals.push({
 				kind: 'action',
-				session,
+				resource: chat,
 				action: {
-					type: ActionType.SessionToolCallStart,
-					session: sessionStr,
+					type: ActionType.ChatToolCallStart,
 					turnId,
 					toolCallId: block.id,
-					toolName: block.name,
+					toolName,
 					displayName,
 					...(meta ? { _meta: meta } : {}),
 				},
 			});
 			signals.push({
 				kind: 'action',
-				session,
+				resource: chat,
 				action: {
-					type: ActionType.SessionToolCallReady,
-					session: sessionStr,
+					type: ActionType.ChatToolCallReady,
 					turnId,
 					toolCallId: block.id,
-					invocationMessage: getClaudeInvocationMessage(block.name, displayName, block.input),
+					invocationMessage: getClaudeInvocationMessage(toolName, displayName, block.input),
 					...(toolInputStr !== undefined ? { toolInput: toolInputStr } : {}),
 					confirmed: ToolCallConfirmationReason.NotNeeded,
 				},

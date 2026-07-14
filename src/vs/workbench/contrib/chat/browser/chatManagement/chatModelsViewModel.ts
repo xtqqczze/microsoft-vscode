@@ -9,6 +9,7 @@ import { Emitter } from '../../../../../base/common/event.js';
 import { ILanguageModelsService, ILanguageModelProviderDescriptor, ILanguageModelChatMetadataAndIdentifier } from '../../../chat/common/languageModels.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { ILanguageModelsProviderGroup } from '../../common/languageModelsConfiguration.js';
+import { getAgentHostByokManageModelsIdentifier } from '../widget/input/chatModelSelectionLogic.js';
 import Severity from '../../../../../base/common/severity.js';
 
 export const MODEL_ENTRY_TEMPLATE_ID = 'model.entry.template';
@@ -38,6 +39,7 @@ export interface ILanguageModelProvider {
 
 export interface ILanguageModel extends ILanguageModelChatMetadataAndIdentifier {
 	provider: ILanguageModelProvider;
+	hidden: boolean;
 }
 
 export interface ILanguageModelEntry {
@@ -65,6 +67,7 @@ export interface ILanguageModelProviderEntry {
 	label: string;
 	templateId: string;
 	collapsed: boolean;
+	hidden: boolean;
 	vendorEntry: ILanguageModelProvider;
 }
 
@@ -139,6 +142,7 @@ export class ChatModelsViewModel extends Disposable {
 		super();
 		this.languageModels = [];
 		this._register(this.languageModelsService.onDidChangeLanguageModels(vendor => this.refreshVendor(vendor)));
+		this._register(this.languageModelsService.onDidChangeModelVisibility(() => this.refreshVisibility()));
 	}
 
 	private readonly _viewModelEntries: IViewModelEntry[] = [];
@@ -395,6 +399,7 @@ export class ChatModelsViewModel extends Disposable {
 			label: provider.group.name,
 			templateId: VENDOR_ENTRY_TEMPLATE_ID,
 			collapsed: this.collapsedGroups.has(id),
+			hidden: this.languageModelsService.isGroupHidden(provider.group.vendor, provider.group.name),
 			vendorEntry: {
 				group: provider.group,
 				vendor: provider.vendor
@@ -469,10 +474,19 @@ export class ChatModelsViewModel extends Disposable {
 				if (vendor.isDefault && metadata.id === 'auto') {
 					continue;
 				}
+				// Agent-host BYOK models are copies of the user's own BYOK models surfaced
+				// by an agent host (e.g. Copilot CLI). They already appear under their real
+				// provider group, so listing them again under the agent-host vendor would
+				// duplicate the entire BYOK catalogue (e.g. hundreds of OpenRouter models
+				// under "Copilot"). Skip them here.
+				if (getAgentHostByokManageModelsIdentifier(metadata) !== undefined) {
+					continue;
+				}
 				models.push({
 					identifier,
 					metadata,
 					provider,
+					hidden: this.languageModelsService.isModelHidden(identifier),
 				});
 			}
 		}
@@ -488,6 +502,29 @@ export class ChatModelsViewModel extends Disposable {
 
 		// return all models ungrouped
 		return this.languageModels;
+	}
+
+	toggleModelHidden(entry: ILanguageModelEntry): void {
+		this.languageModelsService.setModelHidden(entry.model.identifier, !entry.model.hidden);
+	}
+
+	toggleGroupHidden(entry: ILanguageModelProviderEntry): void {
+		this.languageModelsService.setGroupHidden(entry.vendorEntry.group.vendor, entry.vendorEntry.group.name, !entry.hidden);
+	}
+
+	setModelsHidden(entries: readonly ILanguageModelEntry[], hidden: boolean): void {
+		for (const entry of entries) {
+			this.languageModelsService.setModelHidden(entry.model.identifier, hidden);
+		}
+	}
+
+	private refreshVisibility(): void {
+		for (const model of this.languageModels) {
+			model.hidden = this.languageModelsService.isModelHidden(model.identifier);
+		}
+		// Rebuild groups so provider/group header `hidden` reflects the new state.
+		this.languageModelGroups = this.groupModels(this.languageModels);
+		this.doFilter();
 	}
 
 	private getModelId(modelEntry: ILanguageModel): string {

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { h } from '../../../../../../../base/browser/dom.js';
+import { createPixelSpinner } from '../../../../../../../base/browser/ui/pixelSpinner/pixelSpinner.js';
 import { isMarkdownString, MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../../../platform/instantiation/common/instantiation.js';
@@ -21,7 +22,7 @@ import { BaseChatToolInvocationSubPart } from './chatToolInvocationSubPart.js';
 import { extractImagesFromToolInvocationOutputDetails } from '../../../../common/chatImageExtraction.js';
 import { TerminalToolAutoExpand } from './terminalToolAutoExpand.js';
 import { ChatCollapsibleContentPart } from '../chatCollapsibleContentPart.js';
-import { IChatRendererContent } from '../../../../common/model/chatViewModel.js';
+import { IChatRendererContent, isResponseVM } from '../../../../common/model/chatViewModel.js';
 import '../media/chatTerminalToolProgressPart.css';
 import type { ICodeBlockRenderOptions } from '../codeBlockPart.js';
 import { Action, IAction } from '../../../../../../../base/common/actions.js';
@@ -139,11 +140,16 @@ interface ITerminalCommandDecorationOptions {
 	 * Used to access command metadata for the decoration.
 	 */
 	getResolvedCommand(): ITerminalCommand | undefined;
+
+	/**
+	 * Returns whether the tool invocation is currently running.
+	 */
+	getIsRunning(): boolean;
 }
 
 class TerminalCommandDecoration extends Disposable {
 	private readonly _element: HTMLElement;
-	private _interactionElement: HTMLElement | undefined;
+	private _hoverRegistered = false;
 
 	constructor(
 		private readonly _options: ITerminalCommandDecorationOptions,
@@ -152,6 +158,7 @@ class TerminalCommandDecoration extends Disposable {
 		super();
 		const decorationElements = h('span.chat-terminal-command-decoration@decoration', { role: 'img', tabIndex: 0 });
 		this._element = decorationElements.decoration;
+		createPixelSpinner(this._element);
 		this._attachElementToContainer();
 	}
 
@@ -171,10 +178,12 @@ class TerminalCommandDecoration extends Disposable {
 			}
 		}
 
-		this._register(this._hoverService.setupDelayedHover(decoration, () => ({
-			content: this._getHoverText()
-		})));
-		this._attachInteractionHandlers(decoration);
+		if (!this._hoverRegistered) {
+			this._hoverRegistered = true;
+			this._register(this._hoverService.setupDelayedHover(decoration, () => ({
+				content: this._getHoverText()
+			})));
+		}
 	}
 
 	private _getHoverText(): string {
@@ -212,12 +221,15 @@ class TerminalCommandDecoration extends Disposable {
 		const decorationState = getTerminalCommandDecorationState(command, storedState);
 		const tooltip = getTerminalCommandDecorationTooltip(command, storedState);
 
+		const isRunning = this._options.getIsRunning();
+
 		decoration.className = `chat-terminal-command-decoration ${DecorationSelector.CommandDecoration}`;
-		decoration.classList.add(DecorationSelector.Codicon);
-		for (const className of decorationState.classNames) {
-			decoration.classList.add(className);
+		if (isRunning) {
+			const nonIconClasses = decorationState.classNames.filter(c => c !== DecorationSelector.Codicon && !c.startsWith('codicon-'));
+			decoration.classList.add('chat-terminal-running-spinner', ...nonIconClasses);
+		} else {
+			decoration.classList.add(DecorationSelector.Codicon, ...decorationState.classNames, ...ThemeIcon.asClassNameArray(decorationState.icon));
 		}
-		decoration.classList.add(...ThemeIcon.asClassNameArray(decorationState.icon));
 		const isInteractive = !decoration.classList.contains(DecorationSelector.Default);
 		decoration.tabIndex = isInteractive ? 0 : -1;
 		if (isInteractive) {
@@ -233,12 +245,6 @@ class TerminalCommandDecoration extends Disposable {
 		}
 	}
 
-	private _attachInteractionHandlers(decoration: HTMLElement): void {
-		if (this._interactionElement === decoration) {
-			return;
-		}
-		this._interactionElement = decoration;
-	}
 }
 
 /**
@@ -291,6 +297,7 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 	private _isInThinkingContainer: boolean = false;
 	private _usesCollapsibleWrapper: boolean = false;
 	private _thinkingCollapsibleWrapper: ChatTerminalThinkingCollapsibleWrapper | undefined;
+	private readonly _forceExpandTerminalOutput: boolean;
 
 	private markdownPart: ChatMarkdownContentPart | undefined;
 	public get codeblocks(): IChatCodeBlockInfo[] {
@@ -328,6 +335,7 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		this._elementIndex = context.elementIndex;
 		this._contentIndex = context.contentIndex;
 		this._sessionResource = context.element.sessionResource;
+		this._forceExpandTerminalOutput = isResponseVM(context.element) && context.element.isTerminalCommand;
 
 		terminalData = migrateLegacyTerminalToolSpecificData(terminalData);
 		this._terminalData = terminalData;
@@ -350,7 +358,8 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 			terminalData: this._terminalData,
 			getCommandBlock: () => elements.commandBlock,
 			getIconElement: () => undefined,
-			getResolvedCommand: () => this._getResolvedCommand()
+			getResolvedCommand: () => this._getResolvedCommand(),
+			getIsRunning: () => this._isInvocationRunning()
 		}));
 
 		// Use presentationOverrides for display if available (e.g., extracted Python code with syntax highlighting)
@@ -452,7 +461,14 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 
 		elements.message.append(this.markdownPart.domNode);
 		const progressPart = this._register(_instantiationService.createInstance(ChatProgressSubPart, elements.container, this.getIcon(), terminalData.autoApproveInfo));
+		progressPart.domNode.classList.add('chat-terminal-progress-row');
 		this._decoration.update();
+		if (toolInvocation.kind === 'toolInvocation') {
+			this._register(autorun(reader => {
+				toolInvocation.state.read(reader);
+				this._decoration.update();
+			}));
+		}
 
 		// Keep thinking-container semantics separate from wrapper semantics.
 		const terminalToolsInThinking = this._configurationService.getValue<boolean>(ChatConfiguration.TerminalToolsInThinking);
@@ -471,7 +487,9 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 
 		// Only auto-expand in thinking containers if there's actual output to show
 		const hasStoredOutput = !!terminalData.terminalCommandOutput;
-		if (expandedStateByInvocation.get(toolInvocation) || (this._isInThinkingContainer && IChatToolInvocation.isComplete(toolInvocation) && hasStoredOutput)) {
+		const storedExpandedState = expandedStateByInvocation.get(toolInvocation);
+		const hasStoredExpandedState = expandedStateByInvocation.has(toolInvocation);
+		if (storedExpandedState || (!hasStoredExpandedState && this._forceExpandTerminalOutput) || (this._isInThinkingContainer && IChatToolInvocation.isComplete(toolInvocation) && hasStoredOutput)) {
 			void this._toggleOutput(true);
 		}
 		this._register(this._terminalChatService.registerProgressPart(this));
@@ -545,11 +563,12 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		const isSkipped = IChatToolInvocation.executionConfirmedOrDenied(toolInvocation)?.type === ToolConfirmKind.Skipped;
 		const autoExpandFailures = this._configurationService.getValue<boolean>(ChatConfiguration.AutoExpandToolFailures);
 		const hasError = autoExpandFailures && this._terminalData.terminalCommandState?.exitCode !== undefined && this._terminalData.terminalCommandState.exitCode !== 0;
-		const initialExpanded = !isComplete || hasError;
+		const initialExpanded = !isComplete || hasError || this._forceExpandTerminalOutput;
 
 		const wrapper = this._register(this._instantiationService.createInstance(
 			ChatTerminalThinkingCollapsibleWrapper,
 			truncatedCommand,
+			this._terminalData.intention,
 			this._terminalData.commandLine.isSandboxWrapped === true,
 			contentElement,
 			context,
@@ -698,7 +717,7 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 			const action = new Action(
 				TerminalContribCommandId.ContinueInBackground,
 				localize('continueInBackground', 'Continue in Background'),
-				ThemeIcon.asClassName(Codicon.debugContinue),
+				ThemeIcon.asClassName(Codicon.debugContinueSmall),
 				true,
 				() => this.continueInBackground()
 			);
@@ -745,6 +764,21 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		return this._resolveCommand(target);
 	}
 
+	private _isInvocationRunning(): boolean {
+		const commandExitCode = this._getResolvedCommand()?.exitCode;
+		if (commandExitCode !== undefined) {
+			return false;
+		}
+		const storedExitCode = this._terminalData.terminalCommandState?.exitCode;
+		if (storedExitCode !== undefined) {
+			return false;
+		}
+		if (!IChatToolInvocation.isComplete(this.toolInvocation)) {
+			return true;
+		}
+		return this._terminalData.isBackground === true || this._terminalData.didContinueInBackground === true;
+	}
+
 	private _clearCommandAssociation(options?: { clearPersistentData?: boolean }): void {
 		this._terminalCommandUri = undefined;
 		if (options?.clearPersistentData) {
@@ -767,6 +801,7 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		return !this._outputView.isExpanded &&
 			!this._userToggledOutput &&
 			!this._store.isDisposed &&
+			(!this._forceExpandTerminalOutput || !expandedStateByInvocation.has(this.toolInvocation)) &&
 			!expandedStateByInvocation.get(this.toolInvocation);
 	}
 
@@ -960,7 +995,7 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		this.markCollapsibleWrapperComplete();
 
 		// Auto-collapse on success (exit code 0)
-		if (resolvedCommand?.exitCode === 0 && this._outputView.isExpanded && !this._userToggledOutput) {
+		if (resolvedCommand?.exitCode === 0 && this._outputView.isExpanded && !this._userToggledOutput && !this._forceExpandTerminalOutput) {
 			this._toggleOutput(false);
 		}
 
@@ -974,7 +1009,13 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 	private async _toggleOutput(expanded: boolean): Promise<boolean> {
 		const didChange = await this._outputView.toggle(expanded);
 		const isExpanded = this._outputView.isExpanded;
-		this._titleElement.classList.toggle('chat-terminal-content-title-no-bottom-radius', isExpanded);
+		// Only drop the title's bottom border/radius when the output section is
+		// actually rendered below the title to visually close the box. Display-only
+		// invocations (e.g. a denied command with no terminal session or output) never
+		// append the output section (see constructor), so removing the title's bottom
+		// border here would leave an open-bottomed box.
+		const hasOutputSection = !!this._outputView.domNode.parentElement;
+		this._titleElement.classList.toggle('chat-terminal-content-title-no-bottom-radius', isExpanded && hasOutputSection);
 		this._toolbarOutputExpanded = isExpanded;
 		this._updateToolbarActions();
 		if (didChange) {
@@ -1628,6 +1669,7 @@ class ChatTerminalToolOutputSection extends Disposable {
 export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleContentPart {
 	private readonly _terminalContentElement: HTMLElement;
 	private readonly _commandText: string;
+	private readonly _intention: string | undefined;
 	private readonly _isSandboxWrapped: boolean;
 	private _isComplete: boolean;
 	private readonly _isSkipped: boolean;
@@ -1638,6 +1680,7 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 
 	constructor(
 		commandText: string,
+		intention: string | undefined,
 		isSandboxWrapped: boolean,
 		contentElement: HTMLElement,
 		context: IChatContentPartRenderContext,
@@ -1649,17 +1692,29 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 		@IHoverService hoverService: IHoverService,
 		@IConfigurationService configurationService: IConfigurationService,
 	) {
-		const title = isSkipped
+		// When the model supplied an intention (why it's running the command),
+		// use it as the descriptive text instead of the generic verb. Skipped
+		// commands keep the explicit "Skipped" wording since they never ran.
+		// The intention and command are not localizable, so they are combined
+		// directly; only the state suffix is externalized.
+		const intentionText = intention && !isSkipped ? intention : undefined;
+		const stateTitle = isSkipped
 			? localize('chat.terminal.skipped.plain', "Skipped {0}", commandText)
 			: isRunningInBackground
 				? localize('chat.terminal.runningInBackground.plain', "Running {0} in background", commandText)
 				: isComplete
 					? localize('chat.terminal.ran.plain', "Ran {0}", commandText)
 					: localize('chat.terminal.running.plain', "Running {0}", commandText);
+		const title = intentionText
+			? isRunningInBackground
+				? `${intentionText} ${commandText}${localize('chat.terminal.backgroundSuffix', " in background")}`
+				: `${intentionText} ${commandText}`
+			: stateTitle;
 		super(title, context, undefined, hoverService, configurationService);
 
 		this._terminalContentElement = contentElement;
 		this._commandText = commandText;
+		this._intention = intentionText;
 		this._isSandboxWrapped = isSandboxWrapped;
 		this._isComplete = isComplete;
 		this._isSkipped = isSkipped;
@@ -1677,6 +1732,10 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 		this.setExpanded(initialExpanded);
 	}
 
+	protected override shouldAnimateContent(): boolean {
+		return true;
+	}
+
 	private _setCodeFormattedTitle(): void {
 		if (!this._collapseButton) {
 			return;
@@ -1685,36 +1744,54 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 		const labelElement = this._collapseButton.labelElement;
 		labelElement.textContent = '';
 
-		if (this._isSandboxWrapped) {
-			const prefixText = this._isSkipped
-				? localize('chat.terminal.skippedInSandbox.prefix', "Skipped ")
-				: this._isComplete
-					? localize('chat.terminal.ranInSandbox.prefix', "Ran ")
-					: localize('chat.terminal.runningInSandbox.prefix', "Running ");
-			const suffixText = this._isRunningInBackground
+		const suffixText = this._isSandboxWrapped
+			? this._isRunningInBackground
 				? localize('chat.terminal.sandbox.backgroundSuffix', " in sandbox (background)")
-				: localize('chat.terminal.sandbox.suffix', " in sandbox");
-			labelElement.appendChild(document.createTextNode(prefixText));
+				: localize('chat.terminal.sandbox.suffix', " in sandbox")
+			: this._isRunningInBackground
+				? localize('chat.terminal.backgroundSuffix', " in background")
+				: undefined;
+
+		// Intention layout: the intention and the command share the row as two
+		// flex cells that stay on one line and each ellipsis-truncate, splitting
+		// the available width equally when the content overflows.
+		this.domNode.classList.toggle('chat-terminal-has-intention', !!this._intention);
+		if (this._intention) {
+			const row = dom.$('span.chat-terminal-label-flex');
+			const intentionElement = dom.$('span.chat-terminal-intention');
+			intentionElement.textContent = this._intention;
+			const commandElement = dom.$('span.chat-terminal-command');
 			const codeElement = document.createElement('code');
 			codeElement.textContent = this._commandText;
-			labelElement.appendChild(codeElement);
-			labelElement.appendChild(document.createTextNode(suffixText));
+			commandElement.appendChild(codeElement);
+			row.appendChild(intentionElement);
+			row.appendChild(commandElement);
+			if (suffixText) {
+				const suffixElement = dom.$('span.chat-terminal-label-suffix');
+				suffixElement.textContent = suffixText;
+				row.appendChild(suffixElement);
+			}
+			labelElement.appendChild(row);
 			return;
 		}
 
-		const prefixText = this._isSkipped
-			? localize('chat.terminal.skipped.prefix', "Skipped ")
-			: this._isComplete
-				? localize('chat.terminal.ran.prefix', "Ran ")
-				: localize('chat.terminal.running.prefix', "Running ");
-		const ranText = document.createTextNode(prefixText);
+		const prefixText = this._isSandboxWrapped
+			? this._isSkipped
+				? localize('chat.terminal.skippedInSandbox.prefix', "Skipped ")
+				: this._isComplete
+					? localize('chat.terminal.ranInSandbox.prefix', "Ran ")
+					: localize('chat.terminal.runningInSandbox.prefix', "Running ")
+			: this._isSkipped
+				? localize('chat.terminal.skipped.prefix', "Skipped ")
+				: this._isComplete
+					? localize('chat.terminal.ran.prefix', "Ran ")
+					: localize('chat.terminal.running.prefix', "Running ");
+		labelElement.appendChild(document.createTextNode(prefixText));
 		const codeElement = document.createElement('code');
 		codeElement.textContent = this._commandText;
-
-		labelElement.appendChild(ranText);
 		labelElement.appendChild(codeElement);
-		if (this._isRunningInBackground) {
-			labelElement.appendChild(document.createTextNode(localize('chat.terminal.backgroundSuffix', " in background")));
+		if (suffixText) {
+			labelElement.appendChild(document.createTextNode(suffixText));
 		}
 	}
 

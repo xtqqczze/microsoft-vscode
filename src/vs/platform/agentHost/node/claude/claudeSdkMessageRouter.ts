@@ -36,17 +36,26 @@ export class ClaudeSdkMessageRouter extends Disposable {
 	private readonly _editObserver: ClaudeFileEditObserver;
 	private readonly _mapperState = new ClaudeMapperState();
 
+	private _clientToolOwner: ((toolName: string) => string | undefined) | undefined;
+
 	constructor(
-		private readonly _sessionUri: URI,
+		sessionUri: URI,
+		private readonly _chatChannelUri: URI,
 		dbRef: IReference<ISessionDatabase>,
 		private readonly _subagents: SubagentRegistry,
+		clientToolOwner: ((toolName: string) => string | undefined) | undefined = undefined,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@ILogService private readonly _logService: ILogService,
 	) {
 		super();
+		this._clientToolOwner = clientToolOwner;
 		this._editObserver = this._register(
-			instantiationService.createInstance(ClaudeFileEditObserver, _sessionUri.toString(), dbRef),
+			instantiationService.createInstance(ClaudeFileEditObserver, sessionUri.toString(), dbRef),
 		);
+	}
+
+	setClientToolOwner(clientToolOwner: ((toolName: string) => string | undefined) | undefined): void {
+		this._clientToolOwner = clientToolOwner;
 	}
 
 	async handle(message: SDKMessage, turnId: string | undefined): Promise<void> {
@@ -61,11 +70,12 @@ export class ClaudeSdkMessageRouter extends Disposable {
 		try {
 			const signals = mapSDKMessageToAgentSignals(
 				message,
-				this._sessionUri,
+				this._chatChannelUri,
 				turnId,
 				this._mapperState,
 				this._logService,
 				this._subagents,
+				this._clientToolOwner,
 			);
 			for (const signal of signals) {
 				this._onDidProduceSignal.fire(signal);
