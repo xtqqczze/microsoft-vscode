@@ -23,7 +23,7 @@ import { buildDefaultChangesetCatalog } from '../../common/changesetUri.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import type { RootConfigChangedAction } from '../../common/state/protocol/actions.js';
-import { ChangesSummary, ChatOriginKind, CustomizationType, SessionInputRequestKind } from '../../common/state/protocol/state.js';
+import { ChangesSummary, ChatOriginKind, CustomizationType, McpAuthRequiredReason, SessionInputRequestKind } from '../../common/state/protocol/state.js';
 import { ActionType, ActionEnvelope, type ChatAction, type INotification, type SessionAction } from '../../common/state/sessionActions.js';
 import { buildSubagentChatUri, buildChatUri, buildDefaultChatUri, ChatInteractivity, CustomizationLoadStatus, MessageAttachmentKind, MessageKind, PendingMessageKind, ResponsePartKind, SessionInputResponseKind, SessionLifecycle, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, customizationId, type ClientPluginCustomization, type Customization, type PluginCustomization } from '../../common/state/sessionState.js';
 import { IProductService } from '../../../product/common/productService.js';
@@ -3826,6 +3826,68 @@ suite('AgentSideEffects', () => {
 			});
 
 			assert.deepStrictEqual(sessionInputNeeded(), []);
+		});
+
+		test('MCP tool authentication is produced while auth is required and removed once resolved', () => {
+			setupSession();
+			startTurn('turn-1');
+
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallStart,
+				turnId: 'turn-1',
+				toolCallId: 'tc-mcp',
+				toolName: 'get_file',
+				displayName: 'Get File',
+				contributor: { kind: ToolCallContributorKind.MCP, customizationId: 'mcp-1' },
+			});
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallReady,
+				turnId: 'turn-1',
+				toolCallId: 'tc-mcp',
+				invocationMessage: 'Getting file',
+				confirmed: ToolCallConfirmationReason.NotNeeded,
+			});
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallAuthRequired,
+				turnId: 'turn-1',
+				toolCallId: 'tc-mcp',
+				auth: {
+					reason: McpAuthRequiredReason.InsufficientScope,
+					resource: {
+						resource: 'https://mcp.example.com',
+						authorization_servers: ['https://auth.example.com'],
+					},
+					requiredScopes: ['repo'],
+				},
+			});
+
+			const pending = sessionInputNeeded();
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallComplete,
+				turnId: 'turn-1',
+				toolCallId: 'tc-mcp',
+				result: {
+					success: false,
+					pastTenseMessage: 'Cancelled tool call',
+					error: { message: 'MCP authentication was cancelled', code: 'cancelled' },
+				},
+			});
+
+			assert.deepStrictEqual({
+				pending: pending.map(request => ({
+					kind: request.kind,
+					chat: request.chat,
+					toolCallId: request.kind === SessionInputRequestKind.ToolAuthentication ? request.toolCall.toolCallId : undefined,
+				})),
+				resolved: sessionInputNeeded(),
+			}, {
+				pending: [{
+					kind: SessionInputRequestKind.ToolAuthentication,
+					chat: defaultChatUri,
+					toolCallId: 'tc-mcp',
+				}],
+				resolved: [],
+			});
 		});
 
 		test('ending the turn clears the chat\'s outstanding requests', () => {

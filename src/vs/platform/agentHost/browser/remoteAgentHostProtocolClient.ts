@@ -32,6 +32,7 @@ import { type IVscodeUpgradeResult } from '../common/state/protocolUpgrade.js';
 import { isClientTransport, type IProtocolTransport } from '../common/state/sessionTransport.js';
 import { AhpErrorCodes } from '../common/state/protocol/errors.js';
 import { ContentEncoding, ResourceRequestParams, type CompletionsParams, type CompletionsResult, type CreateTerminalParams, type ResolveSessionConfigResult, type SessionConfigCompletionsResult } from '../common/state/protocol/commands.js';
+import { ChatSourceKind } from '../common/state/protocol/channels-chat/commands.js';
 import type { InvokeChangesetOperationParams, InvokeChangesetOperationResult } from '../common/state/protocol/channels-changeset/commands.js';
 import { encodeBase64 } from '../../../base/common/buffer.js';
 import { ILoadEstimator, LoadEstimator } from '../../../base/parts/ipc/common/ipc.net.js';
@@ -860,7 +861,7 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 	 * Authenticate with the remote agent host using a specific scheme.
 	 */
 	async authenticate(params: AuthenticateParams): Promise<AuthenticateResult> {
-		await this._sendRequest('authenticate', { channel: ROOT_STATE_URI, ...params });
+		await this._sendRequest('authenticate', { channel: ROOT_STATE_URI, ...params, scopes: params.scopes ? [...params.scopes] : undefined });
 		return { authenticated: true };
 	}
 
@@ -896,7 +897,7 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 		await this._sendRequest('createChat', {
 			channel: session.toString(),
 			chat: chat.toString(),
-			...(options?.fork ? { source: { chat: options.fork.source.toString(), turnId: options.fork.turnId } } : {}),
+			...(options?.fork ? { source: { kind: ChatSourceKind.Fork, chat: options.fork.source.toString(), turnId: options.fork.turnId } } : {}),
 		});
 	}
 

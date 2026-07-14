@@ -13,12 +13,29 @@ import type { Message } from './state.js';
 // ─── createChat ──────────────────────────────────────────────────────────────
 
 /**
- * Identifies a source chat and turn to fork from.
+ * How a new chat uses its source chat and turn.
  */
-export interface ChatForkSource {
-	/** URI of the existing chat to fork from */
+export const enum ChatSourceKind {
+	/** Copy source history through the referenced turn into the new chat. */
+	Fork = 'fork',
+	/** Supply source context without copying it into the new chat's visible history. */
+	SideChat = 'sideChat',
+}
+
+/**
+ * Identifies a source chat and completed turn for a new chat.
+ *
+ */
+export interface ChatSource {
+	/** How the source is used. */
+	kind: ChatSourceKind;
+	/** URI of the existing source chat. */
 	chat: URI;
-	/** Turn ID in the source chat; content up to and including this turn's response is copied */
+	/**
+	 * Completed turn in the source chat. For a fork, content through this turn is
+	 * copied. For a side chat, that content is supplied as context but is not
+	 * copied into the new chat's visible `turns`.
+	 */
 	turnId: string;
 }
 
@@ -38,8 +55,14 @@ export interface CreateChatParams extends BaseParams {
 	chat: URI;
 	/** Optional initial message for the new chat. */
 	initialMessage?: Message;
-	/** Optional source chat and turn to fork from. */
-	source?: ChatForkSource;
+	/**
+	 * Optional source chat and completed turn.
+	 *
+	 * The source chat MUST belong to this session. Clients MUST only request
+	 * `kind: "sideChat"` when the selected agent advertises
+	 * `capabilities.multipleChats.sideChat`.
+	 */
+	source?: ChatSource;
 }
 
 // ─── disposeChat ─────────────────────────────────────────────────────────────

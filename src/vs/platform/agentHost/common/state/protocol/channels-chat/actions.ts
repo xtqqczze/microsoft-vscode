@@ -8,6 +8,7 @@
 
 import { ActionType } from '../common/actions.js';
 import type { StringOrMarkdown, ErrorInfo, FileEdit, UsageInfo } from '../common/state.js';
+import type { McpAuthRequirement } from '../channels-session/state.js';
 import { ToolCallConfirmationReason, ToolCallCancellationReason, PendingMessageKind, type Message, type ResponsePart, type ToolCallResult, type ToolResultContent, type ChatInputAnswer, type ChatInputRequest, type ChatInputResponseKind, type ConfirmationOption, type ToolCallContributor, type Turn } from './state.js';
 
 // ─── Tool Call Action Base ───────────────────────────────────────────────────
@@ -319,6 +320,46 @@ export interface ChatToolCallContentChangedAction extends ToolCallActionBase {
 	type: ActionType.ChatToolCallContentChanged;
 	/** The current partial content for the running tool call */
 	content: ToolResultContent[];
+}
+
+/**
+ * A running tool call is paused pending MCP authentication. Transitions the
+ * tool call from `running` to `auth-required`.
+ *
+ * The server dispatches this when the MCP server backing the call responds
+ * with a 401/403 challenge mid-execution (see
+ * {@link McpAuthRequirement.reason | `insufficientScope`}). The host SHOULD
+ * pair this with `session/inputNeededSet` (kind `toolAuthentication`) so the
+ * block is visible at the session-summary level, mirroring
+ * {@link McpServerAuthRequiredState}'s own `InputNeeded` guidance.
+ *
+ * Only valid for tool calls contributed by an MCP server — the reducer is a
+ * no-op if the tool call's `contributor` is not
+ * {@link ToolCallContributorKind.MCP | MCP-kind}.
+ *
+ * @category Chat Actions
+ * @version 1
+ */
+export interface ChatToolCallAuthRequiredAction extends ToolCallActionBase {
+	type: ActionType.ChatToolCallAuthRequired;
+	/** The authentication challenge blocking this invocation. */
+	auth: McpAuthRequirement;
+}
+
+/**
+ * The authentication challenge blocking a tool call has been resolved (the
+ * client pushed a token via `authenticate` and the host validated it).
+ * Transitions the tool call from `auth-required` back to `running`,
+ * preserving the fields it had before pausing.
+ *
+ * The host SHOULD remove the corresponding `session/inputNeededSet` entry
+ * (kind `toolAuthentication`) once this is dispatched.
+ *
+ * @category Chat Actions
+ * @version 1
+ */
+export interface ChatToolCallAuthResolvedAction extends ToolCallActionBase {
+	type: ActionType.ChatToolCallAuthResolved;
 }
 
 /**
@@ -685,6 +726,8 @@ export type ChatAction =
 	| ChatToolCallCompleteAction
 	| ChatToolCallResultConfirmedAction
 	| ChatToolCallContentChangedAction
+	| ChatToolCallAuthRequiredAction
+	| ChatToolCallAuthResolvedAction
 	| ChatTurnCompleteAction
 	| ChatTurnCancelledAction
 	| ChatErrorAction

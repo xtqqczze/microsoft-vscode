@@ -778,6 +778,7 @@ export namespace IChatToolInvocation {
 		WaitingForPostApproval,
 		Completed,
 		Cancelled,
+		WaitingForAuthentication,
 	}
 
 	interface IChatToolInvocationStateBase {
@@ -812,6 +813,12 @@ export namespace IChatToolInvocation {
 		progress: IObservable<{ message?: string | IMarkdownString; progress: number | undefined }>;
 	}
 
+	export interface IChatToolInvocationWaitingForAuthenticationState extends IChatToolInvocationStateBase, IChatToolInvocationPostConfirmState {
+		type: StateKind.WaitingForAuthentication;
+		readonly server: IChatMcpAuthenticationRequiredServer;
+		cancel(): void;
+	}
+
 	interface IChatToolInvocationPostExecuteState extends IChatToolInvocationPostConfirmState {
 		resultDetails: IToolResult['toolResultDetails'];
 	}
@@ -839,6 +846,7 @@ export namespace IChatToolInvocation {
 		| IChatToolInvocationStreamingState
 		| IChatToolInvocationWaitingForConfirmationState
 		| IChatToolInvocationExecutingState
+		| IChatToolInvocationWaitingForAuthenticationState
 		| IChatToolWaitingForPostApprovalState
 		| IChatToolInvocationCompleteState
 		| IChatToolInvocationCancelledState;
