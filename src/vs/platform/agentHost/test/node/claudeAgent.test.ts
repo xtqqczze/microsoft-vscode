@@ -2113,6 +2113,46 @@ suite('ClaudeAgent', () => {
 		});
 	});
 
+	test('materializing in a worktree reanchors customization discovery', async () => {
+		const { agent, sdk, fileService } = createTestContext(disposables);
+		await agent.authenticate(GITHUB_COPILOT_PROTECTED_RESOURCE.resource, 'tok');
+
+		const workspace = URI.file('/workspace');
+		const worktree = URI.file('/workspace.worktrees/session');
+		const created = await agent.createSession({ workingDirectory: workspace });
+		const sessionId = AgentSession.id(created.session);
+		sdk.supportedCommandsResult = [{ name: 'worktree-skill', description: 'Worktree skill', argumentHint: '' }];
+		sdk.supportedAgentsResult = [];
+		sdk.mcpServerStatusResult = [];
+		sdk.nextQueryMessages = [makeSystemInitMessage(sessionId), makeResultSuccess(sessionId)];
+
+		await agent.chats.sendMessage(defaultChatUri(created.session), 'hi', worktree, undefined, 'turn-1');
+
+		let sessionChanges = 0;
+		let agentChanges = 0;
+		disposables.add(agent.getSessionForTesting(created.session)!.onDidCustomizationsChange(() => sessionChanges++));
+		disposables.add(agent.onDidCustomizationsChange(() => agentChanges++));
+		await fileService.writeFile(
+			URI.joinPath(worktree, '.claude', 'skills', 'worktree-skill', 'SKILL.md'),
+			VSBuffer.fromString('---\nname: worktree-skill\ndescription: Worktree skill\n---\nbody'),
+		);
+		await timeout(1_000);
+		const customizations = await agent.getSessionCustomizations!(created.session);
+		const skills = customizations.find(customization => customization.uri === URI.joinPath(worktree, '.claude', 'skills').toString());
+
+		assert.deepStrictEqual({
+			sessionChanges,
+			agentChanges,
+			startupCwd: sdk.capturedStartupOptions[0]?.cwd,
+			skills: skills?.type === CustomizationType.Directory ? skills.children?.map(skill => skill.name) : undefined,
+		}, {
+			sessionChanges: 1,
+			agentChanges: 1,
+			startupCwd: worktree.fsPath,
+			skills: ['worktree-skill'],
+		});
+	}).timeout(5_000);
+
 	test('materialize resolves the SDK agent name from the file frontmatter, not the filename', async () => {
 		// `_resolveAgentName` parses the selected `~/.claude/agents/<file>.md`:
 		// the SDK keys agents by their frontmatter `name`, which need not match

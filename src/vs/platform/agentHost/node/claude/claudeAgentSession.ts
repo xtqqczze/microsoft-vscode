@@ -7,7 +7,8 @@ import type { McpSdkServerConfigWithInstance, Options, PermissionMode, SDKUserMe
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { CancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { INativeEnvironmentService } from '../../../environment/common/environment.js';
 import { IFileService } from '../../../files/common/files.js';
@@ -141,6 +142,7 @@ export class ClaudeAgentSession extends Disposable {
 		return this._workingDirectory ?? this.workspace;
 	}
 	private _workingDirectory: URI | undefined;
+	private readonly _customizationWatcher = this._register(new DisposableStore());
 
 	/** Exposed for the materializer's MCP-server build closure. */
 	get pendingClientToolCalls(): PendingRequestRegistry<CallToolResult> { return this._pendingClientToolCalls; }
@@ -343,17 +345,18 @@ export class ClaudeAgentSession extends Disposable {
 		this.toolDiff = this._register(toolDiff);
 		this._register(this.clientCustomizationsDiff.onDidChange(() => this._onDidCustomizationsChange.fire()));
 
-		// Watch the on-disk Claude customization sources so edits made outside
-		// the session (a new `~/.claude/agents/*.md`, an edited skill, a changed
-		// `.mcp.json`) drive a workbench re-fetch. Active from construction so
-		// it covers the provisional (pre-materialize) window too.
-		const customizationWatcher = this._register(new ClaudeCustomizationWatcher(
-			this.workingDirectory,
+		this._watchCustomizations(this.workspace);
+	}
+
+	private _watchCustomizations(directory: URI | undefined): void {
+		this._customizationWatcher.clear();
+		const watcher = this._customizationWatcher.add(new ClaudeCustomizationWatcher(
+			directory,
 			this._environmentService.userHome,
 			this._fileService,
 			this._logService,
 		));
-		this._register(customizationWatcher.onDidChange(() => this._onDidCustomizationsChange.fire()));
+		this._customizationWatcher.add(watcher.onDidChange(() => this._onDidCustomizationsChange.fire()));
 	}
 
 	/**
@@ -423,8 +426,9 @@ export class ClaudeAgentSession extends Disposable {
 		// Adopt the host-resolved working directory (e.g. an isolated worktree)
 		// before it's read below; falls back to the session's `workspace` when the
 		// host didn't resolve a dedicated directory.
-		if (ctx.workingDirectory) {
+		if (ctx.workingDirectory && !isEqual(ctx.workingDirectory, this.workingDirectory)) {
 			this._workingDirectory = ctx.workingDirectory;
+			this._watchCustomizations(ctx.workingDirectory);
 		}
 		if (!this.workingDirectory) {
 			throw new Error(`Cannot materialize Claude session ${this.sessionId}: workingDirectory is required`);
