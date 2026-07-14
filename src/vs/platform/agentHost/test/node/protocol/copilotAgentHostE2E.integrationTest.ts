@@ -117,6 +117,7 @@ suite('Agent Host E2E — Copilot (Copilot-specific)', function () {
 			action: {
 				type: ActionType.ChatTurnStarted,
 				turnId,
+				startedAt: new Date().toISOString(),
 				message: {
 					text: 'Call the get_magic_word tool and then tell me the exact magic word it returned.',
 					origin: { kind: MessageKind.User },

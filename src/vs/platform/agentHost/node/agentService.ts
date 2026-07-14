@@ -672,7 +672,7 @@ export class AgentService extends Disposable implements IAgentService {
 	 */
 	private async _startSessionPrompt(session: URI, chat: URI, prompt: string): Promise<void> {
 		const message: Message = { text: prompt, origin: { kind: MessageKind.User } };
-		const action = { type: ActionType.ChatTurnStarted, turnId: generateUuid(), message } as const;
+		const action = { type: ActionType.ChatTurnStarted, turnId: generateUuid(), startedAt: new Date().toISOString(), message } as const;
 		this._stateManager.dispatchServerAction(chat.toString(), action);
 		this._sideEffects.handleAction(chat.toString(), action);
 	}
