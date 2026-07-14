@@ -2130,13 +2130,15 @@ suite('ClaudeAgent', () => {
 
 		let sessionChanges = 0;
 		let agentChanges = 0;
-		disposables.add(agent.getSessionForTesting(created.session)!.onDidCustomizationsChange(() => sessionChanges++));
+		const session = agent.getSessionForTesting(created.session)!;
+		const customizationChanged = Event.toPromise(session.onDidCustomizationsChange, disposables);
+		disposables.add(session.onDidCustomizationsChange(() => sessionChanges++));
 		disposables.add(agent.onDidCustomizationsChange(() => agentChanges++));
 		await fileService.writeFile(
 			URI.joinPath(worktree, '.claude', 'skills', 'worktree-skill', 'SKILL.md'),
 			VSBuffer.fromString('---\nname: worktree-skill\ndescription: Worktree skill\n---\nbody'),
 		);
-		await timeout(1_000);
+		await customizationChanged;
 		const customizations = await agent.getSessionCustomizations!(created.session);
 		const skills = customizations.find(customization => customization.uri === URI.joinPath(worktree, '.claude', 'skills').toString());
 
