@@ -29,7 +29,7 @@ import {
 import { DeferredPromise, timeout } from '../../../../base/common/async.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import type { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { isUUID } from '../../../../base/common/uuid.js';
 import { isCancellationError } from '../../../../base/common/errors.js';
@@ -2131,7 +2131,7 @@ suite('ClaudeAgent', () => {
 		let sessionChanges = 0;
 		let agentChanges = 0;
 		const session = agent.getSessionForTesting(created.session)!;
-		const customizationChanged = Event.toPromise(session.onDidCustomizationsChange, disposables);
+		const customizationChanged = Event.toPromise(session.onDidCustomizationsChange, disposables.add(new DisposableStore()));
 		disposables.add(session.onDidCustomizationsChange(() => sessionChanges++));
 		disposables.add(agent.onDidCustomizationsChange(() => agentChanges++));
 		await fileService.writeFile(
