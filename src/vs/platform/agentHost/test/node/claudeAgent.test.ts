@@ -5474,9 +5474,8 @@ suite('ClaudeAgent (Phase 9 — runtime mutation surface)', () => {
 		});
 	});
 
-	test('changeModel with `max` effort clamps to `xhigh` on the runtime path and warns', async () => {
-		const log = new CapturingLogService();
-		const { ctx, sessionUri, query, advance } = await materialize({ logService: log });
+	test('changeModel with `max` effort passes `max` through on the runtime path', async () => {
+		const { ctx, sessionUri, query, advance } = await materialize();
 
 		await ctx.agent.chats.changeModel(defaultChatUri(sessionUri), { id: 'claude-opus-4.6', config: { thinkingLevel: 'max' } });
 		const p2 = ctx.agent.chats.sendMessage(defaultChatUri(sessionUri), 'next', undefined, undefined, 'turn-2');
@@ -5484,8 +5483,7 @@ suite('ClaudeAgent (Phase 9 — runtime mutation surface)', () => {
 		advance.complete();
 		await p2;
 
-		assert.deepStrictEqual(query.recordedFlagSettings.map(s => s.effortLevel), ['xhigh']);
-		assert.ok(log.warns.some(w => w.includes('clamped to')), `expected clamp warning, got: ${log.warns.join(' | ')}`);
+		assert.deepStrictEqual(query.recordedFlagSettings.map(s => s.effortLevel), ['max']);
 	});
 
 	test('changeModel with same id and unchanged effort skips the SDK setters', async () => {

@@ -16,7 +16,7 @@ import { ILogService } from '../../../log/common/log.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { ClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
-import { ClaudeRuntimeEffortLevel, clampEffortForRuntime, resolveClaudeEffort } from '../../common/claudeModelConfig.js';
+import { ClaudeRuntimeEffortLevel, toRuntimeEffortLevel, resolveClaudeEffort } from '../../common/claudeModelConfig.js';
 import { AgentSignal, IAgentSessionProjectInfo } from '../../common/agentService.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
@@ -495,7 +495,7 @@ export class ClaudeAgentSession extends Disposable {
 		// config. Read provisional state directly off the session.
 		pipeline.seedCurrentConfig(
 			toSdkModelId(this._provisionalModel?.id),
-			clampEffortForRuntime(resolveClaudeEffort(this._provisionalModel)),
+			toRuntimeEffortLevel(resolveClaudeEffort(this._provisionalModel)),
 			permissionMode,
 		);
 
@@ -736,9 +736,8 @@ export class ClaudeAgentSession extends Disposable {
 	 *   startup picks it up via `Options.model` / `Options.effort`.
 	 * - Post-materialize: queue the change on the pipeline; the SDK
 	 *   applies it on the NEXT user request via
-	 *   `Query.setModel` / `Query.applyFlagSettings`. `'max'` effort is
-	 *   clamped to `'xhigh'` on the runtime path (CAPI lacks a `'max'`
-	 *   tier today).
+	 *   `Query.setModel` / `Query.applyFlagSettings`. `'max'` flows through
+	 *   unchanged — see {@link toRuntimeEffortLevel}.
 	 *
 	 * In both cases the new model is persisted to the per-session
 	 * metadata overlay so a later resume sees the user's choice.
@@ -746,11 +745,6 @@ export class ClaudeAgentSession extends Disposable {
 	async setModel(model: ModelSelection): Promise<void> {
 		this._provisionalModel = model;
 		if (this._pipeline) {
-			const requestedEffort = resolveClaudeEffort(model);
-			const runtimeEffort = clampEffortForRuntime(requestedEffort);
-			if (requestedEffort === 'max') {
-				this._logService.warn(`[Claude:${this.sessionId}] setModel: 'max' effort clamped to 'xhigh' (Copilot CAPI has no 'max' model yet)`);
-			}
 			await this._pipeline.setModel(toSdkModelId(model.id));
 			// Always push the resolved effort, including `undefined`. Switching
 			// to a model that does not support reasoning effort (e.g. Haiku)
@@ -758,7 +752,7 @@ export class ClaudeAgentSession extends Disposable {
 			// SDK is still applying from a prior effort-capable model — otherwise
 			// the next turn replays e.g. `'high'` onto Haiku and the API 400s
 			// (`output_config.effort ... does not support reasoning effort`).
-			await this._pipeline.setEffort(runtimeEffort);
+			await this._pipeline.setEffort(toRuntimeEffortLevel(resolveClaudeEffort(model)));
 		}
 		await this._metadataStore.write(this._storageUri, { model });
 	}
