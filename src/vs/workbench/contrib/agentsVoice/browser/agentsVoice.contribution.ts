@@ -456,7 +456,6 @@ configurationRegistry.registerConfiguration({
 			},
 			scope: ConfigurationScope.APPLICATION,
 			restricted: true,
-			included: false,
 		},
 		'agents.voice.backendUrl': {
 			type: 'string',
