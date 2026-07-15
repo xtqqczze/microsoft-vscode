@@ -136,6 +136,15 @@
 }
 
 /*
+ * Notifications center header title — the shared ramp above only handles casing
+ * and size. Its semibold weight lives here so all of this header's typography
+ * stays in one module.
+ */
+.style-override.monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-title {
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+}
+
+/*
  * File Explorer titles — respect the real casing of the workspace / folder name
  * (user input). `text-transform: none` overrides both the base `uppercase` rule
  * and the `capitalize` override above (the `:has(...)` argument raises
