@@ -684,11 +684,13 @@ export class AgentSideEffects extends Disposable {
 		if (action.type === ActionType.ChatTurnCancelled) {
 			this._turnTracker.turnCompleted(sessionKey, turnId, 'cancelled');
 			this._toolCallTracker.clearSession(sessionKey);
+			this._markSessionUnread(sessionUri);
 		}
 
 		if (action.type === ActionType.ChatError) {
 			this._turnTracker.turnCompleted(sessionKey, turnId, 'error');
 			this._toolCallTracker.clearSession(sessionKey);
+			this._markSessionUnread(sessionUri);
 		}
 	}
 
@@ -735,6 +737,21 @@ export class AgentSideEffects extends Disposable {
 		// targets that chat's title, mirroring `seedTitleFromFirstMessage`.
 		const titleChatChannel = isAhpChatChannel(sessionKey) && !isDefaultChatUri(sessionKey) ? sessionKey : undefined;
 		this._titleController.refineTitleFromFirstTurn(sessionUri, titleChatChannel);
+
+		// A completed turn produces new output the user may not have seen. Route
+		// subagent turns to their owning session too (a background subagent can
+		// complete after the parent turn). Each client keeps its active session
+		// read; `_markSessionUnread` is idempotent.
+		this._markSessionUnread(sessionUri);
+	}
+
+	private _markSessionUnread(session: ProtocolURI): void {
+		const status = this._stateManager.getSessionSummary(session)?.status ?? 0;
+		if (!(status & SessionStatus.IsRead)) {
+			return;
+		}
+		this._stateManager.dispatchServerAction(session, { type: ActionType.SessionIsReadChanged, isRead: false });
+		this._persistSessionFlag(session, 'isRead', '');
 	}
 
 	private _describeSignal(signal: AgentSignal): string {
@@ -993,6 +1010,14 @@ export class AgentSideEffects extends Disposable {
 		const autoApproval = await this._permissionManager.getAutoApproval(approvalEvent, sessionKey);
 		const part = this._stateManager.getSessionState(sessionKey)?.activeTurn?.responseParts.find(part => part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === e.state.toolCallId);
 		const toolCall = part?.kind === ResponsePartKind.ToolCall ? part.toolCall : undefined;
+		if (toolCall
+			&& toolCall.status !== ToolCallStatus.Streaming
+			&& toolCall.status !== ToolCallStatus.Running
+			&& toolCall.status !== ToolCallStatus.PendingConfirmation) {
+			this._toolCallAgents.delete(`${sessionKey}:${e.state.toolCallId}`);
+			this._logService.trace(`[AgentSideEffects] Dropping stale tool ready for ${e.state.toolCallId}: status=${toolCall.status}`);
+			return;
+		}
 		const contributor = e.state.contributor ?? toolCall?.contributor;
 		let effective = e;
 		const clientShouldAutoApprove = autoApproval !== undefined

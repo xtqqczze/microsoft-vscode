@@ -1003,6 +1003,178 @@ suite('AgentSideEffects', () => {
 		});
 	});
 
+	suite('turn completion — read/unread', () => {
+
+		function readChangesFrom(envelopes: readonly ActionEnvelope[]): boolean[] {
+			return envelopes
+				.filter(e => e.action.type === ActionType.SessionIsReadChanged)
+				.map(e => (e.action as { isRead: boolean }).isRead);
+		}
+
+		/**
+		 * Turn completion persists the (un)read flag, so these tests need a real
+		 * session database rather than the suite's null data service.
+		 */
+		function setupPersisting(): { sideEffects: AgentSideEffects; db: TestSessionDatabase } {
+			const db = new TestSessionDatabase();
+			const persisting = createTestSideEffects(disposables, stateManager, {
+				getAgent: () => agent,
+				agents: agentList,
+				sessionDataService: createSessionDataService(db),
+				onTurnComplete: () => { },
+			}, undefined, disposables.add(new AgentHostTelemetryService(telemetryService)));
+			return { sideEffects: persisting, db };
+		}
+
+		test('marks a read session unread when a turn completes', () => {
+			const { sideEffects: persisting } = setupPersisting();
+			setupSession();
+			// The session has been read (e.g. a client viewed it).
+			stateManager.dispatchServerAction(sessionUri.toString(), { type: ActionType.SessionIsReadChanged, isRead: true });
+			disposables.add(persisting.registerProgressListener(agent));
+			startTurn('turn-1');
+
+			const envelopes: ActionEnvelope[] = [];
+			disposables.add(stateManager.onDidEmitEnvelope(e => envelopes.push(e)));
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: { type: ActionType.ChatTurnComplete, turnId: 'turn-1', duration: 1000 },
+			});
+
+			assert.deepStrictEqual({
+				readChanges: readChangesFrom(envelopes),
+				isReadBitSet: (stateManager.getSessionSummary(sessionUri.toString())!.status & SessionStatus.IsRead) !== 0,
+			}, {
+				readChanges: [false],
+				isReadBitSet: false,
+			});
+		});
+
+		test('does not re-mark an already-unread session on turn completion', () => {
+			const { sideEffects: persisting } = setupPersisting();
+			setupSession();
+			// No SessionIsReadChanged dispatched: the session starts unread.
+			disposables.add(persisting.registerProgressListener(agent));
+			startTurn('turn-1');
+
+			const envelopes: ActionEnvelope[] = [];
+			disposables.add(stateManager.onDidEmitEnvelope(e => envelopes.push(e)));
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: { type: ActionType.ChatTurnComplete, turnId: 'turn-1', duration: 1000 },
+			});
+
+			assert.deepStrictEqual(readChangesFrom(envelopes), []);
+		});
+
+		test('persists the unread flag so it survives a host restart', async () => {
+			const { sideEffects: persisting, db } = setupPersisting();
+			setupSession();
+			stateManager.dispatchServerAction(sessionUri.toString(), { type: ActionType.SessionIsReadChanged, isRead: true });
+			disposables.add(persisting.registerProgressListener(agent));
+			startTurn('turn-1');
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: { type: ActionType.ChatTurnComplete, turnId: 'turn-1', duration: 1000 },
+			});
+
+			assert.strictEqual(await db.getMetadata('isRead'), '');
+		});
+
+		test('marks the parent session unread when a subagent turn completes', () => {
+			const { sideEffects: persisting } = setupPersisting();
+			setupSession();
+			// The session has been read (e.g. a client viewed it after the parent
+			// turn already produced output). A background subagent then completes.
+			stateManager.dispatchServerAction(sessionUri.toString(), { type: ActionType.SessionIsReadChanged, isRead: true });
+			disposables.add(persisting.registerProgressListener(agent));
+			startTurn('turn-1');
+
+			// Spawn a subagent chat off a parent tool call.
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: {
+					type: ActionType.ChatToolCallStart, turnId: 'turn-1',
+					toolCallId: 'tc-1', toolName: 'runSubagent', displayName: 'Run Subagent', contributor: undefined,
+					_meta: { toolKind: undefined, language: undefined },
+				},
+			});
+			agent.fireProgress({
+				kind: 'subagent_started', chat: URI.parse(defaultChatUri),
+				toolCallId: 'tc-1', agentName: 'code-reviewer', agentDisplayName: 'Code Reviewer',
+			});
+
+			const subagentUri = buildSubagentChatUri(sessionUri.toString(), 'tc-1');
+			const subagentTurnId = stateManager.getSessionState(subagentUri)!.activeTurn!.id;
+
+			const envelopes: ActionEnvelope[] = [];
+			disposables.add(stateManager.onDidEmitEnvelope(e => envelopes.push(e)));
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(subagentUri),
+				action: { type: ActionType.ChatTurnComplete, turnId: subagentTurnId, duration: 1000 },
+			});
+
+			assert.deepStrictEqual({
+				readChanges: readChangesFrom(envelopes),
+				isReadBitSet: (stateManager.getSessionSummary(sessionUri.toString())!.status & SessionStatus.IsRead) !== 0,
+			}, {
+				readChanges: [false],
+				isReadBitSet: false,
+			});
+		});
+		test('marks a read session unread when a turn is cancelled', () => {
+			const { sideEffects: persisting } = setupPersisting();
+			setupSession();
+			stateManager.dispatchServerAction(sessionUri.toString(), { type: ActionType.SessionIsReadChanged, isRead: true });
+			disposables.add(persisting.registerProgressListener(agent));
+			startTurn('turn-1');
+
+			const envelopes: ActionEnvelope[] = [];
+			disposables.add(stateManager.onDidEmitEnvelope(e => envelopes.push(e)));
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: { type: ActionType.ChatTurnCancelled, turnId: 'turn-1', duration: 1000 },
+			});
+
+			assert.deepStrictEqual({
+				readChanges: readChangesFrom(envelopes),
+				isReadBitSet: (stateManager.getSessionSummary(sessionUri.toString())!.status & SessionStatus.IsRead) !== 0,
+			}, {
+				readChanges: [false],
+				isReadBitSet: false,
+			});
+		});
+
+		test('marks a read session unread when a turn errors', () => {
+			const { sideEffects: persisting } = setupPersisting();
+			setupSession();
+			stateManager.dispatchServerAction(sessionUri.toString(), { type: ActionType.SessionIsReadChanged, isRead: true });
+			disposables.add(persisting.registerProgressListener(agent));
+			startTurn('turn-1');
+
+			const envelopes: ActionEnvelope[] = [];
+			disposables.add(stateManager.onDidEmitEnvelope(e => envelopes.push(e)));
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: { type: ActionType.ChatError, turnId: 'turn-1', duration: 1000, error: { errorType: 'Error', message: 'boom' } },
+			});
+
+			assert.deepStrictEqual({
+				readChanges: readChangesFrom(envelopes),
+				isReadBitSet: (stateManager.getSessionSummary(sessionUri.toString())!.status & SessionStatus.IsRead) !== 0,
+			}, {
+				readChanges: [false],
+				isReadBitSet: false,
+			});
+		});
+	});
+
 	suite('handleAction — session/turnCancelled', () => {
 
 		test('calls abortSession on the agent', async () => {
@@ -2159,6 +2331,65 @@ suite('AgentSideEffects', () => {
 				'tool call should advance to PendingConfirmation for permission-gated tool_ready');
 		});
 
+		test('tool_ready is dropped when the tool completes while permission lookup is pending', async () => {
+			setupSession();
+			startTurn('turn-1');
+			disposables.add(sideEffects.registerProgressListener(agent));
+
+			const envelopes: ActionEnvelope[] = [];
+			disposables.add(stateManager.onDidEmitEnvelope(e => envelopes.push(e)));
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: {
+					type: ActionType.ChatToolCallStart, turnId: 'turn-1',
+					toolCallId: 'tc-stale-ready', toolName: 'vscodeAPI', displayName: 'Get VS Code API References',
+					contributor: { kind: ToolCallContributorKind.Client, clientId: 'disconnected-client' },
+					_meta: { toolKind: undefined, language: undefined },
+				},
+			});
+			agent.fireProgress({
+				kind: 'pending_confirmation', chat: URI.parse(defaultChatUri),
+				state: {
+					status: ToolCallStatus.PendingConfirmation,
+					toolCallId: 'tc-stale-ready', toolName: 'vscodeAPI', displayName: 'Get VS Code API References',
+					invocationMessage: 'Get VS Code API References', toolInput: '{"query":"test"}',
+					confirmationTitle: 'Allow tool call?', edits: undefined,
+				},
+				permissionKind: 'custom-tool', permissionPath: undefined,
+			});
+
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallReady,
+				turnId: 'turn-1',
+				toolCallId: 'tc-stale-ready',
+				invocationMessage: 'Get VS Code API References',
+				confirmed: ToolCallConfirmationReason.NotNeeded,
+			});
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallComplete,
+				turnId: 'turn-1',
+				toolCallId: 'tc-stale-ready',
+				result: {
+					success: false,
+					pastTenseMessage: 'Get VS Code API References failed',
+					error: { message: 'Client disconnected' },
+				},
+			});
+
+			await Promise.resolve();
+
+			const toolCall = stateManager.getSessionState(sessionUri.toString())?.activeTurn?.responseParts
+				.find(part => part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === 'tc-stale-ready');
+			assert.deepStrictEqual({
+				status: toolCall?.kind === ResponsePartKind.ToolCall ? toolCall.toolCall.status : undefined,
+				readyActions: envelopes.filter(e => e.action.type === ActionType.ChatToolCallReady).length,
+			}, {
+				status: ToolCallStatus.Completed,
+				readyActions: 1,
+			});
+		});
+
 		test('tool_ready for an additional chat is emitted on that chat channel', async () => {
 			setupSession();
 			const chatUri = buildChatUri(sessionUri.toString(), 'peer');
@@ -2727,6 +2958,7 @@ suite('AgentSideEffects', () => {
 				{ requestId: 'tc-mid-1', approved: true },
 			]);
 		});
+
 	});
 
 	// ---- Edit auto-approve ----------------------------------------------

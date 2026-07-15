@@ -115,6 +115,10 @@ export class ClaudeAgentSession extends Disposable {
 		return isDefaultChatUri(this._chatChannelUri) ? this.sessionUri : this._chatChannelUri;
 	}
 
+	private get _sessionCustomizations(): readonly Customization[] {
+		return this._stateManager.getSessionState(this.sessionUri.toString())?.customizations ?? [];
+	}
+
 	/** Pre-materialize model selection. Mutable; flows into `Options.model` on first installPipeline. */
 	private _provisionalModel: ModelSelection | undefined;
 	/**
@@ -1034,7 +1038,7 @@ export class ClaudeAgentSession extends Disposable {
 
 		// Final projection: the client-pushed tier first, then the discovered
 		// tier, with session MCP enablement applied to both.
-		const state = this._stateManager.getSessionState(this._storageUri.toString())?.customizations ?? [];
+		const state = this._sessionCustomizations;
 		const desiredById = new Map(state.map(customization => [customization.id, customization.enabled]));
 		const result: Customization[] = synced.map(item => ({
 			...item.customization,
@@ -1050,7 +1054,7 @@ export class ClaudeAgentSession extends Disposable {
 
 	private async _reconcileMcpServerEnablement(): Promise<void> {
 		const pipeline = this._requirePipeline();
-		const state = this._stateManager.getSessionState(this._storageUri.toString())?.customizations ?? [];
+		const state = this._sessionCustomizations;
 		const desired = new Map(getMcpServerCustomizations(state).map(server => [server.name, server.enabled]));
 		if (desired.size === 0) {
 			return;
@@ -1062,7 +1066,7 @@ export class ClaudeAgentSession extends Disposable {
 	}
 
 	private _desiredClientPluginPaths(): readonly URI[] {
-		const state = this._stateManager.getSessionState(this._storageUri.toString())?.customizations ?? [];
+		const state = this._sessionCustomizations;
 		const desiredById = new Map(state.map(customization => [customization.id, customization.enabled]));
 		const paths: URI[] = [];
 		for (const synced of this.clientCustomizationsDiff.model.state.get().synced) {

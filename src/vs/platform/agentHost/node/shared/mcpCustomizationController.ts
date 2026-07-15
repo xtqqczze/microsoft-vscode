@@ -416,7 +416,7 @@ export function getMcpServerCustomizations(customizations: readonly Customizatio
 		} else {
 			for (const child of top.children ?? []) {
 				if (child.type === CustomizationType.McpServer) {
-					result.push(child);
+					result.push(top.enabled ? child : { ...child, enabled: false });
 				}
 			}
 		}

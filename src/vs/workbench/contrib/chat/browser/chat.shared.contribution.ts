@@ -502,6 +502,15 @@ configurationRegistry.registerConfiguration({
 			description: nls.localize('chat.permissions.default.settingDescription', "Controls the default permissions picker mode for new local chat sessions. You can still change the permission mode per session, and each session remembers the permission mode that was used. If enterprise policy disables auto approval, new sessions use Default Approvals."),
 			default: ChatPermissionLevel.Default,
 		},
+		[ChatConfiguration.AutoApprovalsEnabled]: {
+			type: 'boolean',
+			default: product.quality !== 'stable',
+			description: nls.localize('chat.experimental.autoApprovals.enabled', "Controls whether Approve When Safe is shown in Agent Host approval pickers."),
+			tags: ['experimental'],
+			experiment: {
+				mode: 'auto'
+			},
+		},
 		[ChatConfiguration.PermissionsSandboxToggleEnabled]: {
 			type: 'boolean',
 			default: false,
@@ -528,13 +537,14 @@ configurationRegistry.registerConfiguration({
 				},
 				approvals: {
 					type: 'string',
-					enum: [ChatPermissionLevel.Default, ChatPermissionLevel.AutoApprove],
+					enum: [ChatPermissionLevel.Default, ChatPermissionLevel.Assisted, ChatPermissionLevel.AutoApprove],
 					enumDescriptions: [
-						nls.localize('chat.defaultConfiguration.approvals.default', "Default Approvals — Copilot uses your configured settings."),
-						nls.localize('chat.defaultConfiguration.approvals.autoApprove', "Bypass Approvals — all tool calls are auto-approved."),
+						nls.localize('chat.defaultConfiguration.approvals.default', "Ask When Needed — asks when approval settings don't apply."),
+						nls.localize('chat.defaultConfiguration.approvals.assisted', "Approve When Safe — evaluates risk before running tools."),
+						nls.localize('chat.defaultConfiguration.approvals.autoApprove', "Allow All — runs tool calls without asking."),
 					],
 					default: ChatPermissionLevel.Default,
-					description: nls.localize('chat.defaultConfiguration.approvals.description', "The starting approval behavior for new agent sessions. If enterprise policy disables auto approval, new sessions use Default Approvals."),
+					description: nls.localize('chat.defaultConfiguration.approvals.description', "The starting approval behavior for new agent sessions. If enterprise policy disables auto approval, new sessions use Ask When Needed."),
 				},
 			},
 			default: { mode: 'interactive', approvals: ChatPermissionLevel.Default },
@@ -802,11 +812,6 @@ configurationRegistry.registerConfiguration({
 			default: true,
 			description: nls.localize('chat.contextUsage.enabled', "Show the context window usage indicator in the chat input."),
 		},
-		[ChatConfiguration.Verbose]: {
-			type: 'boolean',
-			default: false,
-			description: nls.localize('chat.verbose', "Show request and completion timestamps. Hover over a completion timestamp to show the elapsed response time."),
-		},
 		[ChatConfiguration.ChatPersistentProgressEnabled]: {
 			type: 'boolean',
 			default: product.quality !== 'stable',
@@ -839,27 +844,35 @@ configurationRegistry.registerConfiguration({
 			default: false
 		},
 		[ChatConfiguration.TurnStatusPills]: {
-			type: 'object',
-			markdownDescription: nls.localize('chat.turnStatusPills', "Controls which agent turn status pills are shown above the chat input while a turn is in progress and inside the completed response. Only applies to agent sessions."),
-			properties: {
-				changes: {
+			anyOf: [
+				{
 					type: 'boolean',
-					default: false,
-					description: nls.localize('chat.turnStatusPills.changes', "Show a pill summarizing the files changed and the lines added and removed in the turn."),
 				},
-				preview: {
-					type: 'boolean',
-					default: false,
-					description: nls.localize('chat.turnStatusPills.preview', "Show a pill to preview a Markdown or HTML file created or edited in the turn."),
+				{
+					type: 'object',
+					properties: {
+						changes: {
+							type: 'boolean',
+							default: false,
+							description: nls.localize('chat.turnStatusPills.changes', "Show a pill summarizing the files changed and the lines added and removed in the turn."),
+						},
+						preview: {
+							type: 'boolean',
+							default: false,
+							description: nls.localize('chat.turnStatusPills.preview', "Show a pill to preview a Markdown or HTML file created or edited in the turn."),
+						},
+						browser: {
+							type: 'boolean',
+							default: false,
+							description: nls.localize('chat.turnStatusPills.browser', "Show a pill for browser activity in the turn."),
+						},
+					},
+					additionalProperties: false,
+					deprecationMessage: nls.localize('chat.turnStatusPills.objectDeprecated', "The per-pill object form is deprecated. Use a boolean value instead."),
 				},
-				browser: {
-					type: 'boolean',
-					default: false,
-					description: nls.localize('chat.turnStatusPills.browser', "Show a \"Live Browser\" pill to open the integrated browser at the last URL a browser tool opened in the turn."),
-				},
-			},
-			default: { changes: false, preview: false, browser: false },
-			additionalProperties: false,
+			],
+			markdownDescription: nls.localize('chat.turnStatusPills', "Controls whether agent status pills are shown above the chat input while a turn is in progress and inside the completed response. Only applies to agent sessions."),
+			default: false,
 		},
 		[mcpAccessConfig]: {
 			type: 'string',
