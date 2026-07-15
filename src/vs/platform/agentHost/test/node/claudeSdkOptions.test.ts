@@ -23,6 +23,7 @@ suite('claudeSdkOptions / buildSubprocessEnv', () => {
 		'ELECTRON_NO_ATTACH_CONSOLE',
 		'PATH',
 		'HOME',
+		'USERPROFILE',
 	];
 
 	function clearAndSet(values: Record<string, string>): void {
@@ -37,7 +38,7 @@ suite('claudeSdkOptions / buildSubprocessEnv', () => {
 		}
 	});
 
-	test('strips VSCODE_*, ELECTRON_*, NODE_OPTIONS, ANTHROPIC_API_KEY; keeps ELECTRON_RUN_AS_NODE; preserves unrelated vars', () => {
+	test('strips unsafe variables and forwards home paths in proxy mode', () => {
 		clearAndSet({
 			VSCODE_PID: '1234',
 			VSCODE_NLS_CONFIG: '{}',
@@ -46,6 +47,7 @@ suite('claudeSdkOptions / buildSubprocessEnv', () => {
 			ANTHROPIC_API_KEY: 'sk-leak',
 			PATH: '/usr/bin',
 			HOME: '/Users/test',
+			USERPROFILE: 'C:\\Users\\test',
 		});
 
 		const env = buildSubprocessEnv();
@@ -59,6 +61,7 @@ suite('claudeSdkOptions / buildSubprocessEnv', () => {
 			electronOther: env.ELECTRON_NO_ATTACH_CONSOLE,
 			path: env.PATH,
 			home: env.HOME,
+			userProfile: env.USERPROFILE,
 		}, {
 			runAsNode: '1',
 			nodeOptions: undefined,
@@ -67,7 +70,8 @@ suite('claudeSdkOptions / buildSubprocessEnv', () => {
 			vscodeNls: undefined,
 			electronOther: undefined,
 			path: undefined, // not explicitly forwarded; PATH is composed in settingsEnv, not subprocessEnv
-			home: undefined, // unrelated vars are simply absent from the override map (inherited by SDK)
+			home: '/Users/test',
+			userProfile: 'C:\\Users\\test',
 		});
 	});
 

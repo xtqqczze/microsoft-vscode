@@ -229,7 +229,13 @@ export function buildSubprocessEnv(proxied: boolean = true): Record<string, stri
 	// Native mode: inherit the real env so the user's own credentials + PATH
 	// reach the subprocess (replace semantics wipe anything not present here).
 	const env: Record<string, string | undefined> = proxied
-		? { ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: undefined, ANTHROPIC_API_KEY: undefined }
+		? {
+			ELECTRON_RUN_AS_NODE: '1',
+			NODE_OPTIONS: undefined,
+			ANTHROPIC_API_KEY: undefined,
+			HOME: process.env['HOME'],
+			USERPROFILE: process.env['USERPROFILE'],
+		}
 		: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: undefined };
 	for (const key of Object.keys(process.env)) {
 		if (key === 'ELECTRON_RUN_AS_NODE') { continue; }
