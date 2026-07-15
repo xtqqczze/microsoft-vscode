@@ -13,7 +13,7 @@ import { isEqual } from '../../../../../../base/common/resources.js';
 import { mock } from '../../../../../../base/test/common/mock.js';
 import { runWithFakedTimers } from '../../../../../../base/test/common/timeTravelScheduler.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { AgentSession, ClaudePreferAgentHostAgentsSettingId, ClaudePreferAgentHostEditorSettingId, IAgentHostService, type IAgentCreateChatOptions, type IAgentCreateSessionConfig, type IAgentSessionMetadata } from '../../../../../../platform/agentHost/common/agentService.js';
+import { AgentHostCodexAgentEnabledSettingId, AgentSession, ClaudePreferAgentHostAgentsSettingId, ClaudePreferAgentHostEditorSettingId, IAgentHostService, type IAgentCreateChatOptions, type IAgentCreateSessionConfig, type IAgentSessionMetadata } from '../../../../../../platform/agentHost/common/agentService.js';
 import type { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import type { ResolveSessionConfigResult } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
 import { ChatInteractivity as ProtocolChatInteractivity, ChatOriginKind as ProtocolChatOriginKind, CustomizationLoadStatus, CustomizationType, McpServerStatus, MessageKind, SessionLifecycle, type AgentInfo, type ChangesSummary, type Customization, type RootState, type SessionConfigState, type SessionState, type SessionSummary } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
@@ -584,7 +584,7 @@ suite('LocalAgentHostSessionsProvider', () => {
 		);
 	});
 
-	// ---- Claude AH/EH gate (preferAgentHost) -------
+	// ---- AH/EH gate (preferAgentHost) -------
 
 	// The agent host's Claude provider id is `claude`. In a window that prefers
 	// the extension-host Claude (the GitHub Copilot Chat extension's), the local
@@ -623,6 +623,31 @@ suite('LocalAgentHostSessionsProvider', () => {
 		const provider = createProvider(disposables, agentHost, undefined, { configurationService: configService, isSessionsWindow: true });
 
 		assert.deepStrictEqual(provider.sessionTypes.map(t => t.id), ['copilotcli', 'claude']);
+	});
+
+	test('gates agent-host Codex in the Agents window on the provider enablement setting', () => {
+		agentHost.setAgents([
+			{ provider: 'copilotcli', displayName: 'Copilot', description: '', models: [] } as AgentInfo,
+			{ provider: 'codex', displayName: 'Codex', description: '', models: [] } as AgentInfo,
+		]);
+		const configService = new TestConfigurationService();
+		configService.setUserConfiguration(AgentHostCodexAgentEnabledSettingId, false);
+		const provider = createProvider(disposables, agentHost, undefined, { configurationService: configService, isSessionsWindow: true });
+
+		assert.deepStrictEqual(provider.sessionTypes.map(t => t.id), ['copilotcli']);
+
+		let sessionTypesChanged = false;
+		disposables.add(provider.onDidChangeSessionTypes(() => { sessionTypesChanged = true; }));
+		configService.setUserConfiguration(AgentHostCodexAgentEnabledSettingId, true);
+		fireConfigChange(configService, AgentHostCodexAgentEnabledSettingId);
+
+		assert.deepStrictEqual({
+			sessionTypesChanged,
+			sessionTypes: provider.sessionTypes.map(t => t.id),
+		}, {
+			sessionTypesChanged: true,
+			sessionTypes: ['copilotcli', 'codex'],
+		});
 	});
 
 	test('gates agent-host Claude on the editor-window setting outside the Agents window', () => {
@@ -3235,8 +3260,11 @@ suite('LocalAgentHostSessionsProvider', () => {
 			{ provider: 'codex', displayName: 'Codex', description: '', models: [] } as AgentInfo,
 			{ provider: 'claude', displayName: 'Claude', description: '', models: [] } as AgentInfo,
 		]);
+		const configurationService = new TestConfigurationService();
+		configurationService.setUserConfiguration(AgentHostCodexAgentEnabledSettingId, true);
 		const provider = createProvider(disposables, agentHost, codexAndClaude, {
 			openSession: true,
+			configurationService,
 			sendRequest: async (): Promise<ChatSendResult> => {
 				// While the codex send is in flight, a foreign-type (claude)
 				// session shows up in the host's list (e.g. restored from an
