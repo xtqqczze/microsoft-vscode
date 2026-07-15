@@ -130,10 +130,9 @@ function isSafeSessionConfigKey(property: string): boolean {
 }
 
 function normalizeAutoApproveValue(value: unknown, policyRestricted: boolean): ChatPermissionLevel | undefined {
-	// `KNOWN_AUTO_APPROVE_VALUES` is intentionally tolerant of forward/legacy
-	// compatibility values (e.g. `assisted`) that are not real
-	// `ChatPermissionLevel`s. Validate against the enum here so this function
-	// never returns a value outside its declared contract.
+	// `KNOWN_AUTO_APPROVE_VALUES` is intentionally tolerant of legacy values
+	// that are not real `ChatPermissionLevel`s. Validate against the enum here
+	// so this function never returns a value outside its declared contract.
 	if (!isChatPermissionLevel(value)) {
 		return undefined;
 	}
