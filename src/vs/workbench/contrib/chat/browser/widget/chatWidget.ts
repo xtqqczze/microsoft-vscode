@@ -741,6 +741,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		return this.listWidget.scrollHeight;
 	}
 
+	get viewportHeight(): number {
+		return this.listWidget.renderHeight;
+	}
+
 	get attachmentModel(): ChatAttachmentModel {
 		return this.input.attachmentModel;
 	}
