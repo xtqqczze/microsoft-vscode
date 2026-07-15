@@ -2245,7 +2245,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 			}
 			let agentSession: CopilotAgentSession | undefined;
 			try {
-				agentSession = this._createAgentSession(launchPlan, workingDirectory, activeClient, chat);
+				agentSession = this._createAgentSession(launchPlan, workingDirectory, activeClient, session, chat);
 				await agentSession.initializeSession();
 				if (options?.fork?.turnIdMapping) {
 					await agentSession.remapTurnIds(options.fork.turnIdMapping);
@@ -2479,7 +2479,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 			};
 			let agentSession: CopilotAgentSession | undefined;
 			try {
-				agentSession = this._createAgentSession(launchPlan, workingDirectory, activeClient, chat);
+				agentSession = this._createAgentSession(launchPlan, workingDirectory, activeClient, session, chat);
 				await agentSession.initializeSession();
 				this._ensureEntry(sessionId).registerPeerChat(chatKey, new CopilotSessionEntry(agentSession));
 				this._logService.info(`[Copilot] Resumed additional chat ${chatKey} in session ${session.toString()}`);
@@ -2750,9 +2750,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 	 * {@link _resumeSession} for the same id cannot dispose this entry mid-init
 	 * via {@link DisposableMap.set}.
 	 */
-	private _createAgentSession(launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: ActiveClient, channelUri?: URI): CopilotAgentSession {
-		const sessionUri = channelUri ?? AgentSession.uri(this.id, launchPlan.sessionId);
-		const chatChannelUri = channelUri ?? URI.parse(buildDefaultChatUri(sessionUri));
+	private _createAgentSession(launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: ActiveClient, sessionUri = AgentSession.uri(this.id, launchPlan.sessionId), chatChannelUri = URI.parse(buildDefaultChatUri(sessionUri))): CopilotAgentSession {
 
 		const agentSession = this._instantiationService.createInstance(
 			CopilotAgentSession,

@@ -39,7 +39,7 @@ import { isAgentFeedbackAnnotationsAttachment, renderAgentFeedbackAnnotationsAtt
 import { ISessionDatabase, ISessionDataService, SESSION_ATTACHMENTS_DIRNAME } from '../../common/sessionDataService.js';
 import { MessageAttachmentKind, ToolCallContributorKind, type FileEdit, type MessageAttachment } from '../../common/state/protocol/state.js';
 import { ActionType, isChatAction, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
-import { MessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, ToolCallConfirmationReason, ToolCallRiskAssessmentKind, ToolCallRiskAssessmentStatus, ToolCallStatus, ToolResultContentType, buildSubagentSessionUri, getToolSubagentContent, isSubagentSession, parseChatUri, type PendingMessage, type ChatInputAnswer, type ChatInputOption, type ChatInputQuestion, type ChatInputRequest, type ToolCallResult, type ToolResultContent, type Turn, type UsageInfo, type UsageInfoMeta } from '../../common/state/sessionState.js';
+import { MessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, ToolCallConfirmationReason, ToolCallRiskAssessmentKind, ToolCallRiskAssessmentStatus, ToolCallStatus, ToolResultContentType, buildSubagentSessionUri, getToolSubagentContent, isSubagentSession, type PendingMessage, type ChatInputAnswer, type ChatInputOption, type ChatInputQuestion, type ChatInputRequest, type ToolCallResult, type ToolResultContent, type Turn, type UsageInfo, type UsageInfoMeta } from '../../common/state/sessionState.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import type { IExitPlanModeResponse } from './copilotAgent.js';
 import { CopilotSessionWrapper } from './copilotSessionWrapper.js';
@@ -490,7 +490,6 @@ export class CopilotAgentSession extends Disposable {
 	readonly sessionId: string;
 	readonly sessionUri: URI;
 	private readonly _chatChannelUri: URI;
-	private readonly _customizationStateUri: URI;
 
 	/** Working directory this session operates in, if any. */
 	get workingDirectory(): URI | undefined { return this._workingDirectory; }
@@ -683,8 +682,6 @@ export class CopilotAgentSession extends Disposable {
 		super();
 		this.sessionId = options.rawSessionId;
 		this.sessionUri = options.sessionUri;
-		const parsedSessionUri = parseChatUri(options.sessionUri)?.session;
-		this._customizationStateUri = parsedSessionUri ? URI.parse(parsedSessionUri) : options.sessionUri;
 		this._slashCommandProvider = new CopilotSlashCommandProvider(() => this._wrapper.session.rpc.commands.list({ includeBuiltins: true, includeSkills: true, includeClientCommands: true }).then(c => c.commands), this._logService);
 		this._chatChannelUri = options.chatChannelUri;
 		this._onDidSessionProgress = options.onDidSessionProgress;
@@ -712,7 +709,7 @@ export class CopilotAgentSession extends Disposable {
 		this._editTracker = this._instantiationService.createInstance(FileEditTracker, options.sessionUri.toString(), this._databaseRef.object);
 
 		this._mcpCustomizations = this._register(this._instantiationService.createInstance(McpCustomizationController, {
-			providerId: this._customizationStateUri.scheme,
+			providerId: this.sessionUri.scheme,
 			sessionId: this.sessionId,
 			resolveChildId: options.resolveMcpChildId,
 			emit: action => this._emitAction(action),
@@ -1795,7 +1792,7 @@ export class CopilotAgentSession extends Disposable {
 	}
 
 	private async _reconcileMcpServerEnablement(): Promise<void> {
-		const desiredCustomizations = this._stateManager.getSessionState(this._customizationStateUri.toString())?.customizations ?? [];
+		const desiredCustomizations = this._stateManager.getSessionState(this.sessionUri.toString())?.customizations ?? [];
 		const desiredServers = getMcpServerCustomizations(desiredCustomizations);
 		if (desiredServers.length === 0) {
 			return;

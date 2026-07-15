@@ -5294,7 +5294,7 @@ suite('CopilotAgentSession', () => {
 			const serverName = 'slack';
 			const id = 'mcp-top-level:copilot:test-session-1:slack';
 			const { session, mockSession } = await createAgentSession(disposables, {
-				sessionUri: peerChatUri,
+				sessionUri: parentSessionUri,
 				chatChannelUri: peerChatUri,
 				stateSessionUri: parentSessionUri,
 				sessionCustomizations: () => [{
