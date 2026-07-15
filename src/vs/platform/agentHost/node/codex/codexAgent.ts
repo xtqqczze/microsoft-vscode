@@ -698,10 +698,10 @@ export class CodexAgent extends Disposable implements IAgent {
 		@IAgentHostGitHubEndpointService private readonly _gitHubEndpointService: IAgentHostGitHubEndpointService,
 		@IAgentSdkDownloader private readonly _agentSdkDownloader: IAgentSdkDownloader,
 		@IProductService private readonly _productService: IProductService,
-		@IInstantiationService instantiationService: IInstantiationService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 	) {
 		super();
-		this._metadataStore = instantiationService.createInstance(CodexSessionMetadataStore);
+		this._metadataStore = this._instantiationService.createInstance(CodexSessionMetadataStore);
 	}
 
 	// #region Auth
@@ -3186,10 +3186,6 @@ export class CodexAgent extends Disposable implements IAgent {
 		sess?.pendingClientToolCalls.respondOrBuffer(toolCallId, result);
 	}
 
-	setCustomizationEnabled(_uri: string, _enabled: boolean): void {
-		// no-op; customizations not yet wired for codex.
-	}
-
 	// ---- MCP servers -------------------------------------------------------
 
 	/**
@@ -3303,7 +3299,7 @@ export class CodexAgent extends Disposable implements IAgent {
 	 */
 	private _getOrCreateMcpController(session: ICodexSession): McpCustomizationController {
 		if (!session.mcpController) {
-			session.mcpController = new McpCustomizationController({
+			session.mcpController = this._instantiationService.createInstance(McpCustomizationController, {
 				providerId: this.id,
 				sessionId: session.sessionId,
 				resolveChildId: () => undefined,

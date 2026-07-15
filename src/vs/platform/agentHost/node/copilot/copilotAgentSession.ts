@@ -55,9 +55,10 @@ import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { getEditFilePaths, getInvocationMessage, getPastTenseMessage, getPermissionDisplay, getShellIntention, getShellLanguage, getSubagentMetadata, getTaskCompleteMarkdown, getToolDisplayName, getToolInputString, getToolKind, isAgentCoordinationTool, isEditTool, isHiddenTool, isShellTool, isTaskCompleteTool, synthesizeSkillToolCall, tryStringify, type ITypedPermissionRequest } from './copilotToolDisplay.js';
 import { FileEditTracker } from '../shared/fileEditTracker.js';
 import { stripProxyErrorMarker, tryBuildChatErrorMeta, tryBuildChatErrorMetaFromFields } from '../shared/forwardedChatError.js';
-import { McpCustomizationController, type ISdkMcpServer } from '../shared/mcpCustomizationController.js';
+import { getMcpServerCustomizations, McpCustomizationController, type ISdkMcpServer } from '../shared/mcpCustomizationController.js';
 import { appendSdkToolResultContent, mapSessionEvents } from './mapSessionEvents.js';
 import { buildPendingEditContentUri } from './pendingEditContentStore.js';
+import { AgentHostStateManager, IAgentHostStateManager } from '../agentHostStateManager.js';
 import { McpAuthRequiredReason, McpServerStatus, type McpAuthRequirement, type McpServerState } from '../../common/state/protocol/channels-session/state.js';
 import type { ProtectedResourceMetadata } from '../../common/state/protocol/common/state.js';
 import { CopilotSlashCommandProvider } from './copilotSlashCommandProvider.js';
@@ -658,6 +659,7 @@ export class CopilotAgentSession extends Disposable {
 		@IFileService private readonly _fileService: IFileService,
 		@INativeEnvironmentService private readonly _environmentService: INativeEnvironmentService,
 		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
+		@IAgentHostStateManager private readonly _stateManager: AgentHostStateManager,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 	) {
 		super();
@@ -689,7 +691,7 @@ export class CopilotAgentSession extends Disposable {
 
 		this._editTracker = this._instantiationService.createInstance(FileEditTracker, options.sessionUri.toString(), this._databaseRef.object);
 
-		this._mcpCustomizations = this._register(new McpCustomizationController({
+		this._mcpCustomizations = this._register(this._instantiationService.createInstance(McpCustomizationController, {
 			providerId: this.sessionUri.scheme,
 			sessionId: this.sessionId,
 			resolveChildId: options.resolveMcpChildId,
@@ -1396,6 +1398,7 @@ export class CopilotAgentSession extends Disposable {
 
 		await this.applyMode(mode);
 		await this._applyEffectiveSandboxConfig();
+		await this._reconcileMcpServerEnablement();
 		await this._wrapper.session.send({ prompt, attachments: sdkAttachments?.length ? sdkAttachments : undefined });
 		this._logService.info(`[Copilot:${this.sessionId}] session.send() returned`);
 	}
@@ -1544,6 +1547,7 @@ export class CopilotAgentSession extends Disposable {
 		this._steeringMessagesInFlight.add(steeringMessage.id);
 		this._logService.info(`[Copilot:${this.sessionId}] Sending steering message: "${steeringMessage.message.text.substring(0, 100)}"`);
 		try {
+			await this._reconcileMcpServerEnablement();
 			await this._wrapper.session.send({
 				prompt: steeringMessage.message.text,
 				mode: 'immediate',
@@ -1742,6 +1746,31 @@ export class CopilotAgentSession extends Disposable {
 		await this._wrapper.session.rpc.mcp.enable({ serverName });
 		await this._wrapper.session.rpc.mcp.listTools({ serverName });
 		this._seedMcpServersFromRpc();
+	}
+
+	private async _reconcileMcpServerEnablement(): Promise<void> {
+		const desiredCustomizations = this._stateManager.getSessionState(this.sessionUri.toString())?.customizations ?? [];
+		const desiredServers = getMcpServerCustomizations(desiredCustomizations);
+		if (desiredServers.length === 0) {
+			return;
+		}
+		await this._refreshMcpServersFromRpc();
+		let changed = false;
+		for (const server of this._mcpCustomizations.serverEnablement()) {
+			const desired = desiredServers.find(customization => customization.id === server.customizationId)?.enabled;
+			if (desired === undefined || desired === server.enabled) {
+				continue;
+			}
+			if (desired) {
+				await this._wrapper.session.rpc.mcp.enable({ serverName: server.serverName });
+			} else {
+				await this._wrapper.session.rpc.mcp.disable({ serverName: server.serverName });
+			}
+			changed = true;
+		}
+		if (changed) {
+			await this._refreshMcpServersFromRpc();
+		}
 	}
 
 	async stopMcpServer(id: string): Promise<void> {
@@ -3267,19 +3296,20 @@ export class CopilotAgentSession extends Disposable {
 	 * next live event arrives.
 	 */
 	private _seedMcpServersFromRpc(): void {
-		const mcpRpc = this._wrapper.session.rpc?.mcp;
-		if (!mcpRpc) {
-			// Older SDKs (and test mocks) may not expose the MCP RPC surface.
-			return;
-		}
-		mcpRpc.list().then(result => {
-			if (this._store.isDisposed) {
-				return;
-			}
-			this._applyMcpServerList(result.servers);
-		}, err => {
+		this._refreshMcpServersFromRpc().catch(err => {
 			this._logService.warn(`[Copilot:${this.sessionId}] Failed to seed MCP server inventory`, err);
 		});
+	}
+
+	private async _refreshMcpServersFromRpc(): Promise<void> {
+		const mcpRpc = this._wrapper.session.rpc?.mcp;
+		if (!mcpRpc) {
+			return;
+		}
+		const result = await mcpRpc.list();
+		if (!this._store.isDisposed) {
+			this._applyMcpServerList(result.servers);
+		}
 	}
 
 	private _applyMcpServerList(servers: readonly { readonly name: string; readonly status: SdkMcpServerStatus; readonly error?: string }[]): void {
@@ -3328,7 +3358,11 @@ export class CopilotAgentSession extends Disposable {
 	 * {@link McpServerState} union.
 	 */
 	private _toSdkMcpServer(name: string, status: SdkMcpServerStatus, error?: string): ISdkMcpServer {
-		return { name, state: this._translateSdkMcpStatus(name, status, error) };
+		return {
+			name,
+			state: this._translateSdkMcpStatus(name, status, error),
+			enabled: status !== 'disabled',
+		};
 	}
 
 	private _translateSdkMcpStatus(name: string, status: SdkMcpServerStatus, error?: string): McpServerState {

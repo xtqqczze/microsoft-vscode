@@ -26,12 +26,13 @@ import { AgentFeedbackAttachmentDisplayKind } from '../../common/meta/agentFeedb
 import { IDiffComputeService } from '../../common/diffComputeService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import { ActionType, type ChatDeltaAction, type ChatErrorAction, type ChatInputRequestedAction, type ChatResponsePartAction, type ChatToolCallCompleteAction, type ChatToolCallReadyAction, type ChatToolCallStartAction, type ChatTurnCompleteAction, type ChatUsageAction, type SessionAction } from '../../common/state/sessionActions.js';
-import { MessageAttachmentKind, MessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, buildDefaultChatUri, readUsageInfoMeta, type ToolDefinition, type ToolResultContent, type ToolResultFileEditContent, type UsageInfoMeta } from '../../common/state/sessionState.js';
-import { CustomizationType, McpAuthRequiredReason, McpServerStatus } from '../../common/state/protocol/channels-session/state.js';
+import { MessageAttachmentKind, MessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, buildDefaultChatUri, createSessionState, mergeSessionWithDefaultChat, readUsageInfoMeta, SessionStatus, type ToolDefinition, type ToolResultContent, type ToolResultFileEditContent, type UsageInfoMeta } from '../../common/state/sessionState.js';
+import { CustomizationType, McpAuthRequiredReason, McpServerStatus, type Customization } from '../../common/state/protocol/channels-session/state.js';
 import { CopilotAgentSession } from '../../node/copilot/copilotAgentSession.js';
 import { ActiveClientToolSet } from '../../node/activeClientState.js';
 import { type CopilotSessionLaunchPlan, type IActiveClientSnapshot, type ICopilotSessionLauncher, type ICopilotSessionRuntime } from '../../node/copilot/copilotSessionLauncher.js';
 import { CopilotSessionWrapper } from '../../node/copilot/copilotSessionWrapper.js';
+import { AgentHostStateManager, IAgentHostStateManager } from '../../node/agentHostStateManager.js';
 import { buildCopilotSystemNotification } from '../../node/copilot/copilotSystemNotification.js';
 import { IAgentConfigurationService } from '../../node/agentConfigurationService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
@@ -56,6 +57,8 @@ class MockCopilotSession {
 	readonly compactCalls: unknown[] = [];
 	readonly commandListCalls: unknown[] = [];
 	readonly commandInvokeCalls: Array<{ name: string; input?: string }> = [];
+	readonly mcpEnableCalls: Array<{ serverName: string }> = [];
+	readonly mcpDisableCalls: Array<{ serverName: string }> = [];
 	compactResult: { success: boolean; tokensRemoved: number; messagesRemoved: number; contextWindow?: { currentTokens: number; tokenLimit: number; messagesLength: number } } = { success: true, tokensRemoved: 0, messagesRemoved: 0 };
 	compactError: unknown = undefined;
 	commandListResult: {
@@ -159,6 +162,18 @@ class MockCopilotSession {
 				}
 				return this.mcpListResult;
 			},
+			enable: async (params: { serverName: string }) => {
+				this.mcpEnableCalls.push(params);
+				this.mcpListResult = {
+					servers: this.mcpListResult.servers.map(server => server.name === params.serverName ? { ...server, status: 'pending' } : server),
+				};
+			},
+			disable: async (params: { serverName: string }) => {
+				this.mcpDisableCalls.push(params);
+				this.mcpListResult = {
+					servers: this.mcpListResult.servers.map(server => server.name === params.serverName ? { ...server, status: 'disabled' } : server),
+				};
+			},
 			executeSampling: async () => ({ status: 'completed' as const, result: undefined }),
 			cancelSamplingExecution: async () => { /* no-op */ },
 		},
@@ -182,7 +197,7 @@ class MockCopilotSession {
 
 	readonly sandboxConfigUpdates: unknown[] = [];
 
-	mcpListResult: { servers: ReadonlyArray<{ name: string; status: 'connected' | 'failed' | 'pending'; error?: string }> } = { servers: [] };
+	mcpListResult: { servers: ReadonlyArray<{ name: string; status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled' | 'not_configured'; error?: string }> } = { servers: [] };
 	mcpListError: unknown = undefined;
 }
 
@@ -270,6 +285,7 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 	fileReadErrors?: readonly string[];
 	/** Configure the mock session before {@link CopilotAgentSession.initializeSession} runs. */
 	configureMockSession?: (session: MockCopilotSession) => void;
+	sessionCustomizations?: () => readonly Customization[];
 	/** Optional server-tool host wired into the session. */
 	serverToolHost?: IAgentServerToolHost;
 	/** Platform used to compute the SDK sandbox policy. Defaults to `'linux'` so sandbox tests are deterministic. */
@@ -384,6 +400,23 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 		whenIdle: async () => { /* no-op */ },
 	};
 	services.set(IAgentConfigurationService, fakeConfigurationService);
+	const stateManager = disposables.add(new class extends AgentHostStateManager {
+		override getSessionState() {
+			if (!options?.sessionCustomizations) {
+				return undefined;
+			}
+			const state = createSessionState({
+				resource: sessionUri.toString(),
+				provider: 'copilot',
+				title: 'Test session',
+				status: SessionStatus.Idle,
+				createdAt: new Date().toISOString(),
+				modifiedAt: new Date().toISOString(),
+			});
+			return mergeSessionWithDefaultChat({ ...state, customizations: [...options.sessionCustomizations()] }, undefined);
+		}
+	}(new NullLogService()));
+	services.set(IAgentHostStateManager, stateManager);
 	const environmentService = {
 		_serviceBrand: undefined,
 		userHome: URI.file('/mock-home'),
@@ -4753,6 +4786,88 @@ suite('CopilotAgentSession', () => {
 	});
 
 	suite('MCP server inventory', () => {
+
+		test('session MCP desired enablement reconciles runtime drift', async () => {
+			const serverName = 'slack';
+			const id = 'mcp-top-level:copilot:test-session-1:slack';
+			let desiredEnabled = true;
+			const { session, mockSession } = await createAgentSession(disposables, {
+				sessionCustomizations: () => [{
+					type: CustomizationType.McpServer,
+					id,
+					uri: id,
+					name: serverName,
+					enabled: desiredEnabled,
+					state: { kind: McpServerStatus.Starting },
+				}],
+				configureMockSession: mock => {
+					mock.mcpListResult = { servers: [{ name: serverName, status: 'pending' }] };
+				},
+			});
+
+			desiredEnabled = false;
+			await session.send('disable Slack');
+			const afterDisable = session.topLevelMcpCustomizations();
+			mockSession.fire('session.mcp_servers_loaded', { servers: [{ name: serverName, status: 'pending' }] });
+			mockSession.mcpListResult = { servers: [{ name: serverName, status: 'pending' }] };
+			const afterRuntimeUpdate = session.topLevelMcpCustomizations();
+			await session.send('keep Slack disabled');
+			const afterReconcile = session.topLevelMcpCustomizations();
+			desiredEnabled = true;
+			await session.send('enable Slack');
+
+			assert.deepStrictEqual({
+				disableCalls: mockSession.mcpDisableCalls,
+				afterDisable,
+				afterRuntimeUpdate,
+				afterReconcile,
+				enableCalls: mockSession.mcpEnableCalls,
+				afterEnable: session.topLevelMcpCustomizations(),
+			}, {
+				disableCalls: [{ serverName }, { serverName }],
+				afterDisable: [{
+					type: CustomizationType.McpServer,
+					id,
+					uri: id,
+					name: serverName,
+					enabled: false,
+					state: { kind: McpServerStatus.Stopped },
+					channel: undefined,
+					mcpApp: { capabilities: { serverTools: { listChanged: true }, serverResources: {}, sampling: {} } },
+				}],
+				afterRuntimeUpdate: [{
+					type: CustomizationType.McpServer,
+					id,
+					uri: id,
+					name: serverName,
+					enabled: false,
+					state: { kind: McpServerStatus.Starting },
+					channel: undefined,
+					mcpApp: { capabilities: { serverTools: { listChanged: true }, serverResources: {}, sampling: {} } },
+				}],
+				afterReconcile: [{
+					type: CustomizationType.McpServer,
+					id,
+					uri: id,
+					name: serverName,
+					enabled: false,
+					state: { kind: McpServerStatus.Stopped },
+					channel: undefined,
+					mcpApp: { capabilities: { serverTools: { listChanged: true }, serverResources: {}, sampling: {} } },
+				}],
+				enableCalls: [{ serverName }],
+				afterEnable: [{
+					type: CustomizationType.McpServer,
+					id,
+					uri: id,
+					name: serverName,
+					enabled: true,
+					state: { kind: McpServerStatus.Starting },
+					channel: undefined,
+					mcpApp: { capabilities: { serverTools: { listChanged: true }, serverResources: {}, sampling: {} } },
+				}],
+			});
+		});
 
 		test('tool-triggered MCP auth transitions the active MCP tool call until authentication resolves', async () => {
 			const { session, mockSession, runtime, signals } = await createAgentSession(disposables);
