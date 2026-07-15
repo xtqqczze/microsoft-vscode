@@ -809,9 +809,7 @@ suite('CopilotAgent', () => {
 			};
 			await forward(notification);
 
-			// A token refresh / account change swaps the current auth token; later
-			// events resolve their restricted context from the new token. token-b is
-			// opted out, so the second event emits nothing.
+			// Swapping the current auth token to opted-out token-b: later events resolve context from it and emit nothing.
 			await agent.authenticate('https://api.github.com', 'token-b');
 			await forward(notification);
 
