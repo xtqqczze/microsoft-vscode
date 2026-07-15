@@ -49,8 +49,8 @@ export class ActivitybarPart extends Part {
 	static readonly COMPACT_ACTIVITYBAR_WIDTH = 36;
 
 	/** Narrower dimensions used when the floating panels (Modern UI) experiment is enabled. */
-	static readonly FLOATING_ACTION_HEIGHT = 44;
-	static readonly FLOATING_ACTIVITYBAR_WIDTH = 44;
+	static readonly FLOATING_ACTION_HEIGHT = 36;
+	static readonly FLOATING_ACTIVITYBAR_WIDTH = 36;
 	static readonly FLOATING_COMPACT_ACTIVITYBAR_WIDTH = 32;
 
 	static readonly ICON_SIZE = 24;
