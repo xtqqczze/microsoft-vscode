@@ -33,7 +33,7 @@ import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { SessionType } from '../../common/chatSessionsService.js';
 import { IChatViewTitleActionContext } from '../../common/actions/chatActions.js';
 import { getChatSessionType, isUntitledChatSession } from '../../common/model/chatUri.js';
-import { ChatInputNotificationSeverity, IChatInputNotificationService } from '../../browser/widget/input/chatInputNotificationService.js';
+import { ChatInputNotificationActionKind, ChatInputNotificationSeverity, IChatInputNotificationService } from '../../browser/widget/input/chatInputNotificationService.js';
 import { OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION, OPEN_AGENTS_WINDOW_COMMAND_ID, ChatConfiguration } from '../../common/constants.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
@@ -463,6 +463,7 @@ export class AgentsHandoffInputTipContribution extends Disposable implements IWo
 			description,
 			actions: [
 				{
+					kind: ChatInputNotificationActionKind.Command,
 					label: actionLabel,
 					commandId: AgentsHandoffInputTipContribution.TIP_OPEN_COMMAND_ID,
 					commandArgs,
