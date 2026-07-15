@@ -4847,6 +4847,48 @@ suite('CopilotAgentSession', () => {
 			assert.deepStrictEqual(await authPromise, { kind: 'cancelled' });
 		});
 
+		test('client tool completion preserves shared MCP authentication for other tool calls', async () => {
+			const { session, mockSession, runtime, signals } = await createAgentSession(disposables);
+			session.resetTurnState('turn-shared-auth');
+			for (const toolCallId of ['tool-auth-cancel', 'tool-auth-continue']) {
+				mockSession.fire('tool.execution_start', {
+					toolCallId,
+					toolName: 'mcp_tool',
+					mcpServerName: 'github',
+				} as SessionEventPayload<'tool.execution_start'>['data']);
+			}
+			const authPromise = runtime.handleMcpAuthRequest({
+				requestId: 'shared-auth',
+				serverName: 'github',
+				serverUrl: 'https://api.githubcopilot.com/mcp/',
+				reason: 'upscope',
+				wwwAuthenticateParams: { scope: 'notifications', error: 'insufficient_scope' },
+			}, { sessionId: 'test-session-1' });
+
+			session.handleClientToolCallComplete('tool-auth-cancel', {
+				success: false,
+				pastTenseMessage: 'Cancelled tool call',
+				error: { message: 'MCP authentication was cancelled', code: 'cancelled' },
+			});
+			const resolved = await session.resolveMcpAuthentication({
+				resource: 'https://api.githubcopilot.com/mcp/',
+				scopes: ['notifications'],
+				token: 'token',
+			});
+
+			assert.deepStrictEqual({
+				resolved,
+				authResult: await authPromise,
+				resolvedToolCalls: getActions(signals)
+					.filter(action => action.type === ActionType.ChatToolCallAuthResolved)
+					.map(action => action.type === ActionType.ChatToolCallAuthResolved ? action.toolCallId : undefined),
+			}, {
+				resolved: true,
+				authResult: { kind: 'token', accessToken: 'token' },
+				resolvedToolCalls: ['tool-auth-continue'],
+			});
+		});
+
 		test('initial GitHub MCP auth reuses the existing token without requesting the advertised scope catalog', async () => {
 			const { runtime, signals } = await createAgentSession(disposables, { githubToken: 'existing-token' });
 

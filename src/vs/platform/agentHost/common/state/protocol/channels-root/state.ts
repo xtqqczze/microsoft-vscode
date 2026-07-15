@@ -105,8 +105,7 @@ export interface AgentCapabilities {
 	 * The agent can host more than one concurrent chat per session. When absent,
 	 * clients MUST NOT call `createChat` to open chats beyond the default one the
 	 * session starts with. An empty object `{}` advertises multi-chat without
-	 * source-based creation; set {@link MultipleChatsCapability.fork} or
-	 * {@link MultipleChatsCapability.sideChat} to allow the corresponding mode.
+	 * forking; set {@link MultipleChatsCapability.fork} to also allow forking.
 	 */
 	multipleChats?: MultipleChatsCapability;
 }
@@ -119,21 +118,10 @@ export interface AgentCapabilities {
 export interface MultipleChatsCapability {
 	/**
 	 * The agent can fork a chat from a specific turn. When absent or `false`,
-	 * clients MUST NOT pass a {@link ChatSource} with `kind: "fork"` to
-	 * `createChat`.
+	 * clients MUST NOT pass a {@link ChatForkSource} (`source`) to `createChat`.
 	 * Forking always implies multi-chat support.
 	 */
 	fork?: boolean;
-	/**
-	 * The agent can create a side chat from a specific turn. When absent or
-	 * `false`, clients MUST NOT pass a {@link ChatSource} with
-	 * `kind: "sideChat"` to `createChat`.
-	 *
-	 * A side chat receives the source turn as context without copying the source
-	 * transcript into its own visible history. Side-chat support always implies
-	 * multi-chat support.
-	 */
-	sideChat?: boolean;
 }
 
 /**

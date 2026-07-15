@@ -80,7 +80,7 @@ interface IPendingMcpAuthRequest {
 	readonly serverName: string;
 	readonly resource: ProtectedResourceMetadata;
 	readonly requiredScopes: readonly string[];
-	readonly toolCalls: readonly IMcpAuthToolCall[];
+	readonly toolCalls: IMcpAuthToolCall[];
 	readonly deferred: DeferredPromise<McpAuthResult | null | undefined>;
 }
 
@@ -1083,11 +1083,15 @@ export class CopilotAgentSession extends Disposable {
 
 	private _cancelMcpAuthenticationForToolCall(toolCallId: string): boolean {
 		for (const [requestId, pending] of this._pendingMcpAuthRequests) {
-			if (!pending.toolCalls.some(toolCall => toolCall.toolCallId === toolCallId)) {
+			const toolCallIndex = pending.toolCalls.findIndex(toolCall => toolCall.toolCallId === toolCallId);
+			if (toolCallIndex === -1) {
 				continue;
 			}
-			this._pendingMcpAuthRequests.delete(requestId);
-			pending.deferred.complete({ kind: 'cancelled' });
+			pending.toolCalls.splice(toolCallIndex, 1);
+			if (pending.toolCalls.length === 0) {
+				this._pendingMcpAuthRequests.delete(requestId);
+				pending.deferred.complete({ kind: 'cancelled' });
+			}
 			return true;
 		}
 		return false;
@@ -1196,7 +1200,7 @@ export class CopilotAgentSession extends Disposable {
 		return deferred.p.finally(() => this._pendingMcpAuthRequests.delete(request.requestId));
 	}
 
-	private _activeMcpToolCalls(serverName: string): readonly IMcpAuthToolCall[] {
+	private _activeMcpToolCalls(serverName: string): IMcpAuthToolCall[] {
 		if (!this._turnId) {
 			return [];
 		}

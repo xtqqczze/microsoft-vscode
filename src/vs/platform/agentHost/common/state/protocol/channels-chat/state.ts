@@ -148,8 +148,6 @@ export const enum ChatOriginKind {
 	User = 'user',
 	/** Forked from an existing chat at a specific turn. */
 	Fork = 'fork',
-	/** Created as an independent side conversation from a specific turn. */
-	SideChat = 'sideChat',
 	/** Spawned by a tool call running in another chat (e.g. a sub-agent delegation). */
 	Tool = 'tool',
 }
@@ -169,7 +167,6 @@ export const enum ChatOriginKind {
 export type ChatOrigin =
 	| { kind: ChatOriginKind.User }
 	| { kind: ChatOriginKind.Fork; chat: URI; turnId: string }
-	| { kind: ChatOriginKind.SideChat; chat: URI; turnId: string }
 	| { kind: ChatOriginKind.Tool; chat: URI; toolCallId: string };
 
 /**
@@ -489,8 +486,6 @@ export const enum MessageAttachmentKind {
 	Resource = 'resource',
 	/** An attachment that references annotations on an annotations channel. */
 	Annotations = 'annotations',
-	/** An attachment that references a bounded transcript from another chat. */
-	Chat = 'chat',
 }
 
 /**
@@ -754,30 +749,6 @@ export interface MessageAnnotationsAttachment extends MessageAttachmentBase {
 }
 
 /**
- * An attachment that references a chat transcript through a fixed completed
- * turn.
- *
- * The referenced chat MUST belong to the same session as the message's chat.
- * The host resolves the transcript from its first retained turn through
- * `endTurn`, inclusive, when accepting the message. Later turns do not
- * change the context represented by an already-sent attachment.
- *
- * Hosts MUST NOT recursively expand chat attachments found inside the
- * referenced transcript. Clients SHOULD keep rendering `label` if the
- * referenced chat is later pruned, and treat opening `resource` as best-effort.
- *
- * @category Turn Types
- */
-export interface MessageChatAttachment extends MessageAttachmentBase {
-	/** Discriminant */
-	type: MessageAttachmentKind.Chat;
-	/** URI of the referenced chat. */
-	resource: URI;
-	/** Last completed turn included in the referenced transcript. */
-	endTurn: string;
-}
-
-/**
  * An attachment associated with a {@link Message}.
  *
  * @category Turn Types
@@ -786,8 +757,7 @@ export type MessageAttachment =
 	| SimpleMessageAttachment
 	| MessageEmbeddedResourceAttachment
 	| MessageResourceAttachment
-	| MessageAnnotationsAttachment
-	| MessageChatAttachment;
+	| MessageAnnotationsAttachment;
 
 // ─── Response Parts ──────────────────────────────────────────────────────────
 
@@ -963,6 +933,57 @@ export const enum ToolCallConfirmationReason {
 }
 
 /**
+ * Identifies a model judge as the source of a confirmation requirement.
+ *
+ * @category Tool Call Types
+ */
+export const enum ToolCallRiskAssessmentKind {
+	Judge = 'judge',
+}
+
+/**
+ * Lifecycle status of an asynchronous model-judge confirmation decision.
+ *
+ * @category Tool Call Types
+ */
+export const enum ToolCallRiskAssessmentStatus {
+	Loading = 'loading',
+	Complete = 'complete',
+}
+
+interface ToolCallRiskAssessmentBase {
+	kind: ToolCallRiskAssessmentKind;
+}
+
+/**
+ * The model judge is still evaluating the tool call.
+ *
+ * @category Tool Call Types
+ */
+export interface ToolCallRiskAssessmentLoadingState extends ToolCallRiskAssessmentBase {
+	status: ToolCallRiskAssessmentStatus.Loading;
+}
+
+/**
+ * The model judge has completed its evaluation.
+ *
+ * @category Tool Call Types
+ */
+export interface ToolCallRiskAssessmentCompleteState extends ToolCallRiskAssessmentBase {
+	status: ToolCallRiskAssessmentStatus.Complete;
+	reason: StringOrMarkdown;
+	/**
+	 * The judge's normalized safety score, where `0` is unsafe and `1` is safe.
+	 * @format float
+	 */
+	safety: number;
+}
+
+export type ToolCallRiskAssessment =
+	| ToolCallRiskAssessmentLoadingState
+	| ToolCallRiskAssessmentCompleteState;
+
+/**
  * Why a tool call was cancelled.
  *
  * @category Tool Call Types
@@ -1128,6 +1149,8 @@ export interface ToolCallPendingConfirmationState extends ToolCallBase, ToolCall
 	status: ToolCallStatus.PendingConfirmation;
 	/** Short title for the confirmation prompt (e.g. `"Run in terminal"`, `"Write file"`) */
 	confirmationTitle?: StringOrMarkdown;
+	/** Risk assessment that informed the confirmation requirement. */
+	riskAssessment?: ToolCallRiskAssessment;
 	/** File edits that this tool call will perform, for preview before confirmation */
 	edits?: { items: FileEdit[] };
 	/** Whether the agent host allows the client to edit the tool's input parameters before confirming */
@@ -1179,8 +1202,16 @@ export interface ToolCallRunningState extends ToolCallBase, ToolCallParameterFie
  * A running tool call is paused because the MCP server backing it needs
  * authentication — most commonly {@link McpAuthRequirement.reason |
  * `insufficientScope`} step-up auth triggered by the `tools/call` request
- * itself. Only ever reached from, and returned to, {@link ToolCallRunningState}:
- * `running` → `auth-required` → `running` → …
+ * itself. Only ever reached from {@link ToolCallRunningState}, and normally
+ * returns there once authenticated: `running` → `auth-required` → `running`
+ * → …. A client MAY instead cancel the invocation without authenticating by
+ * dispatching a `chat/toolCallComplete` with a **failed** result, always
+ * moving straight to {@link ToolCallCompletedState} —
+ * `requiresResultConfirmation` is ignored on this path, so it can never
+ * enter {@link ToolCallPendingResultConfirmationState}. A **successful**
+ * result dispatched from this state is invalid and MUST be rejected/ignored
+ * as a no-op by the reducer, since execution never resumed after the
+ * challenge.
  *
  * This is the tool-call-level counterpart to
  * {@link McpServerAuthRequiredState} — that state means the MCP *server*

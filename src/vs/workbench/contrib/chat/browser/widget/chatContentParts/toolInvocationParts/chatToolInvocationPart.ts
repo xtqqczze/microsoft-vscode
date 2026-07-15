@@ -122,16 +122,20 @@ export class ChatToolInvocationPart extends Disposable implements IChatContentPa
 
 		let appData: IObservable<IMcpAppRenderData | undefined> = constObservable(undefined);
 		if (toolInvocation.kind === 'toolInvocation') {
-			let previousState = toolInvocation.state.get().type;
+			let previousState = toolInvocation.state.get();
 			let previousDataKind = toolInvocation.toolSpecificDataKind.get();
+			let previousToolSpecificData = toolInvocation.toolSpecificData;
 			this._register(autorun(reader => {
-				const state = toolInvocation.state.read(reader).type;
+				const state = toolInvocation.state.read(reader);
 				const dataKind = toolInvocation.toolSpecificDataKind.read(reader);
-				const stateChanged = state !== previousState;
+				const toolSpecificData = toolInvocation.toolSpecificData;
+				const stateChanged = state.type !== previousState.type;
 				const dataKindChanged = dataKind !== previousDataKind;
-				if (stateChanged || dataKindChanged) {
-					previousState = state;
-					previousDataKind = dataKind;
+				const dataChanged = state !== previousState && toolSpecificData !== previousToolSpecificData;
+				previousState = state;
+				previousDataKind = dataKind;
+				previousToolSpecificData = toolSpecificData;
+				if (stateChanged || dataKindChanged || dataChanged) {
 					render();
 				}
 			}));

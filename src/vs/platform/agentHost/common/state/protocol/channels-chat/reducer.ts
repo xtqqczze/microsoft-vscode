@@ -370,7 +370,11 @@ export function chatReducer(state: ChatState, action: ChatAction, log?: (msg: st
 
 		case ActionType.ChatToolCallReady:
 			return refreshSummaryStatus(updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
-				if (tc.status !== ToolCallStatus.Streaming && tc.status !== ToolCallStatus.Running) {
+				if (
+					tc.status !== ToolCallStatus.Streaming
+					&& tc.status !== ToolCallStatus.Running
+					&& tc.status !== ToolCallStatus.PendingConfirmation
+				) {
 					return tc;
 				}
 				const base = tcBaseWithMeta(tc, action._meta);
@@ -383,15 +387,18 @@ export function chatReducer(state: ChatState, action: ChatAction, log?: (msg: st
 						confirmed: action.confirmed,
 					};
 				}
+				const pending = tc.status === ToolCallStatus.PendingConfirmation ? tc : undefined;
+				const options = action.options ?? pending?.options;
 				return {
 					status: ToolCallStatus.PendingConfirmation,
 					...base,
 					invocationMessage: action.invocationMessage,
-					toolInput: action.toolInput,
-					confirmationTitle: action.confirmationTitle,
-					edits: action.edits,
-					editable: action.editable,
-					...(action.options ? { options: action.options } : {}),
+					toolInput: action.toolInput ?? pending?.toolInput,
+					confirmationTitle: action.confirmationTitle ?? pending?.confirmationTitle,
+					riskAssessment: action.riskAssessment ?? pending?.riskAssessment,
+					edits: action.edits ?? pending?.edits,
+					editable: action.editable ?? pending?.editable,
+					...(options ? { options } : {}),
 				};
 			}));
 
@@ -426,17 +433,38 @@ export function chatReducer(state: ChatState, action: ChatAction, log?: (msg: st
 
 		case ActionType.ChatToolCallComplete:
 			return refreshSummaryStatus(updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
-				if (tc.status !== ToolCallStatus.Running && tc.status !== ToolCallStatus.PendingConfirmation) {
+				if (tc.status !== ToolCallStatus.Running && tc.status !== ToolCallStatus.PendingConfirmation && tc.status !== ToolCallStatus.AuthRequired) {
+					return tc;
+				}
+				// A tool call in `auth-required` can only be completed with a failed
+				// result — that's the client cancelling the invocation instead of
+				// resolving the pending MCP authentication challenge. A *successful*
+				// completion from `auth-required` is invalid: execution never
+				// resumed after the challenge, so there's nothing that could have
+				// produced a real result. The reducer ignores it, leaving the tool
+				// call in `auth-required`; the client must resolve the auth
+				// challenge (`chat/toolCallAuthResolved`) before completing
+				// successfully.
+				if (tc.status === ToolCallStatus.AuthRequired && action.result.success) {
 					return tc;
 				}
 				const base = tcBaseWithMeta(tc, action._meta);
-				const confirmed = tc.status === ToolCallStatus.Running
+				const confirmed = tc.status === ToolCallStatus.Running || tc.status === ToolCallStatus.AuthRequired
 					? tc.confirmed
 					: ToolCallConfirmationReason.NotNeeded;
-				const selectedOption = tc.status === ToolCallStatus.Running
+				const selectedOption = tc.status === ToolCallStatus.Running || tc.status === ToolCallStatus.AuthRequired
 					? tc.selectedOption
 					: undefined;
-				if (action.requiresResultConfirmation) {
+				// Preserve any partial content produced before the call paused for
+				// auth — a client cancelling from `auth-required` without
+				// authenticating never resumes execution, so this is the only
+				// content the tool ever produced unless `action.result` overrides it.
+				const preAuthContent = tc.status === ToolCallStatus.AuthRequired ? tc.content : undefined;
+				// Cancelling from `auth-required` always completes terminally: the
+				// pending auth challenge isn't a "pending result" the client can
+				// review, so `requiresResultConfirmation` is ignored for this path —
+				// it must never enter `pending-result-confirmation`.
+				if (action.requiresResultConfirmation && tc.status !== ToolCallStatus.AuthRequired) {
 					return {
 						status: ToolCallStatus.PendingResultConfirmation,
 						...base,
@@ -444,6 +472,7 @@ export function chatReducer(state: ChatState, action: ChatAction, log?: (msg: st
 						toolInput: tc.toolInput,
 						confirmed,
 						...(selectedOption ? { selectedOption } : {}),
+						...(preAuthContent ? { content: preAuthContent } : {}),
 						...action.result,
 					};
 				}
@@ -454,6 +483,7 @@ export function chatReducer(state: ChatState, action: ChatAction, log?: (msg: st
 					toolInput: tc.toolInput,
 					confirmed,
 					...(selectedOption ? { selectedOption } : {}),
+					...(preAuthContent ? { content: preAuthContent } : {}),
 					...action.result,
 				};
 			}));
