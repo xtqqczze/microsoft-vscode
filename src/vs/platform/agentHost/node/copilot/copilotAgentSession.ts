@@ -39,7 +39,7 @@ import { isAgentFeedbackAnnotationsAttachment, renderAgentFeedbackAnnotationsAtt
 import { ISessionDatabase, ISessionDataService, SESSION_ATTACHMENTS_DIRNAME } from '../../common/sessionDataService.js';
 import { MessageAttachmentKind, ToolCallContributorKind, type FileEdit, type MessageAttachment } from '../../common/state/protocol/state.js';
 import { ActionType, isChatAction, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
-import { MessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, ToolCallConfirmationReason, ToolCallRiskAssessmentKind, ToolCallRiskAssessmentStatus, ToolCallStatus, ToolResultContentType, buildSubagentSessionUri, getToolSubagentContent, isSubagentSession, type PendingMessage, type ChatInputAnswer, type ChatInputOption, type ChatInputQuestion, type ChatInputRequest, type ToolCallResult, type ToolResultContent, type Turn, type UsageInfo, type UsageInfoMeta } from '../../common/state/sessionState.js';
+import { MessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, ToolCallConfirmationReason, ToolCallRiskAssessmentKind, ToolCallRiskAssessmentStatus, ToolCallStatus, ToolResultContentType, buildSubagentSessionUri, getToolSubagentContent, isDefaultChatUri, isSubagentSession, type PendingMessage, type ChatInputAnswer, type ChatInputOption, type ChatInputQuestion, type ChatInputRequest, type ToolCallResult, type ToolResultContent, type Turn, type UsageInfo, type UsageInfoMeta } from '../../common/state/sessionState.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import type { IExitPlanModeResponse } from './copilotAgent.js';
 import { CopilotSessionWrapper } from './copilotSessionWrapper.js';
@@ -55,7 +55,7 @@ import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { getEditFilePaths, getInvocationMessage, getPastTenseMessage, getPermissionDisplay, getShellIntention, getShellLanguage, getSubagentMetadata, getTaskCompleteMarkdown, getToolDisplayName, getToolInputString, getToolKind, isAgentCoordinationTool, isEditTool, isHiddenTool, isShellTool, isTaskCompleteTool, synthesizeSkillToolCall, tryStringify, type ITypedPermissionRequest } from './copilotToolDisplay.js';
 import { FileEditTracker } from '../shared/fileEditTracker.js';
 import { stripProxyErrorMarker, tryBuildChatErrorMeta, tryBuildChatErrorMetaFromFields } from '../shared/forwardedChatError.js';
-import { getMcpServerCustomizations, McpCustomizationController, type ISdkMcpServer } from '../shared/mcpCustomizationController.js';
+import { getEffectiveMcpServerCustomizations, McpCustomizationController, type ISdkMcpServer } from '../shared/mcpCustomizationController.js';
 import { appendSdkToolResultContent, mapSessionEvents } from './mapSessionEvents.js';
 import { buildPendingEditContentUri } from './pendingEditContentStore.js';
 import { AgentHostStateManager, IAgentHostStateManager } from '../agentHostStateManager.js';
@@ -637,6 +637,10 @@ export class CopilotAgentSession extends Disposable {
 	/** Bridges SDK-reported MCP server state into AHP customization actions. */
 	private readonly _mcpCustomizations: McpCustomizationController;
 
+	private get _storageUri(): URI {
+		return isDefaultChatUri(this._chatChannelUri) ? this.sessionUri : this._chatChannelUri;
+	}
+
 	/**
 	 * Fans MCP server notifications (today: `notifications/tools/list_changed`)
 	 * up to the agent and on to the protocol server. Fired by the
@@ -702,15 +706,16 @@ export class CopilotAgentSession extends Disposable {
 		// leaves client tool calls unstamped (no owning client).
 		this._activeClientToolSet = options.activeClientToolSet ?? new ActiveClientToolSet();
 
-		this._databaseRef = sessionDataService.openDatabase(options.sessionUri);
+		this._databaseRef = sessionDataService.openDatabase(this._storageUri);
 		this._register(toDisposable(() => this._databaseRef.dispose()));
-		this._sessionDataDir = sessionDataService.getSessionDataDir(options.sessionUri);
+		this._sessionDataDir = sessionDataService.getSessionDataDir(this._storageUri);
 
-		this._editTracker = this._instantiationService.createInstance(FileEditTracker, options.sessionUri.toString(), this._databaseRef.object);
+		this._editTracker = this._instantiationService.createInstance(FileEditTracker, this._storageUri.toString(), this._databaseRef.object);
 
 		this._mcpCustomizations = this._register(this._instantiationService.createInstance(McpCustomizationController, {
 			providerId: this.sessionUri.scheme,
 			sessionId: this.sessionId,
+			sessionUri: this.sessionUri,
 			resolveChildId: options.resolveMcpChildId,
 			emit: action => this._emitAction(action),
 		}));
@@ -1147,7 +1152,7 @@ export class CopilotAgentSession extends Disposable {
 		// Advertise the agent host's server tools for this session so clients
 		// see them as server-provided. Execution happens in-process via the SDK
 		// tool handlers built in `_createServerSdkTools`.
-		this._serverToolHost?.advertise(this.sessionUri.toString());
+		this._serverToolHost?.advertise(this._storageUri.toString());
 	}
 
 	private _createRuntimeAdapter(): ICopilotSessionRuntime {
@@ -1573,7 +1578,7 @@ export class CopilotAgentSession extends Disposable {
 	 * answer questions or fill in elicitation forms.
 	 */
 	private _isAutopilotMode(): boolean {
-		return this._configurationService.getEffectiveValue(this.sessionUri.toString(), platformSessionSchema, SessionConfigKey.Mode) === 'autopilot';
+		return this._configurationService.getEffectiveValue(this._storageUri.toString(), platformSessionSchema, SessionConfigKey.Mode) === 'autopilot';
 	}
 
 	/**
@@ -1626,7 +1631,7 @@ export class CopilotAgentSession extends Disposable {
 		if (result.subagentTurnsByToolCallId.size === 0) {
 			return [];
 		}
-		const parentSessionStr = this.sessionUri.toString();
+		const parentSessionStr = this._storageUri.toString();
 		const out: IRestoredSubagentSession[] = [];
 		for (const turn of result.turns) {
 			for (const rp of turn.responseParts) {
@@ -1690,7 +1695,7 @@ export class CopilotAgentSession extends Disposable {
 		} catch {
 			// Database may not exist yet — that's fine
 		}
-		const result = await mapSessionEvents(this.sessionUri, db, events, {
+		const result = await mapSessionEvents(this._storageUri, db, events, {
 			workingDirectory: this._workingDirectory,
 			model: this._launchPlan.kind === 'create'
 				? this._launchPlan.model
@@ -1793,7 +1798,7 @@ export class CopilotAgentSession extends Disposable {
 
 	private async _reconcileMcpServerEnablement(): Promise<void> {
 		const desiredCustomizations = this._stateManager.getSessionState(this.sessionUri.toString())?.customizations ?? [];
-		const desiredServers = getMcpServerCustomizations(desiredCustomizations);
+		const desiredServers = getEffectiveMcpServerCustomizations(desiredCustomizations);
 		if (desiredServers.length === 0) {
 			return;
 		}
@@ -2171,7 +2176,7 @@ export class CopilotAgentSession extends Disposable {
 		if (this._configurationService.getRootValue(platformRootSchema, AgentHostGlobalAutoApproveEnabledConfigKey) === true) {
 			return true;
 		}
-		return this._configurationService.getEffectiveValue(this.sessionUri.toString(), platformSessionSchema, SessionConfigKey.AutoApprove) === 'autoApprove';
+		return this._configurationService.getEffectiveValue(this._storageUri.toString(), platformSessionSchema, SessionConfigKey.AutoApprove) === 'autoApprove';
 	}
 
 	private _getSdkPermissionMode(): PermissionAllowAllMode {
@@ -2184,11 +2189,11 @@ export class CopilotAgentSession extends Disposable {
 	}
 
 	private _getConfiguredApprovalLevel(): string {
-		return this._configurationService.getEffectiveValue(this.sessionUri.toString(), platformSessionSchema, SessionConfigKey.AutoApprove) ?? 'default';
+		return this._configurationService.getEffectiveValue(this._storageUri.toString(), platformSessionSchema, SessionConfigKey.AutoApprove) ?? 'default';
 	}
 
 	private _getConfiguredAgentMode(): string {
-		return this._configurationService.getEffectiveValue(this.sessionUri.toString(), platformSessionSchema, SessionConfigKey.Mode) ?? 'interactive';
+		return this._configurationService.getEffectiveValue(this._storageUri.toString(), platformSessionSchema, SessionConfigKey.Mode) ?? 'interactive';
 	}
 
 	private _subscribeToPermissionConfigChanges(): void {
@@ -2196,7 +2201,7 @@ export class CopilotAgentSession extends Disposable {
 			void this._syncPermissionModeAfterConfigChange();
 		}));
 		this._register(this._configurationService.onDidSessionConfigChange(event => {
-			if (event.session === this.sessionUri.toString() && Object.hasOwn(event.config, SessionConfigKey.AutoApprove)) {
+			if (event.session === this._storageUri.toString() && Object.hasOwn(event.config, SessionConfigKey.AutoApprove)) {
 				void this._syncPermissionModeAfterConfigChange();
 			}
 		}));
@@ -2322,7 +2327,7 @@ export class CopilotAgentSession extends Disposable {
 			this._logService.warn(`[Copilot:${this.sessionId}] Failed to check file for edit preview: ${filePath}`, err);
 		}
 
-		const afterUri = buildPendingEditContentUri(this.sessionUri.toString(), toolCallId, filePath);
+		const afterUri = buildPendingEditContentUri(this._storageUri.toString(), toolCallId, filePath);
 		try {
 			await this._fileService.writeFile(afterUri, VSBuffer.fromString(newFileContents));
 		} catch (err) {
@@ -3594,7 +3599,7 @@ export class CopilotAgentSession extends Disposable {
 	 * propagate to all subscribed clients via `session/configChanged`.
 	 */
 	private _syncAhpConfigFromSdkMode(sdkMode: CopilotSdkMode): void {
-		const sessionUri = this.sessionUri.toString();
+		const sessionUri = this._storageUri.toString();
 		const patch: Record<string, unknown> = {};
 		switch (sdkMode) {
 			case 'plan':

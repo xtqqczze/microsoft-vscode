@@ -35,7 +35,7 @@ import { readClaudePermissionMode } from './claudeSessionPermissionMode.js';
 import { SessionClientToolsDiff } from './clientTools/claudeSessionClientToolsModel.js';
 import { SessionClientCustomizationsDiff } from './customizations/claudeSessionClientCustomizationsModel.js';
 import { ClaudeCustomizationWatcher, buildDiscoveredCustomizations, resolveClaudeAgentName } from './customizations/claudeSessionCustomizationDiscovery.js';
-import { applyMcpServerEnablement, findMcpChildId, findMcpServerName, getMcpServerCustomizations } from '../shared/mcpCustomizationController.js';
+import { applyMcpServerEnablement, findMcpChildId, findMcpServerName, getEffectiveMcpServerCustomizations } from '../shared/mcpCustomizationController.js';
 import { scanClaudeDiskCustomizations } from './customizations/scan/claudeAgentSkillScan.js';
 import { scanClaudeHooks } from './customizations/scan/claudeHookScan.js';
 import { scanClaudeMcpServers } from './customizations/scan/claudeMcpScan.js';
@@ -1055,7 +1055,7 @@ export class ClaudeAgentSession extends Disposable {
 	private async _reconcileMcpServerEnablement(): Promise<void> {
 		const pipeline = this._requirePipeline();
 		const state = this._sessionCustomizations;
-		const desired = new Map(getMcpServerCustomizations(state).map(server => [server.name, server.enabled]));
+		const desired = new Map(getEffectiveMcpServerCustomizations(state).map(server => [server.name, server.enabled]));
 		if (desired.size === 0) {
 			return;
 		}

@@ -3685,6 +3685,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			session.mcpController = this._instantiationService.createInstance(McpCustomizationController, {
 				providerId: this.id,
 				sessionId: session.sessionId,
+				sessionUri: session.sessionUri,
 				resolveChildId: () => undefined,
 				emit: action => this._fire(session.sessionUri, action),
 				capabilities: CODEX_MCP_APP_CAPABILITIES,

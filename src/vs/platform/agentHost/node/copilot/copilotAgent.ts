@@ -172,6 +172,11 @@ interface IProvisionalSession {
 	readonly workspaceless?: boolean;
 }
 
+interface ICopilotAgentSessionIdentity {
+	readonly sessionUri: URI;
+	readonly chatChannelUri: URI;
+}
+
 function toRestrictedTelemetryEndpoint(endpoint: string | undefined): string | undefined {
 	return endpoint ? `${endpoint.replace(/\/+$/, '')}/telemetry` : undefined;
 }
@@ -2245,7 +2250,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 			}
 			let agentSession: CopilotAgentSession | undefined;
 			try {
-				agentSession = this._createAgentSession(launchPlan, workingDirectory, activeClient, session, chat);
+				agentSession = this._createAgentSession(launchPlan, workingDirectory, activeClient, { sessionUri: session, chatChannelUri: chat });
 				await agentSession.initializeSession();
 				if (options?.fork?.turnIdMapping) {
 					await agentSession.remapTurnIds(options.fork.turnIdMapping);
@@ -2479,7 +2484,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 			};
 			let agentSession: CopilotAgentSession | undefined;
 			try {
-				agentSession = this._createAgentSession(launchPlan, workingDirectory, activeClient, session, chat);
+				agentSession = this._createAgentSession(launchPlan, workingDirectory, activeClient, { sessionUri: session, chatChannelUri: chat });
 				await agentSession.initializeSession();
 				this._ensureEntry(sessionId).registerPeerChat(chatKey, new CopilotSessionEntry(agentSession));
 				this._logService.info(`[Copilot] Resumed additional chat ${chatKey} in session ${session.toString()}`);
@@ -2750,7 +2755,9 @@ export class CopilotAgent extends Disposable implements IAgent {
 	 * {@link _resumeSession} for the same id cannot dispose this entry mid-init
 	 * via {@link DisposableMap.set}.
 	 */
-	private _createAgentSession(launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: ActiveClient, sessionUri = AgentSession.uri(this.id, launchPlan.sessionId), chatChannelUri = URI.parse(buildDefaultChatUri(sessionUri))): CopilotAgentSession {
+	private _createAgentSession(launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: ActiveClient, identity?: ICopilotAgentSessionIdentity): CopilotAgentSession {
+		const sessionUri = identity?.sessionUri ?? AgentSession.uri(this.id, launchPlan.sessionId);
+		const chatChannelUri = identity?.chatChannelUri ?? URI.parse(buildDefaultChatUri(sessionUri));
 
 		const agentSession = this._instantiationService.createInstance(
 			CopilotAgentSession,

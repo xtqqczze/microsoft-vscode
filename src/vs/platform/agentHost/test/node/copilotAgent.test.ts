@@ -3278,7 +3278,7 @@ suite('CopilotAgent', () => {
 		type ChatInternals = {
 			_chatBackings: Map<string, { sdkSessionId: string; model?: ModelSelection }>;
 			_sessions: Map<string, CopilotSessionEntry>;
-			_createAgentSession: (launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: unknown, channelUri?: URI) => CopilotAgentSession;
+			_createAgentSession: (launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: unknown, identity?: { sessionUri: URI; chatChannelUri: URI }) => CopilotAgentSession;
 			_forkSdkChat: (client: unknown, sourceEntry: unknown, turnId: string, targetDbDir: URI) => Promise<string>;
 			_resolveAgentName: (snapshot: IActiveClientSnapshot, agent: AgentSelection) => string | undefined;
 		};
@@ -3341,10 +3341,12 @@ suite('CopilotAgent', () => {
 				const internals = agent as unknown as ChatInternals;
 				let captured: CopilotSessionLaunchPlan | undefined;
 				let capturedChannel: URI | undefined;
+				let capturedSession: URI | undefined;
 				let rec: IFakeChatRecorder | undefined;
-				internals._createAgentSession = (launchPlan, _dir, _ac, channelUri) => {
+				internals._createAgentSession = (launchPlan, _dir, _ac, identity) => {
 					captured = launchPlan;
-					capturedChannel = channelUri;
+					capturedChannel = identity?.chatChannelUri;
+					capturedSession = identity?.sessionUri;
 					const built = makeFakeChatSession(session, launchPlan.sessionId, undefined, launchPlan.shellManager);
 					rec = built.rec;
 					return built.fake;
@@ -3358,6 +3360,7 @@ suite('CopilotAgent', () => {
 				assert.deepStrictEqual({
 					tracked: hasPeerChatStub(agent, chatUri),
 					initialized: rec?.initialized,
+					session: capturedSession?.toString(),
 					channel: capturedChannel?.toString(),
 					kind: captured?.kind,
 					backing: internals._chatBackings.get(chatUri.toString()),
@@ -3368,6 +3371,7 @@ suite('CopilotAgent', () => {
 				}, {
 					tracked: true,
 					initialized: true,
+					session: session.toString(),
 					channel: chatUri.toString(),
 					kind: 'create',
 					backing: { sdkSessionId: captured!.sessionId, model: { id: 'gpt-x' } },
@@ -3558,9 +3562,9 @@ suite('CopilotAgent', () => {
 				await agent1.authenticate('https://api.github.com', 'token');
 				await agent1.createSession({ session, workingDirectory: URI.file('/workspace') });
 				const internals1 = agent1 as unknown as ChatInternals;
-				internals1._createAgentSession = (launchPlan, _dir, _ac, channelUri) => {
-					if (channelUri) {
-						created[channelUri.authority] = launchPlan.sessionId;
+				internals1._createAgentSession = (launchPlan, _dir, _ac, identity) => {
+					if (identity) {
+						created[identity.chatChannelUri.authority] = launchPlan.sessionId;
 					}
 					return makeFakeChatSession(session, launchPlan.sessionId, undefined, launchPlan.shellManager).fake;
 				};
@@ -3688,7 +3692,7 @@ suite('CopilotAgent', () => {
 		type ConvInternals = {
 			_sessions: Map<string, CopilotSessionEntry>;
 			_provisionalSessions: Map<string, unknown>;
-			_createAgentSession: (launchPlan: CopilotSessionLaunchPlan, dir: URI | undefined, activeClient: unknown, channelUri?: URI) => CopilotAgentSession;
+			_createAgentSession: (launchPlan: CopilotSessionLaunchPlan, dir: URI | undefined, activeClient: unknown, identity?: { sessionUri: URI; chatChannelUri: URI }) => CopilotAgentSession;
 		};
 
 		interface IFakeConvRecorder {
@@ -3738,9 +3742,9 @@ suite('CopilotAgent', () => {
 		 * as the chat's backing.
 		 */
 		function stubBackingSession(agent: CopilotAgent): void {
-			(agent as unknown as ConvInternals)._createAgentSession = (launchPlan, _dir, _ac, channelUri) => {
+			(agent as unknown as ConvInternals)._createAgentSession = (launchPlan, _dir, _ac, identity) => {
 				return {
-					sessionUri: channelUri,
+					sessionUri: identity?.sessionUri ?? AgentSession.uri('copilotcli', launchPlan.sessionId),
 					sessionId: launchPlan.sessionId,
 					appliedSnapshot: { tools: [], plugins: [], mcpServers: {} } satisfies IActiveClientSnapshot,
 					async initializeSession(): Promise<void> { },
@@ -4414,12 +4418,12 @@ suite('CopilotAgent', () => {
 			// `sendMessage`, mirroring AgentSideEffects.
 			let anchor: URI | undefined;
 			const agentInternals = agent as unknown as {
-				_createAgentSession: (launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: unknown, channelUri?: URI) => CopilotAgentSession;
+				_createAgentSession: (launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: unknown, identity?: { sessionUri: URI; chatChannelUri: URI }) => CopilotAgentSession;
 			};
 			const originalCreateAgentSession = agentInternals._createAgentSession;
-			agentInternals._createAgentSession = (launchPlan, customizationDirectory, activeClient, channelUri) => {
+			agentInternals._createAgentSession = (launchPlan, customizationDirectory, activeClient, identity) => {
 				anchor = customizationDirectory;
-				return originalCreateAgentSession.call(agent, launchPlan, customizationDirectory, activeClient, channelUri);
+				return originalCreateAgentSession.call(agent, launchPlan, customizationDirectory, activeClient, identity);
 			};
 
 			try {
@@ -4515,7 +4519,7 @@ suite('CopilotAgent', () => {
 			_getAlternativeAgentForWorktree(provisional: unknown, workingDirectory: URI | undefined): AgentSelection | undefined;
 			_resolveAgentWhenMaterializing(provisional: unknown, snapshot: IActiveClientSnapshot, workingDirectory: URI | undefined): Promise<{ agent: AgentSelection; name: string } | undefined>;
 			_resolveAgentName(snapshot: IActiveClientSnapshot, agent: AgentSelection): string | undefined;
-			_createAgentSession(launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: unknown, channelUri?: URI): CopilotAgentSession;
+			_createAgentSession(launchPlan: CopilotSessionLaunchPlan, customizationDirectory: URI | undefined, activeClient: unknown, identity?: { sessionUri: URI; chatChannelUri: URI }): CopilotAgentSession;
 			_readSessionMetadata(session: URI): Promise<{ agent?: AgentSelection }>;
 		};
 
@@ -4628,9 +4632,9 @@ suite('CopilotAgent', () => {
 			let launchAgentName: string | undefined;
 			const internals = agent as unknown as AgentInternals;
 			const originalCreateAgentSession = internals._createAgentSession;
-			internals._createAgentSession = (launchPlan, customizationDirectory, activeClient, channelUri) => {
+			internals._createAgentSession = (launchPlan, customizationDirectory, activeClient, identity) => {
 				launchAgentName = launchPlan.resolvedAgentName;
-				return originalCreateAgentSession.call(agent, launchPlan, customizationDirectory, activeClient, channelUri);
+				return originalCreateAgentSession.call(agent, launchPlan, customizationDirectory, activeClient, identity);
 			};
 
 			try {

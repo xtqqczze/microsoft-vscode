@@ -5,11 +5,11 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { derived, observableValue, transaction, type IObservable, type ITransaction } from '../../../../base/common/observable.js';
+import { URI } from '../../../../base/common/uri.js';
 import { ActionType } from '../../common/state/protocol/common/actions.js';
 import { CustomizationType, McpServerStatus, type AhpMcpUiHostCapabilities, type ChildCustomization, type Customization, type McpServerCustomization, type McpServerState } from '../../common/state/protocol/channels-session/state.js';
 import { DEFAULT_MCP_APP, DEFAULT_MCP_APP_CAPABILITIES } from '../../common/state/protocol/mcpAppDefaults.js';
 import type { SessionAction } from '../../common/state/sessionActions.js';
-import { AgentSession } from '../../common/agentService.js';
 import { AgentHostStateManager, IAgentHostStateManager } from '../agentHostStateManager.js';
 
 /**
@@ -66,6 +66,8 @@ export interface IMcpCustomizationControllerOptions {
 	readonly providerId: string;
 	/** Session id (the raw id, not the full URI). Used as the channel path segment. */
 	readonly sessionId: string;
+	/** Canonical session URI used to resolve persisted customization state. */
+	readonly sessionUri: URI;
 	/**
 	 * Resolves an existing child customization id for a given server
 	 * name. See {@link IMcpChildIdResolver}.
@@ -388,7 +390,7 @@ export class McpCustomizationController extends Disposable {
 			id,
 			uri: this._mintTopLevelId(serverName),
 			name: serverName,
-			enabled: getMcpServerCustomizations(this._stateManager.getSessionState(AgentSession.uri(this._options.providerId, this._options.sessionId).toString())?.customizations ?? [])
+			enabled: getEffectiveMcpServerCustomizations(this._stateManager.getSessionState(this._options.sessionUri.toString())?.customizations ?? [])
 				.find(customization => customization.id === id)?.enabled ?? enabled,
 			state,
 			channel,
@@ -416,6 +418,22 @@ export function getMcpServerCustomizations(customizations: readonly Customizatio
 		} else {
 			for (const child of top.children ?? []) {
 				if (child.type === CustomizationType.McpServer) {
+					result.push(child);
+				}
+			}
+		}
+	}
+	return result;
+}
+
+export function getEffectiveMcpServerCustomizations(customizations: readonly Customization[]): readonly McpServerCustomization[] {
+	const result: McpServerCustomization[] = [];
+	for (const top of customizations) {
+		if (top.type === CustomizationType.McpServer) {
+			result.push(top);
+		} else {
+			for (const child of top.children ?? []) {
+				if (child.type === CustomizationType.McpServer) {
 					result.push(top.enabled ? child : { ...child, enabled: false });
 				}
 			}
@@ -425,7 +443,7 @@ export function getMcpServerCustomizations(customizations: readonly Customizatio
 }
 
 export function applyMcpServerEnablement(customizations: readonly Customization[], desired: readonly Customization[]): readonly Customization[] {
-	const desiredById = new Map(getMcpServerCustomizations(desired).map(server => [server.id, server.enabled]));
+	const desiredById = new Map(getEffectiveMcpServerCustomizations(desired).map(server => [server.id, server.enabled]));
 	return customizations.map(customization => {
 		if (customization.type === CustomizationType.McpServer) {
 			return applyMcpEnablement(customization, desiredById);

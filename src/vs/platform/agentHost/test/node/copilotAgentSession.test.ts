@@ -312,7 +312,6 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 	sessionCustomizations?: () => readonly Customization[];
 	sessionUri?: URI;
 	chatChannelUri?: URI;
-	stateSessionUri?: URI;
 	resolveMcpChildId?: (serverName: string) => string | undefined;
 	/** Optional server-tool host wired into the session. */
 	serverToolHost?: IAgentServerToolHost;
@@ -359,7 +358,6 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 	const parentSessionUri = AgentSession.uri('copilot', 'test-session-1');
 	const sessionUri = options?.sessionUri ?? parentSessionUri;
 	const chatChannelUri = options?.chatChannelUri ?? URI.parse(buildDefaultChatUri(parentSessionUri));
-	const stateSessionUri = options?.stateSessionUri ?? parentSessionUri;
 	const mockSession = new MockCopilotSession();
 	options?.configureMockSession?.(mockSession);
 
@@ -440,11 +438,11 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 	services.set(IAgentConfigurationService, fakeConfigurationService);
 	const stateManager = disposables.add(new class extends AgentHostStateManager {
 		override getSessionState(session: string) {
-			if (!options?.sessionCustomizations || session !== stateSessionUri.toString()) {
+			if (!options?.sessionCustomizations || session !== sessionUri.toString()) {
 				return undefined;
 			}
 			const state = createSessionState({
-				resource: stateSessionUri.toString(),
+				resource: sessionUri.toString(),
 				provider: 'copilot',
 				title: 'Test session',
 				status: SessionStatus.Idle,
@@ -5289,14 +5287,13 @@ suite('CopilotAgentSession', () => {
 		});
 
 		test('peer chat MCP desired enablement uses parent session customizations', async () => {
-			const parentSessionUri = AgentSession.uri('copilot', 'test-session-1');
+			const parentSessionUri = AgentSession.uri('copilot', 'parent-session');
 			const peerChatUri = URI.parse(buildChatUri(parentSessionUri, 'peer-1'));
 			const serverName = 'slack';
 			const id = 'mcp-top-level:copilot:test-session-1:slack';
 			const { session, mockSession } = await createAgentSession(disposables, {
 				sessionUri: parentSessionUri,
 				chatChannelUri: peerChatUri,
-				stateSessionUri: parentSessionUri,
 				sessionCustomizations: () => [{
 					type: CustomizationType.McpServer,
 					id,
@@ -5312,7 +5309,13 @@ suite('CopilotAgentSession', () => {
 
 			await session.send('keep Slack disabled');
 
-			assert.deepStrictEqual(mockSession.mcpDisableCalls, [{ serverName }]);
+			assert.deepStrictEqual({
+				disableCalls: mockSession.mcpDisableCalls,
+				effectiveEnabled: session.topLevelMcpCustomizations()[0]?.enabled,
+			}, {
+				disableCalls: [{ serverName }],
+				effectiveEnabled: false,
+			});
 		});
 
 		test('nested MCP desired enablement includes parent container enablement', async () => {

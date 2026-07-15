@@ -17,7 +17,8 @@ import { McpCustomizationController, findMcpChildId, findMcpServerName, parseMcp
 function harness(store: Pick<DisposableStore, 'add'>, opts: { customizations?: readonly Customization[]; desiredEnabled?: boolean } = {}) {
 	const actions: SessionAction[] = [];
 	const stateManager = store.add(new AgentHostStateManager(new NullLogService()));
-	const session = AgentSession.uri('copilot', 'session-1').toString();
+	const sessionUri = AgentSession.uri('copilot', 'session-1');
+	const session = sessionUri.toString();
 	stateManager.createSession({
 		resource: session,
 		provider: 'copilot',
@@ -42,6 +43,7 @@ function harness(store: Pick<DisposableStore, 'add'>, opts: { customizations?: r
 	const controller = new McpCustomizationController({
 		providerId: 'copilot',
 		sessionId: 'session-1',
+		sessionUri,
 		resolveChildId: name => findMcpChildId(opts.customizations ?? [], name),
 		emit: a => actions.push(a),
 	}, stateManager);
