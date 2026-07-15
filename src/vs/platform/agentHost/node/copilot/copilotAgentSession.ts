@@ -1276,6 +1276,23 @@ export class CopilotAgentSession extends Disposable {
 		this._pendingMcpAuthRequests.clear();
 	}
 
+	private _cancelPendingMcpAuthRequestsForServer(serverName: string): void {
+		for (const [requestId, pending] of this._pendingMcpAuthRequests) {
+			if (pending.serverName !== serverName) {
+				continue;
+			}
+			this._pendingMcpAuthRequests.delete(requestId);
+			for (const toolCall of pending.toolCalls) {
+				this._emitAction({
+					type: ActionType.ChatToolCallAuthResolved,
+					turnId: toolCall.turnId,
+					toolCallId: toolCall.toolCallId,
+				}, toolCall.parentToolCallId);
+			}
+			pending.deferred.complete({ kind: 'cancelled' });
+		}
+	}
+
 	// ---- session operations -------------------------------------------------
 
 	async send(prompt: string, attachments?: readonly MessageAttachment[], turnId?: string, mode?: CopilotSdkMode, senderClientId?: string): Promise<void> {
@@ -1742,7 +1759,7 @@ export class CopilotAgentSession extends Disposable {
 			return;
 		}
 		// stopServer leaves inline session MCP servers not_configured; disable->enable is the validated restart path.
-		await this._wrapper.session.rpc.mcp.disable({ serverName });
+		await this._disableMcpServer(serverName);
 		await this._wrapper.session.rpc.mcp.enable({ serverName });
 		await this._wrapper.session.rpc.mcp.listTools({ serverName });
 		this._seedMcpServersFromRpc();
@@ -1761,16 +1778,27 @@ export class CopilotAgentSession extends Disposable {
 			if (desired === undefined || desired === server.enabled) {
 				continue;
 			}
-			if (desired) {
-				await this._wrapper.session.rpc.mcp.enable({ serverName: server.serverName });
-			} else {
-				await this._wrapper.session.rpc.mcp.disable({ serverName: server.serverName });
+			try {
+				if (desired) {
+					await this._wrapper.session.rpc.mcp.enable({ serverName: server.serverName });
+				} else {
+					await this._disableMcpServer(server.serverName);
+				}
+				changed = true;
+			} catch (e) {
+				this._logService.error(e, `[Copilot:${this.sessionId}] Failed to ${desired ? 'enable' : 'disable'} MCP server ${server.serverName}`);
 			}
-			changed = true;
 		}
 		if (changed) {
 			await this._refreshMcpServersFromRpc();
 		}
+	}
+
+	private async _disableMcpServer(serverName: string): Promise<void> {
+		// disable() hangs until pending auth requests have resolved.
+		// reported to the SDK folks though arguable whether it's a bug or not...
+		this._cancelPendingMcpAuthRequestsForServer(serverName);
+		await this._wrapper.session.rpc.mcp.disable({ serverName });
 	}
 
 	async stopMcpServer(id: string): Promise<void> {

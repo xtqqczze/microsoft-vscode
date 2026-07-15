@@ -59,6 +59,7 @@ class MockCopilotSession {
 	readonly commandInvokeCalls: Array<{ name: string; input?: string }> = [];
 	readonly mcpEnableCalls: Array<{ serverName: string }> = [];
 	readonly mcpDisableCalls: Array<{ serverName: string }> = [];
+	mcpDisableGate: Promise<unknown> | undefined;
 	compactResult: { success: boolean; tokensRemoved: number; messagesRemoved: number; contextWindow?: { currentTokens: number; tokenLimit: number; messagesLength: number } } = { success: true, tokensRemoved: 0, messagesRemoved: 0 };
 	compactError: unknown = undefined;
 	commandListResult: {
@@ -170,6 +171,7 @@ class MockCopilotSession {
 			},
 			disable: async (params: { serverName: string }) => {
 				this.mcpDisableCalls.push(params);
+				await this.mcpDisableGate;
 				this.mcpListResult = {
 					servers: this.mcpListResult.servers.map(server => server.name === params.serverName ? { ...server, status: 'disabled' } : server),
 				};
@@ -4866,6 +4868,57 @@ suite('CopilotAgentSession', () => {
 					channel: undefined,
 					mcpApp: { capabilities: { serverTools: { listChanged: true }, serverResources: {}, sampling: {} } },
 				}],
+			});
+		});
+
+		test('disabling an MCP server cancels its pending authentication before awaiting the SDK', async () => {
+			const serverName = 'slack';
+			const id = 'mcp-top-level:copilot:test-session-1:slack';
+			let desiredEnabled = true;
+			const { session, mockSession, runtime } = await createAgentSession(disposables, {
+				sessionCustomizations: () => [{
+					type: CustomizationType.McpServer,
+					id,
+					uri: id,
+					name: serverName,
+					enabled: desiredEnabled,
+					state: { kind: McpServerStatus.Starting },
+				}],
+				configureMockSession: mock => {
+					mock.mcpListResult = { servers: [{ name: serverName, status: 'pending' }] };
+				},
+			});
+			const authPromise = runtime.handleMcpAuthRequest({
+				requestId: 'auth-disable',
+				serverName,
+				serverUrl: 'https://mcp.slack.com/mcp',
+				reason: 'initial',
+				resourceMetadata: JSON.stringify({
+					resource: 'https://mcp.slack.com',
+					authorization_servers: ['https://slack.com/oauth'],
+				}),
+			}, { sessionId: session.sessionId });
+			mockSession.mcpDisableGate = authPromise;
+			desiredEnabled = false;
+
+			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+			try {
+				await Promise.race([
+					session.send('disable Slack'),
+					new Promise((_, reject) => {
+						timeoutHandle = setTimeout(() => reject(new Error('Timed out disabling Slack')), 1000);
+					}),
+				]);
+			} finally {
+				clearTimeout(timeoutHandle);
+			}
+
+			assert.deepStrictEqual({
+				authResult: await authPromise,
+				disableCalls: mockSession.mcpDisableCalls,
+			}, {
+				authResult: { kind: 'cancelled' },
+				disableCalls: [{ serverName }],
 			});
 		});
 
