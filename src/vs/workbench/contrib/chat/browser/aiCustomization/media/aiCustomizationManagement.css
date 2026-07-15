@@ -414,6 +414,20 @@
 	margin-top: 16px;
 }
 
+/* Sessions empty state */
+.agent-sessions-workbench .ai-customization-list-widget .list-empty-state .empty-state-header {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 6px;
+}
+
+.agent-sessions-workbench .ai-customization-list-widget .list-empty-state .empty-state-header > .empty-state-icon {
+	font-size: 16px;
+	margin-bottom: 0;
+	flex-shrink: 0;
+}
+
 /* Group header styling */
 .ai-customization-group-header {
 	display: flex;
@@ -1431,6 +1445,20 @@
 
 .mcp-list-widget .mcp-empty-state .monaco-button {
 	margin-top: 16px;
+}
+
+/* Sessions empty state */
+.agent-sessions-workbench .mcp-empty-state .empty-state-header {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 6px;
+}
+
+.agent-sessions-workbench .mcp-empty-state .empty-state-header > .empty-icon {
+	font-size: 16px;
+	margin-bottom: 0;
+	flex-shrink: 0;
 }
 
 /* MCP Disabled (access blocked) state */
