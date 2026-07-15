@@ -42,7 +42,9 @@ const LOCAL_RESOURCE_SCHEME_PREFIX = 'agent-host-';
  * single machine-wide local agent host, so a fixed key (no per-authority
  * suffix) is used; the base provider persists under `StorageScope.APPLICATION`.
  */
-const LOCAL_AGENT_HOST_CACHED_SESSIONS_STORAGE_KEY = 'localAgentHost.cachedSessions';
+const LOCAL_AGENT_HOST_CACHED_SESSIONS_STORAGE_KEY = 'localAgentHost.cachedSessions.v2';
+// TODO@sandy081 Remove this legacy cache-key cleanup after 2026-10-14.
+const LOCAL_AGENT_HOST_CACHED_SESSIONS_STORAGE_KEY_LEGACY = 'localAgentHost.cachedSessions';
 
 /**
  * Local-window sessions provider backed by the in-process
@@ -114,7 +116,7 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 		// local sessions immediately at startup, before the agent host has
 		// started and the first `listSessions()` round-trip (gated on
 		// authentication settling below) reconciles them.
-		this._enableSessionCachePersistence(LOCAL_AGENT_HOST_CACHED_SESSIONS_STORAGE_KEY);
+		this._enableSessionCachePersistence(LOCAL_AGENT_HOST_CACHED_SESSIONS_STORAGE_KEY, LOCAL_AGENT_HOST_CACHED_SESSIONS_STORAGE_KEY_LEGACY);
 
 		this._attachConnectionListeners(this._agentHostService, this._store);
 

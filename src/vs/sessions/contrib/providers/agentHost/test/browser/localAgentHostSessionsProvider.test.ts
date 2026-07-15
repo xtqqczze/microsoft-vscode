@@ -1122,6 +1122,37 @@ suite('LocalAgentHostSessionsProvider', () => {
 		});
 	}));
 
+	test('discards a legacy cache entry so read state is rebuilt from the host', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		// Storage-key literals of the pre-`.v2` cache schema, whose entries
+		// carried a stale `isRead: true` written by the old always-read adapter.
+		const LEGACY_KEY = 'localAgentHost.cachedSessions';
+		const CURRENT_KEY = 'localAgentHost.cachedSessions.v2';
+		const storageService = disposables.add(new InMemoryStorageService());
+
+		// Simulate a previous (old-schema) window: persist a session, then move
+		// the snapshot to the legacy key as the old build would have written it.
+		await persistCachedSessions(disposables, storageService, [createSession('legacy-1', { summary: 'Legacy One' })]);
+		const snapshot = storageService.get(CURRENT_KEY, StorageScope.APPLICATION);
+		assert.ok(snapshot, 'precondition: current-key snapshot should exist');
+		storageService.store(LEGACY_KEY, snapshot, StorageScope.APPLICATION, StorageTarget.USER);
+		storageService.remove(CURRENT_KEY, StorageScope.APPLICATION);
+
+		// Fresh launch with authentication pending so no live refresh runs: the
+		// legacy entry must be discarded rather than hydrated, and its key removed.
+		const nextHost = new MockAgentHostService();
+		disposables.add(toDisposable(() => nextHost.dispose()));
+		nextHost.setAuthenticationPending(true);
+		const provider = createProvider(disposables, nextHost, undefined, { storageService });
+
+		assert.deepStrictEqual({
+			cachedSessions: provider.getSessions().length,
+			legacyKeyPresent: storageService.get(LEGACY_KEY, StorageScope.APPLICATION) !== undefined,
+		}, {
+			cachedSessions: 0,
+			legacyKeyPresent: false,
+		});
+	}));
+
 	test('hydrated quick chat stays workspace-less after reload despite a scratch working directory', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		// Regression #324581: a committed quick chat persisted into the startup
 		// cache carries a scratch cwd. The adapter's session-kind is fixed at
