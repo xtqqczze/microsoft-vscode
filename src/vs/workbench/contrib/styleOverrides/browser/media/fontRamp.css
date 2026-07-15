@@ -100,7 +100,11 @@
 
 .style-override .monaco-count-badge,
 .style-override .monaco-action-bar .badge .badge-content {
-	font-size: 10px;
+	font-size: var(--vscode-fontSize-label3);
+}
+
+.style-override.monaco-workbench .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .badge .badge-content {
+	font-weight: var(--vscode-fontWeight-regular);
 }
 
 /* =============================================================================
@@ -183,10 +187,6 @@
 .style-override.monaco-workbench .part.auxiliarybar > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked.clicked:focus .active-item-indicator:before {
 	border-top-color: transparent !important;
 	border-bottom-color: transparent !important;
-}
-
-.style-override.monaco-workbench .monaco-count-badge {
-	font-weight: var(--vscode-fontWeight-semiBold);
 }
 
 .style-override .debug-pane .debug-call-stack .session > .state.label {
