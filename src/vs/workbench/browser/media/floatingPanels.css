@@ -166,19 +166,33 @@
 
 /* Inset and vertically center the status bar items within its floating gutter. */
 .monaco-workbench.floating-panels .part.statusbar {
-	padding: var(--vscode-spacing-size40);
+	padding-left: var(--vscode-spacing-size60);
+	padding-right: var(--vscode-spacing-size60);
 	padding-top: calc(var(--vscode-spacing-size40) - var(--vscode-strokeThickness)); /* offset for the border-top of the status bar */
 	padding-bottom: calc(var(--vscode-spacing-size40) + var(--vscode-strokeThickness)); /* offset for the border-bottom of the status bar */
 }
 
-.monaco-workbench.floating-panels .part.statusbar > .items-container > .statusbar-item.left.first-visible-item {
-	padding-left: 4px;
+/* With a compact activity bar the horizontal inset is tightened to match. The
+ * `compact` class lives on the activity bar element, so `:has()` lets the status
+ * bar (a sibling part) react without any code-side class plumbing. */
+.monaco-workbench.floating-panels:has(.part.activitybar.compact) .part.statusbar {
+	padding-left: var(--vscode-spacing-size20);
+	padding-right: var(--vscode-spacing-size20);
 }
 
+/* When the activity bar is hidden its grid cell loses the `visible` class the
+ * split view toggles. With no bar to align to, fall back to the standard 4px
+ * inset. This has higher specificity than the compact rule above, so a hidden
+ * compact bar still resolves to 4px. */
+.monaco-workbench.floating-panels:has(.split-view-view:not(.visible) .part.activitybar) .part.statusbar {
+	padding-left: var(--vscode-spacing-size40);
+	padding-right: var(--vscode-spacing-size40);
+}
+
+.monaco-workbench.floating-panels .part.statusbar > .items-container > .statusbar-item.left.first-visible-item,
 .monaco-workbench.floating-panels .part.statusbar > .items-container > .statusbar-item.left.first-visible-item > .statusbar-item-label {
-	padding-left: 4px;
+	padding-left: var(--vscode-spacing-size40);
 }
-
 /*
  * When the status bar is hidden every floating card sits directly against the window
  * bottom edge. Double the bottom margin (4px → 8px) to match the doubled outer gutter
