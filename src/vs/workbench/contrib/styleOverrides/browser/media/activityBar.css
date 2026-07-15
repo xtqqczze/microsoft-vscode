@@ -332,3 +332,11 @@
 	top: 13px;
 	right: 2px;
 }
+
+.style-override.monaco-workbench .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .profile-badge .profile-text-overlay {
+	top: 16px;
+}
+
+.style-override.monaco-workbench .activitybar.compact > .content :not(.monaco-menu) > .monaco-action-bar .profile-badge .profile-text-overlay {
+	top: 10px;
+}
