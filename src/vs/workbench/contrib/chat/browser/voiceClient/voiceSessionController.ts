@@ -3464,7 +3464,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 
 		const context: IVoiceSessionContext = {
 			sessions: sessionList,
-			display_locale: this._window?.navigator.language,
+			display_locale: this._window?.navigator.language || 'en-US',
 		};
 		if (activeSession) {
 			context.active_session = activeSession;
