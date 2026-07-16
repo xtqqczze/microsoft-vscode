@@ -25,7 +25,10 @@ import { IChatWidgetService } from '../chat.js';
 import { ChatSpeechToTextState, IChatSpeechToTextService } from '../speechToText/chatSpeechToTextService.js';
 import { cancelDictation, isDictating, startDictation, stopDictation } from '../speechToText/dictationSession.js';
 
-export const ChatSpeechToTextConfigured = ContextKeyExpr.has(ChatContextKeys.speechToTextConfigured.key);
+// Gate on `ChatContextKeys.enabled` so the dictation UI and its commands are
+// hidden (not just disabled) when the user has turned AI features off; without
+// it the F1 "Dictate: Select Microphone" command stays discoverable.
+export const ChatSpeechToTextConfigured = ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.has(ChatContextKeys.speechToTextConfigured.key));
 /** True while the on-device model is downloading/loading (the mic shows a spinner instead). */
 export const ChatSpeechToTextPreparing = ContextKeyExpr.has(ChatContextKeys.speechToTextPreparing.key);
 
