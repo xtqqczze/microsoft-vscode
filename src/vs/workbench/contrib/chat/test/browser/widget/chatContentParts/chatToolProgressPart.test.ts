@@ -175,6 +175,27 @@ suite('ChatToolProgressSubPart', () => {
 		disposables.dispose();
 	});
 
+	function renderToolInvocation(toolInvocation: IChatToolInvocation): ChatToolInvocationPart {
+		return disposables.add(new ChatToolInvocationPart(
+			toolInvocation,
+			createRenderContext(),
+			mockMarkdownRenderer,
+			{} as CollapsibleListPool,
+			mockEditorPool,
+			() => 500,
+			undefined,
+			0,
+			instantiationService,
+			{
+				_serviceBrand: undefined,
+				onDidUpdateTodos: Event.None,
+				getTodos: () => [],
+				setTodos() { },
+				migrateTodos() { },
+			} satisfies IChatTodoListService,
+		));
+	}
+
 	test('detects MCP tool invocations for live and serialized rows', () => {
 		const mcpSource: ToolDataSourceType = {
 			type: 'mcp',
@@ -350,6 +371,61 @@ suite('ChatToolProgressSubPart', () => {
 		));
 
 		assert.strictEqual(part.domNode.querySelector('.shimmer-progress'), null);
+	});
+
+	test('renders another client tool with an accessible inline skip action', () => {
+		let cancelCount = 0;
+		const state = observableValue<IChatToolInvocation.State>('state', {
+			type: IChatToolInvocation.StateKind.Executing,
+			parameters: undefined,
+			confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
+			progress: observableValue('progress', { progress: undefined }),
+		});
+		const invocation: IChatToolInvocation = {
+			...createToolInvocation({ invocationMessage: 'Running Run Task on another client...' }),
+			pastTenseMessage: 'Ran Task',
+			state,
+			otherClientToolCall: {
+				cancel: () => {
+					cancelCount++;
+					state.set({
+						type: IChatToolInvocation.StateKind.Completed,
+						parameters: undefined,
+						confirmationMessages: undefined,
+						confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
+						postConfirmed: undefined,
+						resultDetails: undefined,
+						contentForModel: [],
+					}, undefined);
+				}
+			},
+		};
+		const part = renderToolInvocation(invocation);
+		const skipButton = part.domNode.querySelector<HTMLElement>('.monaco-button');
+		const textBeforeSkip = part.domNode.textContent;
+		const buttonLabel = skipButton?.textContent;
+		const buttonRole = skipButton?.getAttribute('role');
+		const tabIndex = skipButton?.tabIndex;
+
+		skipButton?.click();
+
+		assert.deepStrictEqual({
+			textBeforeSkip,
+			textAfterSkip: part.domNode.textContent,
+			buttonAfterSkip: part.domNode.querySelector('.monaco-button'),
+			buttonLabel,
+			buttonRole,
+			tabIndex,
+			cancelCount,
+		}, {
+			textBeforeSkip: 'Running Run Task on another client...Skip',
+			textAfterSkip: 'Ran Task',
+			buttonAfterSkip: null,
+			buttonLabel: 'Skip',
+			buttonRole: 'button',
+			tabIndex: 0,
+			cancelCount: 1,
+		});
 	});
 
 	test('does not add shimmer styling for completed MCP tool progress', () => {

@@ -1,0 +1,17 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.chat-other-client-tool-progress {
+	gap: var(--vscode-spacing-size60);
+}
+
+.chat-other-client-tool-progress > .progress-step {
+	min-width: 0;
+	margin: 0;
+}
+
+.chat-other-client-tool-progress > .monaco-button {
+	flex-shrink: 0;
+}
