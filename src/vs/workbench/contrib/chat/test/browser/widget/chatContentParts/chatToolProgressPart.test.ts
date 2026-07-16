@@ -8,7 +8,7 @@ import * as sinon from 'sinon';
 import { Event } from '../../../../../../../base/common/event.js';
 import { DisposableStore, toDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { observableValue } from '../../../../../../../base/common/observable.js';
-import { IRenderedMarkdown, MarkdownRenderOptions, renderAsPlaintext } from '../../../../../../../base/browser/markdownRenderer.js';
+import { IRenderedMarkdown, MarkdownRenderOptions, renderAsPlaintext, renderMarkdown } from '../../../../../../../base/browser/markdownRenderer.js';
 import { IMarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { URI } from '../../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../base/test/common/utils.js';
@@ -175,11 +175,11 @@ suite('ChatToolProgressSubPart', () => {
 		disposables.dispose();
 	});
 
-	function renderToolInvocation(toolInvocation: IChatToolInvocation): ChatToolInvocationPart {
+	function renderToolInvocation(toolInvocation: IChatToolInvocation, renderer = mockMarkdownRenderer): ChatToolInvocationPart {
 		return disposables.add(new ChatToolInvocationPart(
 			toolInvocation,
 			createRenderContext(),
-			mockMarkdownRenderer,
+			renderer,
 			{} as CollapsibleListPool,
 			mockEditorPool,
 			() => 500,
@@ -400,29 +400,38 @@ suite('ChatToolProgressSubPart', () => {
 				}
 			},
 		};
-		const part = renderToolInvocation(invocation);
-		const skipButton = part.domNode.querySelector<HTMLElement>('.monaco-button');
-		const textBeforeSkip = part.domNode.textContent;
-		const buttonLabel = skipButton?.textContent;
-		const buttonRole = skipButton?.getAttribute('role');
-		const tabIndex = skipButton?.tabIndex;
+		const markdownRenderer: IMarkdownRenderer = {
+			render: (markdown, options) => renderMarkdown(markdown, options),
+		};
+		const part = renderToolInvocation(invocation, markdownRenderer);
+		const skipLink = part.domNode.querySelector<HTMLAnchorElement>('a[data-href="#skip"]');
+		const progressText = part.domNode.querySelector('.progress-step')?.textContent?.replaceAll('\u00a0', ' ');
+		const linkParagraphText = skipLink?.closest('p')?.textContent?.replaceAll('\u00a0', ' ');
+		const linkLabel = skipLink?.textContent;
+		const linkRole = skipLink?.getAttribute('role');
+		const linkHref = skipLink?.getAttribute('href');
+		const tabIndex = skipLink?.tabIndex;
 
-		skipButton?.click();
+		skipLink?.click();
 
 		assert.deepStrictEqual({
-			textBeforeSkip,
-			textAfterSkip: part.domNode.textContent,
-			buttonAfterSkip: part.domNode.querySelector('.monaco-button'),
-			buttonLabel,
-			buttonRole,
+			progressText,
+			linkParagraphText,
+			textAfterSkip: part.domNode.textContent?.replaceAll('\u00a0', ' '),
+			linkAfterSkip: part.domNode.querySelector('a[data-href="#skip"]'),
+			linkLabel,
+			linkRole,
+			linkHref,
 			tabIndex,
 			cancelCount,
 		}, {
-			textBeforeSkip: 'Running Run Task on another client...Skip',
+			progressText: 'Running Run Task on another client... Skip?',
+			linkParagraphText: 'Running Run Task on another client... Skip?',
 			textAfterSkip: 'Ran Task',
-			buttonAfterSkip: null,
-			buttonLabel: 'Skip',
-			buttonRole: 'button',
+			linkAfterSkip: null,
+			linkLabel: 'Skip?',
+			linkRole: 'button',
+			linkHref: '',
 			tabIndex: 0,
 			cancelCount: 1,
 		});

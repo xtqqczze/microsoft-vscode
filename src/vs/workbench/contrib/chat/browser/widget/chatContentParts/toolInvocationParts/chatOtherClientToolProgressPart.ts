@@ -3,17 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Button } from '../../../../../../../base/browser/ui/button/button.js';
+import { renderAsPlaintext } from '../../../../../../../base/browser/markdownRenderer.js';
+import { status } from '../../../../../../../base/browser/ui/aria/aria.js';
+import { Codicon } from '../../../../../../../base/common/codicons.js';
+import { escapeMarkdownSyntaxTokens, MarkdownString } from '../../../../../../../base/common/htmlContent.js';
+import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { IMarkdownRenderer } from '../../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IInstantiationService } from '../../../../../../../platform/instantiation/common/instantiation.js';
-import { defaultButtonStyles } from '../../../../../../../platform/theme/browser/defaultStyles.js';
 import { localize } from '../../../../../../../nls.js';
 import { IChatToolInvocation } from '../../../../common/chatService/chatService.js';
 import { IChatCodeBlockInfo } from '../../../chat.js';
-import { IChatContentPartRenderContext } from '../chatContentParts.js';
+import { AccessibilityWorkbenchSettingId } from '../../../../../accessibility/browser/accessibilityConfiguration.js';
+import { ChatProgressSubPart } from '../chatProgressContentPart.js';
 import { BaseChatToolInvocationSubPart } from './chatToolInvocationSubPart.js';
-import { ChatToolProgressSubPart } from './chatToolProgressPart.js';
-import './media/chatOtherClientToolProgress.css';
+
+const skipHref = '#skip';
 
 export class ChatOtherClientToolProgressPart extends BaseChatToolInvocationSubPart {
 	readonly domNode: HTMLElement;
@@ -21,32 +25,50 @@ export class ChatOtherClientToolProgressPart extends BaseChatToolInvocationSubPa
 
 	constructor(
 		toolInvocation: IChatToolInvocation,
-		context: IChatContentPartRenderContext,
 		renderer: IMarkdownRenderer,
 		announcedToolProgressKeys: Set<string> | undefined,
 		@IInstantiationService instantiationService: IInstantiationService,
+		@IConfigurationService configurationService: IConfigurationService,
 	) {
 		super(toolInvocation);
 
-		const progressPart = this._register(instantiationService.createInstance(
-			ChatToolProgressSubPart,
-			toolInvocation,
-			context,
-			renderer,
-			announcedToolProgressKeys,
-		));
-		this.domNode = progressPart.domNode;
-		this.domNode.classList.add('chat-other-client-tool-progress');
+		const invocationMessage = typeof toolInvocation.invocationMessage === 'string'
+			? toolInvocation.invocationMessage
+			: renderAsPlaintext(toolInvocation.invocationMessage);
+		const content = localize(
+			'agentHost.otherClientTool.runningWithSkip',
+			'{0} [Skip?](#skip)',
+			escapeMarkdownSyntaxTokens(invocationMessage),
+		);
+		let cancelled = false;
+		const rendered = this._register(renderer.render(new MarkdownString(content, { isTrusted: true }), {
+			actionHandler: href => {
+				if (href === skipHref && !cancelled) {
+					cancelled = true;
+					toolInvocation.otherClientToolCall?.cancel();
+				}
+			},
+		}));
+		// eslint-disable-next-line no-restricted-syntax
+		const skipLink = rendered.element.querySelector<HTMLAnchorElement>(`a[data-href="${skipHref}"]`);
+		if (skipLink) {
+			skipLink.setAttribute('role', 'button');
+			skipLink.href = '';
+		}
 
-		const skipButton = this._register(new Button(this.domNode, {
-			...defaultButtonStyles,
-			secondary: true,
-			small: true,
-		}));
-		skipButton.label = localize('agentHost.otherClientTool.skip', "Skip");
-		this._register(skipButton.onDidClick(() => {
-			skipButton.enabled = false;
-			toolInvocation.otherClientToolCall?.cancel();
-		}));
+		const announcementKey = `progress:${toolInvocation.toolCallId}`;
+		if (announcedToolProgressKeys
+			&& configurationService.getValue(AccessibilityWorkbenchSettingId.VerboseChatProgressUpdates)
+			&& !announcedToolProgressKeys.has(announcementKey)) {
+			announcedToolProgressKeys.add(announcementKey);
+			status(localize('agentHost.otherClientTool.runningWithSkip.a11y', '{0} Skip?', invocationMessage));
+		}
+
+		this.domNode = this._register(instantiationService.createInstance(
+			ChatProgressSubPart,
+			rendered.element,
+			Codicon.check,
+			undefined,
+		)).domNode;
 	}
 }
