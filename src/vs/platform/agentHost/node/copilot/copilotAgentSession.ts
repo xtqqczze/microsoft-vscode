@@ -2435,6 +2435,10 @@ export class CopilotAgentSession extends Disposable {
 				wasFreeform: true,
 			};
 		}
+		if (!this.hasActiveTurn) {
+			this._logService.warn(`[Copilot:${this.sessionId}] Rejecting user input request without an active turn`);
+			return { answer: 'No active turn', wasFreeform: true };
+		}
 
 		const questionPreview = request.question.substring(0, 100);
 		try {
@@ -2519,6 +2523,10 @@ export class CopilotAgentSession extends Disposable {
 		const isAutopilot = this._isAutopilotMode();
 		if (isAutopilot) {
 			return { action: 'cancel' };
+		}
+		if (!this.hasActiveTurn) {
+			this._logService.warn(`[Copilot:${this.sessionId}] Rejecting elicitation request without an active turn`);
+			return { action: 'decline' };
 		}
 
 		const messagePreview = context.message.substring(0, 100);
@@ -3636,6 +3644,11 @@ export class CopilotAgentSession extends Disposable {
 	 * `currentMode` so the model can continue with implementation.
 	 */
 	private async _handleExitPlanModeRequest(data: ExitPlanModeRequest, _invocation: { sessionId: string }): Promise<IExitPlanModeResponse> {
+		const turnId = this._currentTurn?.id;
+		if (!turnId) {
+			this._logService.warn(`[Copilot:${this.sessionId}] Rejecting plan review request without an active turn`);
+			return { approved: false };
+		}
 		const requestId = generateUuid();
 		const questionId = generateUuid();
 		this._logService.info(`[Copilot:${this.sessionId}] exitPlanMode.request: rpcId=${requestId}, actions=[${data.actions.join(',')}], recommended=${data.recommendedAction}`);
@@ -3646,6 +3659,10 @@ export class CopilotAgentSession extends Disposable {
 			planPath = planRead.path ?? null;
 		} catch (err) {
 			this._logService.warn(`[Copilot:${this.sessionId}] rpc.plan.read failed for exit_plan_mode: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		if (this._currentTurn?.id !== turnId) {
+			this._logService.warn(`[Copilot:${this.sessionId}] Rejecting plan review request after its turn ended`);
+			return { approved: false };
 		}
 
 		const options = data.actions.map(actionId => {

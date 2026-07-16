@@ -26,7 +26,7 @@ import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import type { RootConfigChangedAction } from '../../common/state/protocol/actions.js';
 import { ChangesSummary, ChatOriginKind, CustomizationType, McpAuthRequiredReason, SessionInputRequestKind } from '../../common/state/protocol/state.js';
 import { ActionType, ActionEnvelope, type ChatAction, type INotification, type SessionAction } from '../../common/state/sessionActions.js';
-import { buildSubagentChatUri, buildChatUri, buildDefaultChatUri, ChatInteractivity, CustomizationLoadStatus, MessageAttachmentKind, MessageKind, PendingMessageKind, ResponsePartKind, SessionInputResponseKind, SessionLifecycle, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, customizationId, type ClientPluginCustomization, type Customization, type PluginCustomization } from '../../common/state/sessionState.js';
+import { buildSubagentChatUri, buildChatUri, buildDefaultChatUri, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInteractivity, CustomizationLoadStatus, MessageAttachmentKind, MessageKind, PendingMessageKind, ResponsePartKind, SessionInputResponseKind, SessionLifecycle, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, customizationId, type ClientPluginCustomization, type Customization, type PluginCustomization } from '../../common/state/sessionState.js';
 import { IProductService } from '../../../product/common/productService.js';
 import { ITelemetryService, TelemetryLevel } from '../../../telemetry/common/telemetry.js';
 import { NullTelemetryService } from '../../../telemetry/common/telemetryUtils.js';
@@ -4123,24 +4123,64 @@ suite('AgentSideEffects', () => {
 			return stateManager.getSessionState(sessionUri.toString())?.inputNeeded ?? [];
 		}
 
-		test('chat input request is produced and removed on completion', () => {
+		test('chat input request mirrors its unresolved response part and is removed on completion', () => {
 			setupSession();
 			startTurn('turn-1');
 
 			stateManager.dispatchServerAction(defaultChatUri, {
 				type: ActionType.ChatInputRequested,
-				request: { id: 'req-1', questions: [] },
+				request: {
+					id: 'req-1',
+					questions: [{ kind: ChatInputQuestionKind.Text, id: 'question-1', message: 'Which value?' }],
+				},
+			});
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatInputAnswerChanged,
+				requestId: 'req-1',
+				questionId: 'question-1',
+				answer: {
+					state: ChatInputAnswerState.Draft,
+					value: { kind: ChatInputAnswerValueKind.Text, value: 'draft value' },
+				},
 			});
 
 			const produced = sessionInputNeeded();
-			assert.deepStrictEqual(produced.map(r => ({ kind: r.kind, chat: r.chat })), [
-				{ kind: SessionInputRequestKind.ChatInput, chat: defaultChatUri },
+			assert.deepStrictEqual(produced.map(r => ({
+				kind: r.kind,
+				chat: r.chat,
+				request: r.kind === SessionInputRequestKind.ChatInput ? r.request : undefined,
+			})), [
+				{
+					kind: SessionInputRequestKind.ChatInput,
+					chat: defaultChatUri,
+					request: {
+						id: 'req-1',
+						questions: [{ kind: ChatInputQuestionKind.Text, id: 'question-1', message: 'Which value?' }],
+						answers: {
+							'question-1': {
+								state: ChatInputAnswerState.Draft,
+								value: { kind: ChatInputAnswerValueKind.Text, value: 'draft value' },
+							},
+						},
+					},
+				},
 			]);
 
 			stateManager.dispatchServerAction(defaultChatUri, {
 				type: ActionType.ChatInputCompleted,
 				requestId: 'req-1',
 				response: SessionInputResponseKind.Accept,
+			});
+
+			assert.deepStrictEqual(sessionInputNeeded(), []);
+		});
+
+		test('chat input request without an active turn is not mirrored', () => {
+			setupSession();
+
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatInputRequested,
+				request: { id: 'req-1', questions: [] },
 			});
 
 			assert.deepStrictEqual(sessionInputNeeded(), []);

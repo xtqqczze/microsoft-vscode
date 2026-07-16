@@ -314,12 +314,10 @@ export class AgentSideEffects extends Disposable {
 	private _syncSessionInputNeededForChatAction(chatUri: ProtocolURI, action: ChatAction): void {
 		switch (action.type) {
 			case ActionType.ChatInputRequested:
-				this._setSessionInputNeeded(chatUri, {
-					id: this._chatInputNeededId(chatUri, action.request.id),
-					kind: SessionInputRequestKind.ChatInput,
-					chat: chatUri,
-					request: action.request,
-				});
+				this._syncChatInputNeeded(chatUri, action.request.id);
+				break;
+			case ActionType.ChatInputAnswerChanged:
+				this._syncChatInputNeeded(chatUri, action.requestId);
 				break;
 			case ActionType.ChatInputCompleted:
 				this._removeSessionInputNeeded(chatUri, this._chatInputNeededId(chatUri, action.requestId));
@@ -340,6 +338,26 @@ export class AgentSideEffects extends Disposable {
 				this._removeSessionInputNeededForChat(chatUri);
 				break;
 		}
+	}
+
+	private _syncChatInputNeeded(chatUri: ProtocolURI, requestId: string): void {
+		const state = this._stateManager.getSessionState(chatUri);
+		const part = state?.activeTurn?.responseParts.find(part =>
+			part.kind === ResponsePartKind.InputRequest
+			&& part.response === undefined
+			&& part.request.id === requestId
+		);
+		const id = this._chatInputNeededId(chatUri, requestId);
+		if (!part || part.kind !== ResponsePartKind.InputRequest) {
+			this._removeSessionInputNeeded(chatUri, id);
+			return;
+		}
+		this._setSessionInputNeeded(chatUri, {
+			id,
+			kind: SessionInputRequestKind.ChatInput,
+			chat: chatUri,
+			request: part.request,
+		});
 	}
 
 	private _syncToolInputNeeded(chatUri: ProtocolURI, turnId: string, toolCallId: string): void {
