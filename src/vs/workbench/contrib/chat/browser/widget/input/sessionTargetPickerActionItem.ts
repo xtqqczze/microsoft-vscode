@@ -152,7 +152,7 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 		}));
 
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration(ChatConfiguration.EditorDefaultProvider) ||
+			if (e.affectsConfiguration(ChatConfiguration.EditorPreferCopilotHarness) ||
 				e.affectsConfiguration(ChatConfiguration.EditorLocalAgentEnabled) ||
 				e.affectsConfiguration(ChatConfiguration.CopilotCliHideExtensionHostEditor)) {
 				this._updateAgentSessionItems();
@@ -264,7 +264,7 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 	/**
 	 * The default session type for the picker when no session is yet active.
 	 * Defaults to {@link AgentSessionProviders.Local} but is overridden based on
-	 * the experimental {@link ChatConfiguration.EditorDefaultProvider} setting
+	 * the experimental {@link ChatConfiguration.EditorPreferCopilotHarness} setting
 	 * when the selected provider is registered.
 	 */
 	protected _getDefaultSessionType(): AgentSessionTarget {
