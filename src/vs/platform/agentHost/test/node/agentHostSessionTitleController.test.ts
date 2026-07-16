@@ -270,6 +270,26 @@ suite('AgentHostSessionTitleController', () => {
 		});
 	});
 
+	test('seedTitleFromFirstMessage persists its fallback when replacing a provisional title', async () => {
+		const copilotApiService = new TestCopilotApiService();
+		copilotApiService.error = new Error('Title generation unavailable');
+		const { controller, stateManager, session, db } = setup(copilotApiService);
+
+		controller.seedProvisionalTitle(session.toString(), 'ls -la');
+		await waitForCondition(async () => await db.getMetadata('customTitle') === 'ls -la', 'provisional title should be persisted');
+		stateManager.seedDefaultChatTurns(session.toString(), [firstTurn('!ls -la', [])]);
+		controller.seedTitleFromFirstMessage(session.toString(), 'Explain how the build works');
+		await waitForCondition(async () => await db.getMetadata('customTitle') === 'Explain how the build works', 'fallback title should replace the provisional title');
+
+		assert.deepStrictEqual({
+			title: stateManager.getSessionState(session.toString())?.title,
+			persistedTitle: await db.getMetadata('customTitle'),
+		}, {
+			title: 'Explain how the build works',
+			persistedTitle: 'Explain how the build works',
+		});
+	});
+
 	function textPart(content: string): ResponsePart {
 		return { kind: ResponsePartKind.Markdown, id: 'm1', content };
 	}

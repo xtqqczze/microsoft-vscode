@@ -1423,6 +1423,8 @@ export class AgentSideEffects extends Disposable {
 			return;
 		}
 
+		this._titleController.seedTitleFromFirstMessage(sessionChannel, msg.message.text, session);
+
 		// Send the message to the agent backend. When `session` is an
 		// additional chat channel, the SDK chat is owned by the
 		// parent session: look up the provider by the parent session URI and

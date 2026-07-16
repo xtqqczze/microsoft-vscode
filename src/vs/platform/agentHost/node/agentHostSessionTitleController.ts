@@ -70,10 +70,12 @@ export class AgentHostSessionTitleController extends Disposable {
 		if (!state || !this._canSeedFirstMessageTitle(key, state.turns.length, state.title)) {
 			return;
 		}
-		// This message is a real request: any provisional title (e.g. from a
-		// `!command`) is now superseded by the generated title we produce.
+		const replacesProvisionalTitle = this._provisionalTitles.has(key);
 		this._provisionalTitles.delete(key);
 		this._applySeedTitle(channel, additionalChat, fallbackTitle);
+		if (replacesProvisionalTitle) {
+			this._persistSeedTitle(channel, additionalChat, fallbackTitle);
+		}
 		this._generateTitleSoon(
 			key,
 			userPrompt,
@@ -85,23 +87,7 @@ export class AgentHostSessionTitleController extends Disposable {
 		);
 	}
 
-	/**
-	 * Seeds a provisional session (or peer chat) title suggested by a locally
-	 * handled command (for example a `!command`'s command text).
-	 *
-	 * Unlike {@link seedTitleFromFirstMessage} this does NOT kick off
-	 * model-based title generation: the suggestion is a placeholder that does
-	 * not describe the session's topic, so it stands only until the user sends a
-	 * real request, at which point {@link seedTitleFromFirstMessage} replaces it
-	 * with a generated title. The title is persisted so it survives reload; a
-	 * session that has only ever run such commands is therefore never left
-	 * untitled.
-	 *
-	 * Successive suggestions keep refreshing the provisional title. A manual
-	 * `/rename` or user edit (which moves the title away from the one we last
-	 * applied) suppresses further updates so a deliberate title is never
-	 * clobbered.
-	 */
+	/** Seeds and persists a provisional title suggested by a locally handled command. */
 	seedProvisionalTitle(channel: ProtocolURI, suggestedTitle: string, chatChannel?: ProtocolURI): void {
 		const title = this._normalizeTitle(suggestedTitle);
 		if (!title) {
