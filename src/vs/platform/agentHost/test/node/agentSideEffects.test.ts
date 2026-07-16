@@ -772,6 +772,47 @@ suite('AgentSideEffects', () => {
 			assert.ok(toolCallPart?.toolCall?.content?.every(c => c.type !== ToolResultContentType.Terminal));
 			assert.ok(toolCallPart?.toolCall?.content?.some(c => c.type === ToolResultContentType.Text));
 		});
+
+		test('seeds the session title from the ! command when the session is untitled', async () => {
+			// A brand-new, untitled session: the bang command is the only thing
+			// we can title it with until a real request arrives.
+			stateManager.createSession({
+				resource: sessionUri.toString(),
+				provider: 'mock',
+				title: '',
+				status: SessionStatus.Idle,
+				createdAt: new Date().toISOString(),
+				modifiedAt: new Date().toISOString(),
+			});
+			stateManager.dispatchServerAction(sessionUri.toString(), { type: ActionType.SessionReady });
+			const db = new TestSessionDatabase();
+			const terminalManager = disposables.add(new TestAgentHostTerminalManager());
+			const bangSideEffects = createTestSideEffects(disposables, stateManager, {
+				getAgent: () => agent,
+				agents: agentList,
+				sessionDataService: createSessionDataService(db),
+				onTurnComplete: () => { },
+			}, undefined, undefined, undefined, terminalManager);
+			const action: ChatAction = {
+				type: ActionType.ChatTurnStarted,
+				turnId: 'turn-1',
+				startedAt: '2025-01-01T00:00:00.000Z',
+				message: { text: '!echo hi', origin: { kind: MessageKind.User } },
+			};
+			stateManager.dispatchClientAction(defaultChatUri, action, { clientId: 'test', clientSeq: 1 });
+			bangSideEffects.handleAction(defaultChatUri, action);
+
+			// The provisional title is applied synchronously, before the command runs.
+			assert.strictEqual(stateManager.getSessionState(sessionUri.toString())?.title, 'echo hi');
+
+			// Let the command finish so the turn closes cleanly.
+			await terminalManager.commandFinishedListenerRegistered.p;
+			terminalManager.fireCommandFinished({ commandId: '1', command: 'echo hi', exitCode: 0, output: 'hi\n' });
+			await waitForState(stateManager, () => stateManager.getActiveTurnId(sessionUri.toString()) === undefined ? true : undefined);
+
+			// The provisional title is persisted so it survives reload.
+			assert.strictEqual(await db.getMetadata('customTitle'), 'echo hi');
+		});
 	});
 
 	// ---- local turn persistence: anchoring + truncate resolution ---------
@@ -1797,6 +1838,57 @@ suite('AgentSideEffects', () => {
 			const state = stateManager.getSessionState(sessionUri.toString());
 			assert.strictEqual(state?.queuedMessages, undefined);
 			assert.strictEqual(state?.title, 'Queued Title');
+		});
+
+		test('replaces a queued bang command title with the following real message', async () => {
+			stateManager.createSession({
+				resource: sessionUri.toString(),
+				provider: 'mock',
+				title: '',
+				status: SessionStatus.Idle,
+				createdAt: new Date().toISOString(),
+				modifiedAt: new Date().toISOString(),
+			});
+			stateManager.dispatchServerAction(sessionUri.toString(), { type: ActionType.SessionReady });
+			const db = new TestSessionDatabase();
+			const terminalManager = disposables.add(new TestAgentHostTerminalManager());
+			const queuedSideEffects = createTestSideEffects(disposables, stateManager, {
+				getAgent: () => agent,
+				agents: agentList,
+				sessionDataService: createSessionDataService(db),
+				onTurnComplete: () => { },
+			}, undefined, undefined, undefined, terminalManager);
+			disposables.add(queuedSideEffects.registerProgressListener(agent));
+
+			startTurn('turn-1');
+			for (const [id, text] of [['q-command', '!echo hi'], ['q-request', 'Explain the build']] as const) {
+				const setAction = {
+					type: ActionType.ChatPendingMessageSet as const,
+					kind: PendingMessageKind.Queued,
+					id,
+					message: { text, origin: { kind: MessageKind.User } },
+				};
+				stateManager.dispatchClientAction(defaultChatUri, setAction, { clientId: 'test', clientSeq: 1 });
+				queuedSideEffects.handleAction(defaultChatUri, setAction);
+			}
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: { type: ActionType.ChatTurnComplete, turnId: 'turn-1', duration: 1000 },
+			});
+			await terminalManager.commandFinishedListenerRegistered.p;
+			terminalManager.fireCommandFinished({ commandId: '1', command: 'echo hi', exitCode: 0, output: 'hi\n' });
+			await waitForSendMessageCalls(1);
+
+			assert.deepStrictEqual({
+				prompt: agent.sendMessageCalls[0].prompt,
+				title: stateManager.getSessionState(sessionUri.toString())?.title,
+				persistedTitle: await db.getMetadata('customTitle'),
+			}, {
+				prompt: 'Explain the build',
+				title: 'Explain the build',
+				persistedTitle: 'Explain the build',
+			});
 		});
 
 		test('drains a peer chat queued message to the owning session with the chat arg', async () => {
