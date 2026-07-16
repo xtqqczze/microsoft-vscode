@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
+import { StopWatch } from '../../../../base/common/stopwatch.js';
 import { ILogService } from '../../../log/common/log.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import { ActionType, StateAction } from '../../common/state/sessionActions.js';
@@ -173,6 +174,7 @@ export class AgentHostLocalCommands extends Disposable {
 	}
 
 	private async _run(command: ILocalChatCommand, handling: ILocalChatCommandHandling, request: ILocalChatCommandRequest): Promise<void> {
+		const stopWatch = StopWatch.create(false);
 		try {
 			await handling.run();
 		} catch (err) {
@@ -182,7 +184,7 @@ export class AgentHostLocalCommands extends Disposable {
 			// reducer opened, optionally persist it as a local turn (so it
 			// survives reload and anchors fork/truncate), then let the owner
 			// drain any messages queued behind it.
-			this._stateManager.dispatchServerAction(request.turnChannel, { type: ActionType.ChatTurnComplete, turnId: request.turnId });
+			this._stateManager.dispatchServerAction(request.turnChannel, { type: ActionType.ChatTurnComplete, turnId: request.turnId, duration: Math.max(0, stopWatch.elapsed()) });
 			if (command.recordsLocalTurn) {
 				this._recordLocalTurn(request.turnChannel, request.turnId);
 			}
