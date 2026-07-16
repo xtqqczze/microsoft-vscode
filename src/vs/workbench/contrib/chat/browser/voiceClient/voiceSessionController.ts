@@ -34,6 +34,8 @@ import { ITelemetryService } from '../../../../../platform/telemetry/common/tele
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
+import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
+import { localize } from '../../../../../nls.js';
 import {
 	VoiceFirstConnectClassification, VoiceFirstConnectEvent,
 	VoiceSessionStartedClassification, VoiceSessionStartedEvent,
@@ -186,6 +188,15 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	private _window: (Window & typeof globalThis) | undefined;
 	private readonly _voiceEventDisposables = this._register(new DisposableStore());
 	private readonly _voiceAutorunDisposable = this._register(new MutableDisposable());
+	/**
+	 * Watchdog that resets `isConnecting` (and surfaces feedback) if the connect
+	 * handshake never completes. Armed up front in {@link connect} so a step that
+	 * hangs (e.g. resolving the GitHub session while a chat request is in flight)
+	 * can't leave the toolbar spinner stuck indefinitely.
+	 */
+	private readonly _connectWatchdog = this._register(new MutableDisposable());
+	private static readonly _CONNECT_TIMEOUT_MS = 10000;
+	private _connectAttemptGeneration = 0;
 	private readonly _autoApprovedSessions = new Set<string>();
 	private _transcriptFadeTimer: ReturnType<typeof setTimeout> | undefined;
 	private _pttMaxDurationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -446,6 +457,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		@IAccessibilitySignalService private readonly accessibilitySignalService: IAccessibilitySignalService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
+		@INotificationService private readonly notificationService: INotificationService,
 	) {
 		super();
 
@@ -643,6 +655,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 
 	async connect(window: Window & typeof globalThis): Promise<void> {
 		if (this._isConnecting.get() || this._isConnected.get()) { return; }
+		const connectAttemptGeneration = ++this._connectAttemptGeneration;
 
 		this._window = window;
 		this._onFocusedSessionChanged();
@@ -651,12 +664,22 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._voiceState.set('idle', undefined);
 		this._telemetryConnectStartMs = Date.now();
 
+		// Arm the watchdog before any awaited work below (resolving the GitHub
+		// session, loading transcripts) so a step that hangs can't leave the
+		// toolbar spinner stuck indefinitely — a real report when a chat request
+		// is in progress. Cleared on a successful handshake or an explicit
+		// disconnect.
+		this._armConnectWatchdog();
+
 		// Resolve the GitHub login used as the transcript partition key.
 		// Voice Code is tightly coupled to GitHub auth via Copilot — one session
 		// is expected to exist. If not, we skip persistence rather than fail.
 		let authToken: string | undefined;
 		try {
 			const sessions = await this.authenticationService.getSessions('github');
+			if (connectAttemptGeneration !== this._connectAttemptGeneration) {
+				return;
+			}
 			this._userLogin = sessions[0]?.account.label;
 			authToken = sessions[0]?.accessToken;
 			if (!this._userLogin) {
@@ -666,6 +689,9 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 				// continues off the existing one (cosmetic — we only ever
 				// chain locally).
 				const lastTurn = (await this.voiceTranscriptStore.loadTurns(this._userLogin, { limit: 1 }))[0];
+				if (connectAttemptGeneration !== this._connectAttemptGeneration) {
+					return;
+				}
 				this._lastPersistedTurnId = lastTurn?.turnId;
 
 				// Pull the last few persisted timeline entries (voice turns,
@@ -678,6 +704,9 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 						this._userLogin,
 						{ limit: VoiceSessionController.PRIOR_TIMELINE_ENTRY_LIMIT }
 					);
+					if (connectAttemptGeneration !== this._connectAttemptGeneration) {
+						return;
+					}
 					this._pendingPriorTimeline = this._buildPriorTimeline(recent);
 				} catch (err) {
 					this.logService.warn('[voice] failed to load prior timeline entries for context', err);
@@ -686,6 +715,13 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			}
 		} catch (err) {
 			this.logService.warn('[voice] failed to resolve GitHub session', err);
+		}
+
+		// The watchdog (or an explicit disconnect) may have reset us while the
+		// awaited auth/transcript calls were in flight; bail rather than opening a
+		// late connection the user is no longer expecting.
+		if (!this._isConnecting.get() || connectAttemptGeneration !== this._connectAttemptGeneration) {
+			return;
 		}
 
 		this._voiceEventDisposables.clear();
@@ -835,6 +871,8 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 					this._isReconnecting.set(false, tx);
 					this._isConnected.set(true, tx);
 				});
+				// Handshake completed — the connect watchdog is no longer needed.
+				this._connectWatchdog.clear();
 
 				// Seed previous session states so existing sessions don't trigger false transitions
 				const seededResources = new Set<string>();
@@ -1387,17 +1425,37 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		}));
 
 		await this.voiceClientService.connect(window, authToken);
+		if (!this._isConnecting.get() || connectAttemptGeneration !== this._connectAttemptGeneration) {
+			return;
+		}
+		// Re-arm so the WebSocket handshake gets a fresh timeout window
+		// independent of how long the awaited auth/transcript work took above.
+		this._armConnectWatchdog();
+	}
 
-		// Timeout: if still connecting after 10s, give up
-		const connectTimeout = setTimeout(() => {
-			if (this._isConnecting.get() && !this._isConnected.get()) {
-				this.disconnect();
+	/**
+	 * Arms (or re-arms) the watchdog that resets voice mode if the connect
+	 * handshake never completes. Without this, a hung connect step leaves the
+	 * toolbar spinner spinning forever with no way to recover; on timeout we drop
+	 * back to a disconnected state and tell the user so they can retry.
+	 */
+	private _armConnectWatchdog(): void {
+		this._connectWatchdog.value = disposableTimeout(() => {
+			if (!this._isConnecting.get() || this._isConnected.get()) {
+				return;
 			}
-		}, 10000);
-		this._voiceEventDisposables.add({ dispose: () => clearTimeout(connectTimeout) });
+			this.logService.warn('[voice] connect handshake timed out; resetting voice mode');
+			this.disconnect();
+			this.notificationService.notify({
+				severity: Severity.Warning,
+				message: localize('voice.connectFailed', "Voice mode could not connect. Please try again."),
+			});
+		}, VoiceSessionController._CONNECT_TIMEOUT_MS);
 	}
 
 	disconnect(): void {
+		this._connectAttemptGeneration++;
+
 		// Telemetry: session ended
 		if (this._telemetrySessionStart) {
 			const durationSec = Math.round((Date.now() - this._telemetrySessionStart) / 1000);
@@ -1411,6 +1469,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 
 		this._isConnecting.set(false, undefined);
 		this._isReconnecting.set(false, undefined);
+		this._connectWatchdog.clear();
 		this._voiceAutorunDisposable.clear();
 		this._voiceEventDisposables.clear();
 		this.ttsPlaybackService.closeContext();
