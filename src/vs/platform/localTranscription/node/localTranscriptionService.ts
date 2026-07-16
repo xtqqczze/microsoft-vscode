@@ -35,6 +35,14 @@ const MAX_INTERIM_SECONDS = 45;
 const INTERIM_DEBOUNCE_MS = 1200;
 
 /**
+ * Silence (seconds) appended to the audio before the final transcription pass.
+ * Whisper frequently fails to emit the last word when the recording ends
+ * abruptly right after it (no trailing silence to mark the utterance end), so a
+ * short pad of zeros gives the model the context it needs to finalize the tail.
+ */
+const FINAL_PASS_TRAILING_SILENCE_SECONDS = 0.5;
+
+/**
  * transformers.js is a heavy, ESM-only dependency that also loads the native
  * onnxruntime-node addon. Import it lazily so forking the utility process stays
  * cheap; the model itself is only downloaded/loaded when dictation first runs.
@@ -182,7 +190,10 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		this._inferenceInFlight = true;
 		try {
 			const audio = this._mergedSamples();
-			const result = await pipe(audio, {
+			// Pad the final pass with trailing silence so Whisper reliably emits
+			// the last word even when the user stops speaking abruptly.
+			const input = isFinal ? this._withTrailingSilence(audio, FINAL_PASS_TRAILING_SILENCE_SECONDS) : audio;
+			const result = await pipe(input, {
 				chunk_length_s: 30,
 				stride_length_s: 5,
 				language: this._language,
@@ -216,6 +227,13 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		}
 		this._samples = [merged];
 		return merged;
+	}
+
+	/** Return `audio` with `seconds` of trailing silence (zeros) appended. */
+	private _withTrailingSilence(audio: Float32Array, seconds: number): Float32Array {
+		const padded = new Float32Array(audio.length + Math.round(SAMPLE_RATE * seconds));
+		padded.set(audio, 0);
+		return padded;
 	}
 
 	async stop(): Promise<string> {
