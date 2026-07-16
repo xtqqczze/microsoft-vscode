@@ -276,6 +276,18 @@ configurationRegistry.registerConfiguration({
 			default: 'onnx-community/whisper-base',
 			tags: ['experimental']
 		},
+		'chat.speechToText.mode': {
+			type: 'string',
+			enum: ['auto', 'toggle', 'pushToTalk'],
+			enumDescriptions: [
+				nls.localize('chat.speechToText.mode.auto', "Tap the dictation shortcut to start and stop, or press and hold it to dictate only while held (push-to-talk)."),
+				nls.localize('chat.speechToText.mode.toggle', "Tap the dictation shortcut to start dictating and tap again to stop."),
+				nls.localize('chat.speechToText.mode.pushToTalk', "Press and hold the dictation shortcut to dictate; dictation stops as soon as the shortcut is released."),
+			],
+			markdownDescription: nls.localize('chat.speechToText.mode.description', "Controls how the chat dictation shortcut ({0}) behaves.", '`Cmd/Ctrl+I`'),
+			default: 'auto',
+			tags: ['experimental']
+		},
 		'chat.editor.fontSize': {
 			type: 'number',
 			description: nls.localize('interactiveSession.editor.fontSize', "Controls the font size in pixels in chat codeblocks."),
