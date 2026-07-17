@@ -33,7 +33,6 @@ export interface IAgentHostMcpServer {
 	readonly enabled: boolean;
 	readonly status: McpServerStatus;
 	readonly state: McpServerState;
-	readonly logOutputChannelId?: string;
 	/** Starts or restarts the server. Providers that cannot control lifecycle may no-op. */
 	start(): Promise<void>;
 	/** Stops the server. Providers that cannot control lifecycle may no-op. */

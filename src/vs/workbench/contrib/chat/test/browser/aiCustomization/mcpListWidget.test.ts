@@ -33,7 +33,6 @@ function createAgentHostServer(overrides: Partial<AgentHostMcpServer> = {}): Age
 		enabled: true,
 		status: McpServerStatus.Ready,
 		state: { kind: McpServerStatus.Ready },
-		logOutputChannelId: undefined,
 		setEnabled: () => { },
 		start: () => { },
 		stop: () => { },
