@@ -4437,7 +4437,7 @@ suite('CopilotAgentSession', () => {
 					toolCallId: 'tc-assisted',
 					toolName: 'my_tool',
 					displayName: 'my_tool',
-					invocationMessage: 'Running my_tool...',
+					invocationMessage: 'my_tool',
 					toolInput: { file: 'test.ts' },
 					riskAssessment: {
 						kind: ToolCallRiskAssessmentKind.Judge,
