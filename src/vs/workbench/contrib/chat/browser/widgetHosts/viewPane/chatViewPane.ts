@@ -52,7 +52,7 @@ import { IChatModel, IChatModelInputState } from '../../../common/model/chatMode
 import { CHAT_PROVIDER_ID } from '../../../common/participants/chatParticipantContribTypes.js';
 import { IChatModelReference, IChatService } from '../../../common/chatService/chatService.js';
 import { IChatSessionsService, localChatSessionType } from '../../../common/chatSessionsService.js';
-import { LocalChatSessionUri, getChatSessionType } from '../../../common/model/chatUri.js';
+import { LocalChatSessionUri, getChatSessionType, isUntitledChatSession } from '../../../common/model/chatUri.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, getDefaultNewChatSessionResource, getDefaultNewChatSessionType } from '../../../common/constants.js';
 import { AgentSessionsControl } from '../../agentSessions/agentSessionsControl.js';
 import { ACTION_ID_NEW_CHAT } from '../../actions/chatActions.js';
@@ -535,8 +535,10 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		// session the user is dictating into (the explicit target session, or the
 		// focused session when dictation began) and is only shown in that
 		// session's view. Switching focus to a different session hides the
-		// transcript here; switching while actively dictating also stops
-		// transcription so it isn't misrouted to the newly focused session.
+		// transcript here; switching to another existing session stops
+		// transcription so it isn't misrouted there. Anything already dictated is
+		// submitted to the original session; an idle hands-free turn may instead
+		// follow an untitled "New Chat" session before any dictation starts.
 		let listeningSession: URI | undefined;
 		let ownerSession: URI | undefined;
 		this._register(autorun(reader => {
@@ -562,18 +564,23 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 					listeningSession = targetSession ?? currentSession;
 					ownerSession = listeningSession;
 				} else if (!targetSession && currentSession && !isEqual(currentSession, listeningSession)) {
-					// User switched to a different session while listening. Only
-					// stop when there's dictation in progress, so it isn't
-					// misrouted to the newly focused session. If nothing has been
-					// recorded yet (e.g. clicking "New Chat" while idly listening
-					// hands-free), keep listening and just follow the new session.
+					const dictationSession = listeningSession;
 					const activelyDictating = turns.some(t => t.speaker === 'user' && t.isPartial && t.text.trim().length > 0);
 					if (activelyDictating) {
-						this.voiceSessionController.stopListening();
+						// The user has already spoken — submit their words to the
+						// session they were dictating into rather than losing them
+						// or misrouting to the newly focused session.
+						this.voiceSessionController.finishListeningAndSubmitTo(dictationSession);
 						listeningSession = undefined;
-					} else {
+					} else if (isUntitledChatSession(currentSession)) {
+						// Idle hands-free listen following into a fresh New Chat.
 						listeningSession = currentSession;
 						ownerSession = currentSession;
+					} else {
+						// Idle listen and the user switched to another existing
+						// session before saying anything — nothing to submit.
+						this.voiceSessionController.discardListening();
+						listeningSession = undefined;
 					}
 				}
 			} else {

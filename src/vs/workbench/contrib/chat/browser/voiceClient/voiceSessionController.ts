@@ -132,6 +132,28 @@ export interface IVoiceSessionController {
 	stopListening(): void;
 
 	/**
+	 * Stop the current recording WITHOUT finalizing the turn: any in-flight
+	 * push-to-talk press is aborted (no `ptt_end` is sent), so the backend
+	 * never finalizes the buffered speech into a `send_to_chat`. Use this on
+	 * focus changes so speech captured for one session can't be misrouted to a
+	 * newly focused session. Like {@link stopListening}, the WebSocket stays
+	 * connected and the auto-listen re-arm loop is suppressed until the user
+	 * talks again.
+	 */
+	discardListening(): void;
+
+	/**
+	 * Stop listening on a focus change while the user is actively dictating:
+	 * finalize the in-flight press (send `ptt_end`) but pin the resulting
+	 * submission to `session` — the session the user was dictating into — so
+	 * their words are not misrouted to the newly focused session. The WebSocket
+	 * stays connected and the auto-listen re-arm loop is suppressed until the
+	 * user talks again. Use {@link discardListening} instead when nothing has
+	 * been dictated yet.
+	 */
+	finishListeningAndSubmitTo(session: URI): void;
+
+	/**
 	 * Mark a session as having been cancelled by the user from VS Code UI. The
 	 * next state-change detected for this session (typically the chat model
 	 * transitioning to `idle`) will be suppressed so the backend doesn't
@@ -237,6 +259,18 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	/** When true, the auto-listen loop is suppressed (user pressed Stop
 	 *  Recording). Cleared on the next explicit `pttDown` or on connect. */
 	private _autoListenSuppressed = false;
+	/** Timestamp (ms) until which an incoming `send_to_chat` is dropped after a
+	 *  discarded turn, so buffered speech from a focus-change discard can't be
+	 *  misrouted to the newly focused session. Cleared on the next `pttDown`. */
+	private _suppressSendToChatUntil = 0;
+	/** One-shot session that the next finalized turn must be submitted to,
+	 *  regardless of which session is focused. Set when listening is stopped on
+	 *  a focus change while the user is actively dictating, so their words land
+	 *  in the session they were dictating into rather than the newly focused
+	 *  one. Consumed by the next `send_to_chat`; also cleared on `pttDown` and
+	 *  after {@link _PINNED_SUBMIT_EXPIRY_MS}. */
+	private _pinnedSubmitSession: URI | undefined;
+	private _pinnedSubmitTimer: ReturnType<typeof setTimeout> | undefined;
 	/** Armed on a fresh connect (hands-free); consumed on `session_init` to
 	 *  enter listening once the backend acks the session. */
 	private _enterListenOnSessionInit = false;
@@ -433,6 +467,13 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	// never produces a state change.
 	private readonly _userCancelledSessions = new Map<string, ReturnType<typeof setTimeout>>();
 	private static readonly _USER_CANCEL_SUPPRESS_MS = 10_000;
+	/** After a focus-change discard, drop a stray backend `send_to_chat` for
+	 *  this long so late-finalized buffered speech isn't misrouted. */
+	private static readonly _DISCARD_SEND_SUPPRESS_MS = 2_000;
+	/** How long a focus-change submit stays pinned to the original session
+	 *  while the backend finalizes the turn and emits `send_to_chat`, before the
+	 *  pin is cleared so it can't misroute a much later, unrelated turn. */
+	private static readonly _PINNED_SUBMIT_EXPIRY_MS = 15_000;
 
 	// Per-session watchdog timers that re-flush session_context shortly after
 	// a confirmation transition. This is a paranoid mitigation: if the
@@ -1599,6 +1640,14 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 				'focus_session',
 			];
 			if (e.name === 'send_to_chat') {
+				// Drop a stray finalization from a turn we just discarded on a
+				// focus change, so buffered speech isn't misrouted to the newly
+				// focused session.
+				if (Date.now() < this._suppressSendToChatUntil) {
+					this.logService.trace('[voice] dropping send_to_chat: turn discarded on focus change');
+					this.voiceClientService.sendToolResult(e.callId, 'ok');
+					return;
+				}
 				const rawText = typeof e.args?.['text'] === 'string' ? (e.args['text'] as string) : '';
 				// Defensively strip a trailing stop phrase (e.g. "send it") that
 				// the backend should have removed but sometimes leaves in.
@@ -1920,6 +1969,11 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	pttDown(): void {
 		if (!this._isConnected.get()) { this.logService.trace('[voice] pttDown ignored: not connected'); return; }
 
+		// A fresh user press starts a new turn — no longer suppress send_to_chat
+		// from a previously discarded turn, nor pin it to a prior session.
+		this._suppressSendToChatUntil = 0;
+		this._setPinnedSubmitSession(undefined);
+
 		// Toggle mode: second tap finishes recording
 		if (this._pttToggleMode) {
 			this.logService.trace('[voice] pttDown: toggle-mode second tap -> finishing turn');
@@ -2073,17 +2127,84 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		}
 	}
 
+	discardListening(): void {
+		// Stop the current recording WITHOUT finalizing the turn. Any in-flight
+		// press is aborted (mic drops its buffer, NO `ptt_end` is sent) so the
+		// backend never turns the buffered speech into a `send_to_chat` — which
+		// would otherwise be routed to the now-focused session. Also drop a
+		// stray `send_to_chat` the backend may already have in flight (e.g. it
+		// auto-ended the turn via VAD before we discarded).
+		if (!this._isConnected.get()) { return; }
+		this._autoListenSuppressed = true;
+		this._pttToggleMode = false;
+		this._clearAutoListenTimer();
+		this._suppressSendToChatUntil = Date.now() + VoiceSessionController._DISCARD_SEND_SUPPRESS_MS;
+		if (this._pttHeld) {
+			this._finishPtt('discard');
+		} else {
+			this._voiceState.set('idle', undefined);
+			this._statusText.set('Tap to start', undefined);
+		}
+	}
+
+	finishListeningAndSubmitTo(session: URI): void {
+		// Stop listening on a focus change, but the user has already dictated —
+		// so finalize the turn (send `ptt_end`) and pin the resulting
+		// `send_to_chat` to `session` (the session they were dictating into) so
+		// their words aren't misrouted to the newly focused session.
+		if (!this._isConnected.get()) { return; }
+		this._autoListenSuppressed = true;
+		this._pttToggleMode = false;
+		this._clearAutoListenTimer();
+		this._setPinnedSubmitSession(session);
+		if (this._pttHeld) {
+			this._finishPtt('local');
+		} else {
+			// The backend already auto-ended the turn (VAD) and a `send_to_chat`
+			// is in flight; the pin routes it. Reflect the pending submission.
+			this._voiceState.set('processing', undefined);
+			this._statusText.set('Processing...', undefined);
+		}
+	}
+
+	private _setPinnedSubmitSession(session: URI | undefined): void {
+		if (this._pinnedSubmitTimer) {
+			clearTimeout(this._pinnedSubmitTimer);
+			this._pinnedSubmitTimer = undefined;
+		}
+		this._pinnedSubmitSession = session;
+		if (session) {
+			this._pinnedSubmitTimer = setTimeout(() => {
+				this._pinnedSubmitTimer = undefined;
+				this._pinnedSubmitSession = undefined;
+			}, VoiceSessionController._PINNED_SUBMIT_EXPIRY_MS);
+		}
+	}
+
+	private _consumePinnedSubmitSession(): URI | undefined {
+		const pinned = this._pinnedSubmitSession;
+		if (pinned) {
+			this._setPinnedSubmitSession(undefined);
+		}
+		return pinned;
+	}
+
 	/**
 	 * Finish the current push-to-talk press.
 	 *
-	 * ``'local'`` is a user-driven end (release / tap / keyword): the mic drains
-	 * its tail and the ``onPttEnd`` → ``ptt_end`` path fires. ``'auto'`` is when
-	 * the backend ended the turn itself (``turn_auto_ended``): the mic is aborted
-	 * with no drain and NO ``ptt_end`` is sent. ``'immediate'`` is for a known-
-	 * silent passive turn: abort with no drain and send ``ptt_end`` synchronously
-	 * so the backend clears its ``user_is_speaking`` latch before the next frame.
+	 * ``reason`` is ``'local'`` for a user-driven end (button release / toggle
+	 * tap / keyword) — the mic drains its tail and the ``onPttEnd`` → ``ptt_end``
+	 * path fires. It is ``'auto'`` when the backend ended the turn itself
+	 * (``turn_auto_ended``): the mic is aborted with no drain and NO ``ptt_end``
+	 * is sent for the turn. ``'immediate'`` is for a known-silent passive turn:
+	 * abort with no drain and send ``ptt_end`` synchronously so the backend
+	 * clears its ``user_is_speaking`` latch before the next frame. ``'discard'``
+	 * throws the press away on a focus change: like ``'auto'`` the mic is aborted
+	 * with NO ``ptt_end`` (so the backend never finalizes it into a
+	 * `send_to_chat`), but the state settles to ``idle`` rather than
+	 * ``processing`` since nothing is being sent.
 	 */
-	private _finishPtt(reason: 'local' | 'auto' | 'immediate' = 'local'): void {
+	private _finishPtt(reason: 'local' | 'auto' | 'immediate' | 'discard' = 'local'): void {
 		// End toggle (hands-free) mode on every turn-ending path — even when not held — so an out-of-band finish can't leave a stale toggle that self-kills the next auto-listen.
 		this._pttToggleMode = false;
 		this._bargeInListenActive = false;
@@ -2105,9 +2226,10 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._replyPlayedSinceSend = false;
 		this._clearAwaitingReply();
 		this._suppressIncomingAudio = false;
-		if (reason === 'auto') {
-			// Backend already ended the turn — stop capturing without draining
-			// more audio and without emitting our own ptt_end.
+		if (reason === 'auto' || reason === 'discard') {
+			// Backend already ended the turn, or we're discarding it — stop
+			// capturing without draining more audio and without emitting our
+			// own ptt_end.
 			this.micCaptureService.abortPtt();
 		} else if (reason === 'immediate') {
 			// Silent passive turn: stop now (no drain) and send ptt_end synchronously so a following narration request isn't NACK'd `busy: user_speaking`.
@@ -2115,6 +2237,11 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			this.voiceClientService.sendPttEnd();
 		} else {
 			this.micCaptureService.pttUp();
+		}
+		if (reason === 'discard') {
+			// Nothing is being sent, so don't leave the UI stuck in 'Processing'.
+			this._voiceState.set('idle', undefined);
+			this._statusText.set('Tap to start', undefined);
 		}
 		if (this.accessibilityService.isScreenReaderOptimized()) {
 			this.accessibilitySignalService.playSignal(AccessibilitySignal.voiceRecordingStopped);
@@ -2309,7 +2436,10 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	 * Otherwise sends to whatever is currently active via the view pane command.
 	 */
 	private async _sendTranscriptionToChat(text: string): Promise<void> {
-		const target = this._targetSession.get();
+		// A focus-change submit pins routing to the session the user was
+		// dictating into; it takes priority over the user-picked target and the
+		// currently focused session so their words land where they were aimed.
+		const target = this._consumePinnedSubmitSession() ?? this._targetSession.get();
 		if (target) {
 			// Check if target is the currently visible session
 			const currentSession = await this.commandService.executeCommand<string | undefined>('_chat.voice.getCurrentSession').catch(() => undefined);
