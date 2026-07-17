@@ -1938,6 +1938,36 @@ export class CopilotAgentSession extends Disposable {
 				: undefined;
 			const recommendation = autoApproval?.recommendation;
 			if (recommendation === 'approve' && !request.requestSandboxBypass) {
+				if (request.kind === 'custom-tool'
+					&& typeof request.toolName === 'string'
+					&& this._clientToolNames.has(request.toolName)
+				) {
+					const { invocationMessage, toolInput, permissionKind, permissionPath } = getPermissionDisplay(request, this._workingDirectory);
+					const parentToolCallId = this._activeToolCalls.get(toolCallId)?.parentToolCallId;
+					this._onDidSessionProgress.fire({
+						kind: 'pending_confirmation',
+						chat: this._chatChannelUri,
+						state: {
+							status: ToolCallStatus.PendingConfirmation,
+							toolCallId,
+							toolName: request.toolName,
+							displayName: getToolDisplayName(request.toolName),
+							invocationMessage,
+							toolInput,
+							riskAssessment: autoApproval?.reason
+								? {
+									kind: ToolCallRiskAssessmentKind.Judge,
+									status: ToolCallRiskAssessmentStatus.Complete,
+									reason: autoApproval.reason,
+									safety: 1,
+								}
+								: undefined,
+						},
+						permissionKind,
+						permissionPath,
+						parentToolCallId,
+					});
+				}
 				return { kind: 'approve-once' };
 			}
 
@@ -3025,7 +3055,9 @@ export class CopilotAgentSession extends Disposable {
 				return;
 			}
 
-			const shouldWaitForClientToolReady = contributor?.kind === ToolCallContributorKind.Client && !isAgentCoordinationTool(e.data.toolName);
+			const shouldWaitForClientToolReady = contributor?.kind === ToolCallContributorKind.Client
+				&& !isAgentCoordinationTool(e.data.toolName)
+				&& this._lastAppliedPermissionMode !== 'on';
 			if (shouldWaitForClientToolReady) {
 				return;
 			}
