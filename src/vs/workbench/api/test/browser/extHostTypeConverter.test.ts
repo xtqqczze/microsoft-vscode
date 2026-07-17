@@ -75,9 +75,7 @@ suite('ExtHostTypeConverter', function () {
 
 	test('LanguageModelChatMessage2 converters preserve tool-result data parts across the provider boundary #313920', function () {
 
-		// Platform converters faithfully round-trip data parts and don't strip unknown mime types,
-		// so the producer (the Copilot host) must avoid emitting internal sentinels to providers
-		// that can't consume them — otherwise a naive `JSON.stringify(part)` leaks them upstream.
+		// Platform converters round-trip data parts unchanged (unknown mime types aren't stripped), so the producer must gate emission (#313920).
 		const CACHE_CONTROL_MIME = 'cache_control';
 
 		const toolResult = new extHostTypes.LanguageModelToolResultPart('call-1', [

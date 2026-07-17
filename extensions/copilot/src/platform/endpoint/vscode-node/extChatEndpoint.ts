@@ -332,7 +332,7 @@ function getTelemetryTurnFromProperties(telemetryProperties: IMakeChatRequestOpt
 interface ConvertToApiChatMessageOptions {
 	readonly ignoreStatefulMarker?: boolean;
 	readonly summarizedAtRoundId?: string;
-	/** Emit the {@link CustomDataPartMimeTypes.CacheControl} sentinel for cache breakpoints. Defaults to `true`. */
+	/** Emit the {@link CustomDataPartMimeTypes.CacheControl} sentinel for cache breakpoints. Defaults to `false` (fail closed) so it never reaches a provider that can't consume it (#313920). */
 	readonly emitCacheBreakpoints?: boolean;
 }
 
@@ -359,7 +359,7 @@ export function convertToApiChatMessage(messages: Raw.ChatMessage[], options: Co
 					continue;
 				}
 			} else if (contentPart.type === Raw.ChatCompletionContentPartKind.CacheBreakpoint) {
-				if (options.emitCacheBreakpoints !== false) {
+				if (options.emitCacheBreakpoints) {
 					apiContent.push(new vscode.LanguageModelDataPart(new TextEncoder().encode('ephemeral'), CustomDataPartMimeTypes.CacheControl));
 				}
 			} else if (contentPart.type === Raw.ChatCompletionContentPartKind.Opaque) {
