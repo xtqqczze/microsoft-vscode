@@ -1414,6 +1414,7 @@ suite('ProtocolServerHandler', () => {
 			stateManager.dispatchServerAction(defaultChatUri, {
 				type: ActionType.ChatTurnStarted,
 				turnId: 'turn-1',
+				startedAt: '2025-01-01T00:00:00.000Z',
 				message: { text: 'run it', origin: { kind: MessageKind.User } },
 			});
 			stateManager.dispatchServerAction(defaultChatUri, {
