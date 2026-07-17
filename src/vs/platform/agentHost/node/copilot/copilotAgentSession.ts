@@ -1942,8 +1942,10 @@ export class CopilotAgentSession extends Disposable {
 					&& typeof request.toolName === 'string'
 					&& this._clientToolNames.has(request.toolName)
 				) {
-					const { invocationMessage, toolInput, permissionKind, permissionPath } = getPermissionDisplay(request, this._workingDirectory);
-					const parentToolCallId = this._activeToolCalls.get(toolCallId)?.parentToolCallId;
+					const trackedToolCall = this._activeToolCalls.get(toolCallId);
+					const displayName = trackedToolCall?.displayName ?? getToolDisplayName(request.toolName);
+					const parameters = trackedToolCall?.parameters;
+					const parentToolCallId = trackedToolCall?.parentToolCallId;
 					this._onDidSessionProgress.fire({
 						kind: 'pending_confirmation',
 						chat: this._chatChannelUri,
@@ -1951,9 +1953,9 @@ export class CopilotAgentSession extends Disposable {
 							status: ToolCallStatus.PendingConfirmation,
 							toolCallId,
 							toolName: request.toolName,
-							displayName: getToolDisplayName(request.toolName),
-							invocationMessage,
-							toolInput,
+							displayName,
+							invocationMessage: getInvocationMessage(request.toolName, displayName, parameters),
+							toolInput: getToolInputString(request.toolName, parameters, tryStringify(parameters)),
 							riskAssessment: autoApproval?.reason
 								? {
 									kind: ToolCallRiskAssessmentKind.Judge,
@@ -1963,8 +1965,6 @@ export class CopilotAgentSession extends Disposable {
 								}
 								: undefined,
 						},
-						permissionKind,
-						permissionPath,
 						parentToolCallId,
 					});
 				}

@@ -4365,12 +4365,12 @@ suite('CopilotAgentSession', () => {
 			assert.deepStrictEqual({
 				permissionModeSetCalls: mockSession.permissionModeSetCalls,
 				toolCallId: readyAction.toolCallId,
-				toolInput: readyAction.toolInput,
+				toolInput: readyAction.toolInput === undefined ? undefined : JSON.parse(readyAction.toolInput),
 				confirmed: readyAction.confirmed,
 			}, {
 				permissionModeSetCalls: ['on'],
 				toolCallId: 'tc-allow-all',
-				toolInput: '{"file":"test.ts"}',
+				toolInput: { file: 'test.ts' },
 				confirmed: ToolCallConfirmationReason.NotNeeded,
 			});
 
@@ -4394,7 +4394,7 @@ suite('CopilotAgentSession', () => {
 			mockSession.fire('tool.execution_start', {
 				toolCallId: 'tc-assisted',
 				toolName: 'my_tool',
-				arguments: {},
+				arguments: { file: 'test.ts' },
 			} as SessionEventPayload<'tool.execution_start'>['data']);
 
 			mockSession.fire('permission.requested', {
@@ -4420,11 +4420,15 @@ suite('CopilotAgentSession', () => {
 				toolName: 'my_tool',
 			});
 			const readySignal = signals.find((s): s is IAgentToolPendingConfirmationSignal => s.kind === 'pending_confirmation');
+			const readyState = readySignal?.state;
 
 			assert.deepStrictEqual({
 				permissionModeSetCalls: mockSession.permissionModeSetCalls,
 				permissionResult,
-				ready: readySignal?.state,
+				ready: readyState ? {
+					...readyState,
+					toolInput: readyState.toolInput === undefined ? undefined : JSON.parse(readyState.toolInput),
+				} : undefined,
 			}, {
 				permissionModeSetCalls: ['auto'],
 				permissionResult: { kind: 'approve-once' },
@@ -4434,7 +4438,7 @@ suite('CopilotAgentSession', () => {
 					toolName: 'my_tool',
 					displayName: 'my_tool',
 					invocationMessage: 'Running my_tool...',
-					toolInput: undefined,
+					toolInput: { file: 'test.ts' },
 					riskAssessment: {
 						kind: ToolCallRiskAssessmentKind.Judge,
 						status: ToolCallRiskAssessmentStatus.Complete,
