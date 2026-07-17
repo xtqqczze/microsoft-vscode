@@ -75,6 +75,14 @@ interface IDeferredResponse {
 	readonly chunks: IDeferredChunk[];
 }
 
+interface IPendingSolicitedNarration {
+	readonly sessionId: string;
+	readonly kind: 'response' | 'confirmation';
+	readonly text: string;
+	readonly audioStartTimer: ReturnType<typeof setTimeout>;
+	hasReceivedAudio: boolean;
+}
+
 export interface IPendingToolConfirmation {
 	readonly type: 'approval' | 'input';
 	readonly sessionLabel: string;
@@ -508,8 +516,8 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	 * A safety timer releases the in-flight guard if no audio ever comes, so a
 	 * later focus/state event can retry rather than the reply being lost.
 	 */
-	private readonly _pendingSolicitedNarrations = new Map<string, { sessionId: string; kind: 'response' | 'confirmation'; text: string; timer: ReturnType<typeof setTimeout> }>();
-	private static readonly _SOLICITED_NARRATION_TIMEOUT_MS = 30_000;
+	private readonly _pendingSolicitedNarrations = new Map<string, IPendingSolicitedNarration>();
+	private static readonly _SOLICITED_NARRATION_AUDIO_START_TIMEOUT_MS = 30_000;
 
 	/**
 	 * Narrations the backend bounced (`narration_ack` `busy`) or cancelled
@@ -943,8 +951,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 				// its timeout) so clicking the session again re-requests immediately.
 				const pending = this._pendingSolicitedNarrations.get(finishedResponseId);
 				if (pending) {
-					clearTimeout(pending.timer);
-					this._pendingSolicitedNarrations.delete(finishedResponseId);
+					this._clearPendingSolicitedNarration(finishedResponseId, pending);
 				}
 			}
 
@@ -1490,6 +1497,9 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			// (otherwise it is stranded and never read). Untagged / non-agent-host
 			// ids pass through unchanged.
 			const codingSessionId = this._canonicalSessionId(e.codingSessionId);
+			if (e.audio) {
+				this._markSolicitedNarrationAudioStarted(e.responseId);
+			}
 			// If this response is for a session the user isn't currently looking
 			// at, don't play it now: buffer it until that session is focused and
 			// notify with a short audio cue instead. When the backend echoes a
@@ -1774,7 +1784,9 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._lastResponseSummaryById.clear();
 		this._lastNarratedText.clear();
 		this._pendingNarrationRetries.clear();
-		for (const s of this._pendingSolicitedNarrations.values()) { clearTimeout(s.timer); }
+		for (const [narrationId, pending] of this._pendingSolicitedNarrations) {
+			this._clearPendingSolicitedNarration(narrationId, pending);
+		}
 		this._pendingSolicitedNarrations.clear();
 		this._deferredNarrations.clear();
 		this._narratedConfirmation.clear();
@@ -1853,7 +1865,9 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		// timers here (as disconnect() does). Otherwise a narration_unblocked on a
 		// new connection could retry narration from this evicted session, and the
 		// solicited-narration safety timers would linger past teardown.
-		for (const s of this._pendingSolicitedNarrations.values()) { clearTimeout(s.timer); }
+		for (const [narrationId, pending] of this._pendingSolicitedNarrations) {
+			this._clearPendingSolicitedNarration(narrationId, pending);
+		}
 		this._pendingSolicitedNarrations.clear();
 		this._solicitedNarrationIds.clear();
 		this._pendingNarrationRetries.clear();
@@ -3021,18 +3035,86 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		}
 		this._solicitedNarrationIds.add(narrationId);
 		// Do NOT mark the reply narrated / clear its pending indicator yet - a
-		// request being accepted is not the reply being heard. Track it until its
-		// audio finalizes (_markNarrationHeard). A safety timer releases the guard
-		// if no audio ever arrives so a later focus/state event can retry.
-		const timer = setTimeout(() => {
-			// No audio finalized in time: release the in-flight guard but leave
-			// _lastNarratedText/pending untouched so the reply can be retried and
-			// isn't silently lost.
-			this._pendingSolicitedNarrations.delete(narrationId);
-			this.logService.trace(`[voice] solicited narration ${narrationId.slice(0, 8)} timed out with no final audio; releasing guard for retry`);
-		}, VoiceSessionController._SOLICITED_NARRATION_TIMEOUT_MS);
-		this._pendingSolicitedNarrations.set(narrationId, { sessionId, kind, text, timer });
+		// request being accepted is not the reply being heard. Wait for the
+		// backend to start returning audio: if it never does, the watchdog below
+		// releases the guard and restores state so voice mode can't get stuck on
+		// a completed response that never produced audio. Once audio starts, the
+		// stream is left to finalize normally (_markNarrationHeard) with no
+		// timeout on the remainder.
+		const audioStartTimer = setTimeout(() => {
+			this._handleSolicitedNarrationAudioStartTimeout(narrationId);
+		}, VoiceSessionController._SOLICITED_NARRATION_AUDIO_START_TIMEOUT_MS);
+		this._pendingSolicitedNarrations.set(narrationId, {
+			sessionId,
+			kind,
+			text,
+			audioStartTimer,
+			hasReceivedAudio: false,
+		});
 		return true;
+	}
+
+	private _markSolicitedNarrationAudioStarted(narrationId: string | undefined): void {
+		if (!narrationId) {
+			return;
+		}
+		const pending = this._pendingSolicitedNarrations.get(narrationId);
+		if (!pending || pending.hasReceivedAudio) {
+			return;
+		}
+		// Audio has started arriving, so the "no audio at all" watchdog is done.
+		// The rest of the stream is left to finalize normally (_markNarrationHeard);
+		// we don't time out a stream that is actively coming in.
+		pending.hasReceivedAudio = true;
+		clearTimeout(pending.audioStartTimer);
+	}
+
+	private _handleSolicitedNarrationAudioStartTimeout(narrationId: string): void {
+		const pending = this._pendingSolicitedNarrations.get(narrationId);
+		if (!pending || pending.hasReceivedAudio) {
+			return;
+		}
+		this._pendingSolicitedNarrations.delete(narrationId);
+		this._solicitedNarrationIds.delete(narrationId);
+		// Only restore state when this was the last thing we were waiting on. If a
+		// direct chat reply is still expected (`_awaitingReplyAudio`) or another
+		// solicited narration is still waiting for its audio to start, restoring
+		// idle / re-entering the hands-free mic here could suppress that other
+		// response's audio. Leave restoration to whichever watchdog fires last.
+		if (this._awaitingReplyAudio || this._hasNarrationAwaitingAudio()) {
+			this.logService.trace(`[voice] solicited narration ${narrationId.slice(0, 8)} timed out waiting for audio start; another response still expected, deferring state restore`);
+			return;
+		}
+		this.logService.trace(`[voice] solicited narration ${narrationId.slice(0, 8)} timed out waiting for audio start; restoring idle state`);
+		this._restoreVoiceStateAfterNarrationTimeout();
+	}
+
+	/** True while any tracked solicited narration is still waiting for its audio
+	 *  to start (i.e. a no-audio watchdog is still outstanding). */
+	private _hasNarrationAwaitingAudio(): boolean {
+		for (const pending of this._pendingSolicitedNarrations.values()) {
+			if (!pending.hasReceivedAudio) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private _clearPendingSolicitedNarration(narrationId: string, pending: IPendingSolicitedNarration): void {
+		clearTimeout(pending.audioStartTimer);
+		this._pendingSolicitedNarrations.delete(narrationId);
+	}
+
+	private _restoreVoiceStateAfterNarrationTimeout(): void {
+		if (this.ttsPlaybackService.isPlaying || this._audioQueue.length > 0 || this._currentPlaybackSessionId !== null || this._pttHeld) {
+			return;
+		}
+		if (this._isHandsFreeEnabled() && this._window && this._isConnected.get()) {
+			this._enterAutoListen();
+			return;
+		}
+		this._voiceState.set('idle', undefined);
+		this._statusText.set('Hold to speak...', undefined);
 	}
 
 	/** Mark a solicited narration's reply as actually heard once its final audio
@@ -3044,8 +3126,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		if (!solicited) {
 			return;
 		}
-		clearTimeout(solicited.timer);
-		this._pendingSolicitedNarrations.delete(narrationId);
+		this._clearPendingSolicitedNarration(narrationId, solicited);
 		// Only responses populate the persistent text dedup (and own the pending
 		// indicator). A confirmation is transient actionable state that must be
 		// re-narratable, so heard confirmations leave _lastNarratedText untouched.
@@ -3081,8 +3162,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		const key = this._sessionKey(e.codingSessionId);
 		const solicited = this._pendingSolicitedNarrations.get(e.narrationId);
 		if (solicited) {
-			clearTimeout(solicited.timer);
-			this._pendingSolicitedNarrations.delete(e.narrationId);
+			this._clearPendingSolicitedNarration(e.narrationId, solicited);
 		}
 		this._solicitedNarrationIds.delete(e.narrationId);
 		if (e.disposition === 'invalid') {
@@ -3109,8 +3189,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		const key = this._sessionKey(e.codingSessionId);
 		const solicited = this._pendingSolicitedNarrations.get(e.narrationId);
 		if (solicited) {
-			clearTimeout(solicited.timer);
-			this._pendingSolicitedNarrations.delete(e.narrationId);
+			this._clearPendingSolicitedNarration(e.narrationId, solicited);
 		}
 		this._solicitedNarrationIds.delete(e.narrationId);
 		if (solicited) {
