@@ -1720,6 +1720,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		@IMenuService private readonly menuService: IMenuService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IVoicePlaybackService private readonly _listVoicePlaybackService: IVoicePlaybackService,
 		@IWorkbenchAssignmentService private readonly assignmentService: IWorkbenchAssignmentService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
@@ -1931,6 +1932,13 @@ export class SessionsList extends Disposable implements ISessionsList {
 				const isLeftClick = DOM.isMouseEvent(e.browserEvent) && e.browserEvent.button === 0;
 				const preserveFocus = isLeftClick ? false : (e.editorOptions.preserveFocus ?? false);
 				this.options.onSessionOpen(element.resource, preserveFocus, e.sideBySide);
+				// If this session has an unheard voice response, opening it may not
+				// change the active-session observable (it can already be the active
+				// session, just not focused), so the voice controller would never
+				// re-activate it. Ask it to narrate the pending item explicitly.
+				if (this._listVoicePlaybackService.hasPendingResponse(element.resource)) {
+					this.commandService.executeCommand('_chat.voice.activateSession', element.resource.toString());
+				}
 			}
 		}));
 
