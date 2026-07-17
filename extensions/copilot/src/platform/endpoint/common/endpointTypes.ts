@@ -13,3 +13,18 @@ export namespace CustomDataPartMimeTypes {
 }
 
 export const CacheType = 'ephemeral';
+
+/**
+ * Vendors of Copilot's built-in BYOK providers whose converters handle the internal
+ * {@link CustomDataPartMimeTypes.CacheControl} sentinel (Anthropic uses it, Gemini strips it).
+ * The sentinel is only emitted to these providers; others would serialize it verbatim into
+ * their upstream request (issue #313920). Stopgap until a public opt-in capability exists.
+ *
+ * TODO @vritant24: replace this vendor allow-list with an externally exposed API so any
+ * `LanguageModelChatProvider` can opt in to receiving cache breakpoints (issue #313920).
+ */
+export const CacheBreakpointAwareModelVendors: ReadonlySet<string> = new Set(['anthropic', 'gemini', 'openrouter']);
+
+export function modelVendorHandlesCacheBreakpoints(vendor: string | undefined): boolean {
+	return !!vendor && CacheBreakpointAwareModelVendors.has(vendor.toLowerCase());
+}
