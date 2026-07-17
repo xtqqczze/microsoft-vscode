@@ -336,6 +336,14 @@ export class CodeApplication extends Disposable {
 		// But allow them if they are made from inside an webview
 		const isSafeFrame = (requestFrame: WebFrameMain | null | undefined): boolean => {
 			for (let frame: WebFrameMain | null | undefined = requestFrame; frame; frame = frame.parent) {
+				// The render frame backing this WebFrameMain may already be disposed
+				// (e.g. the originating webview/window was closed or navigated away)
+				// by the time this webRequest callback runs. Accessing any property
+				// of a disposed frame throws "Render frame was disposed before
+				// WebFrameMain could be accessed", so guard before reading it.
+				if (frame.isDestroyed()) {
+					return false;
+				}
 				if (frame.url.startsWith(`${Schemas.vscodeWebview}://`)) {
 					return true;
 				}
@@ -349,7 +357,7 @@ export class CodeApplication extends Disposable {
 
 		const isAllowedVsCodeFileRequest = (details: Electron.OnBeforeRequestListenerDetails) => {
 			const frame = details.frame;
-			if (!frame || !this.windowsMainService) {
+			if (!frame || frame.isDestroyed() || !this.windowsMainService) {
 				return false;
 			}
 
@@ -370,7 +378,7 @@ export class CodeApplication extends Disposable {
 			}
 
 			const frame = details.frame;
-			if (!frame || !this.windowsMainService) {
+			if (!frame || frame.isDestroyed() || !this.windowsMainService) {
 				return false;
 			}
 
