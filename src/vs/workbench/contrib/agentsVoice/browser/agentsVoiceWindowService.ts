@@ -157,7 +157,7 @@ export class AgentsVoiceWindowService extends Disposable implements IAgentsVoice
 				this.storageService.store(AgentsVoiceStorageKeys.OnboardingCompleted, true, StorageScope.PROFILE, StorageTarget.USER);
 				this.voiceSessionController.connect(mainWindow);
 			},
-			disconnect: () => this.voiceSessionController.disconnect(),
+			disconnect: () => this.voiceSessionController.disconnect('explicit'),
 			pttDown: () => {
 				if (!this.voiceSessionController.isConnected.get() && !this.voiceSessionController.isConnecting.get()) {
 					this.voiceSessionController.connect(mainWindow).then(() => {

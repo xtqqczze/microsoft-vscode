@@ -275,7 +275,7 @@ registerAction2(class extends Action2 {
 	}
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const voiceController = accessor.get(IVoiceSessionController);
-		voiceController.disconnect();
+		voiceController.disconnect('explicit');
 	}
 });
 

@@ -1014,7 +1014,7 @@ export class CancelAction extends Action2 {
 		// Also disconnect voice session if active
 
 		if (voiceController.isConnected.get()) {
-			voiceController.disconnect();
+			voiceController.disconnect('explicit');
 		}
 	}
 }
