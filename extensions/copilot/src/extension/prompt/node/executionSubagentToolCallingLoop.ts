@@ -140,11 +140,9 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 					return endpoint;
 				}
 				// Model does not support tool calls, fallback to main agent endpoint
-				this._logService.trace(`[ExecutionSubagent] Model '${modelName}' does not support tool calls; falling back to main agent endpoint.`);
 				return await this.endpointProvider.getChatEndpoint(this.options.request);
 			} catch (error) {
 				// Model not available, fallback to main agent endpoint
-				this._logService.trace(`[ExecutionSubagent] Failed to resolve model '${modelName}'; falling back to main agent endpoint.`);
 				return await this.endpointProvider.getChatEndpoint(this.options.request);
 			}
 		} else {
