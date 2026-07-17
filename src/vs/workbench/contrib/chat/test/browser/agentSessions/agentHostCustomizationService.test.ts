@@ -30,7 +30,10 @@ interface IDispatchedToggle {
 class FakeTarget implements IAgentHostCustomizationTarget {
 	readonly dispatched: IDispatchedToggle[] = [];
 
-	constructor(readonly customizations: McpServerCustomization[]) { }
+	constructor(
+		readonly customizations: McpServerCustomization[],
+		readonly workingDirectory?: string,
+	) { }
 
 	authenticate(): Promise<unknown> { return Promise.resolve(undefined); }
 	setCustomizationEnabled(rawId: string, enabled: boolean): void {
@@ -117,6 +120,30 @@ suite('AbstractAgentHostCustomizationService - MCP server enablement', () => {
 
 		// Different host (scheme) with a server of the same name: unaffected.
 		assert.strictEqual(sut.getMcpServerEnablement(sessionB, 'GitHub'), ContributionEnablementState.EnabledProfile);
+	});
+
+	test('scopes workspace enablement by working directory without scoping profile enablement', () => {
+		const sut = createSut();
+		sut.setTarget(sessionA1, new FakeTarget([mcpServer('gh-1', 'GitHub', true)], 'file:///repo-a'));
+		sut.setTarget(sessionA2, new FakeTarget([mcpServer('gh-2', 'GitHub', true)], 'file:///repo-b'));
+
+		sut.setMcpServerEnablement(sessionA1, 'GitHub', ContributionEnablementState.DisabledWorkspace);
+		assert.deepStrictEqual({
+			repoA: sut.getMcpServerEnablement(sessionA1, 'GitHub'),
+			repoB: sut.getMcpServerEnablement(sessionA2, 'GitHub'),
+		}, {
+			repoA: ContributionEnablementState.DisabledWorkspace,
+			repoB: ContributionEnablementState.EnabledProfile,
+		});
+
+		sut.setMcpServerEnablement(sessionA1, 'GitHub', ContributionEnablementState.DisabledProfile);
+		assert.deepStrictEqual({
+			repoA: sut.getMcpServerEnablement(sessionA1, 'GitHub'),
+			repoB: sut.getMcpServerEnablement(sessionA2, 'GitHub'),
+		}, {
+			repoA: ContributionEnablementState.DisabledProfile,
+			repoB: ContributionEnablementState.DisabledProfile,
+		});
 	});
 
 	test('getMcpServers is pure and prepare applies an explicit durable policy', () => {
@@ -238,7 +265,7 @@ suite('AbstractAgentHostCustomizationService - MCP server enablement', () => {
 		const sut = createSut();
 		const target = new FakeTarget([mcpServer('gh-1', 'GitHub', true)]);
 		sut.setTarget(sessionA1, target);
-		sut.setMcpServerEnablement(sessionA1, 'GitHub', ContributionEnablementState.DisabledWorkspace);
+		sut.setMcpServerEnablement(sessionA1, 'GitHub', ContributionEnablementState.DisabledProfile);
 		sut.prepareMcpServersForTurn(sessionA1);
 
 		sut.forgetSession(sessionA1);

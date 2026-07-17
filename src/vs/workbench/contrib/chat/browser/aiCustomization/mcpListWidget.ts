@@ -47,7 +47,6 @@ import { ICustomizationHarnessService } from '../../common/customizationHarnessS
 import { IAgentHostCustomizationService } from '../agentSessions/agentHost/agentHostCustomizationService.js';
 import { McpServerStatus } from '../../../../../platform/agentHost/common/state/protocol/state.js';
 import { GalleryItemInstallState, GalleryItemRenderer, IGalleryItemProvider } from './galleryItemRenderer.js';
-import { IWorkspaceContextService, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
 
 const $ = DOM.$;
 
@@ -688,7 +687,6 @@ export class McpListWidget extends Disposable {
 		@ICustomizationHarnessService private readonly customizationHarnessService: ICustomizationHarnessService,
 		@IAgentHostCustomizationService private readonly agentHostCustomizationService: IAgentHostCustomizationService,
 		@IAICustomizationWorkspaceService private readonly workspaceService: IAICustomizationWorkspaceService,
-		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
 		this.element = $('.mcp-list-widget');
@@ -1364,7 +1362,7 @@ export class McpListWidget extends Disposable {
 
 		if (e.element.type === 'session-server-item') {
 			const disposables = new DisposableStore();
-			const isEmptyWorkbench = this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY;
+			const isEmptyWorkbench = this.workspaceService.getActiveProjectRoot() === undefined;
 			const activeSessionActions = getActiveSessionServerOptionsActions(this.commandService, this.agentHostCustomizationService, isEmptyWorkbench, this.customizationHarnessService.activeSessionResource.get(), e.element.server);
 			activeSessionActions.forEach(action => isDisposable(action) && disposables.add(action));
 			this.contextMenuService.showContextMenu({
@@ -1389,7 +1387,7 @@ export class McpListWidget extends Disposable {
 			}
 
 			if (e.element.localServer) {
-				const isEmptyWorkbench = this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY;
+				const isEmptyWorkbench = this.workspaceService.getActiveProjectRoot() === undefined;
 				const enablementActions = getLocalMcpServerEnablementActions(this.mcpService, e.element.localServer.definition.id, isEmptyWorkbench);
 				if (enablementActions.length > 0) {
 					if (actions.length > 0) {

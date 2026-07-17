@@ -41,7 +41,7 @@ import { ISecretStorageService } from '../../../../platform/secrets/common/secre
 import { StorageScope } from '../../../../platform/storage/common/storage.js';
 import { defaultCheckboxStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { spinningLoading } from '../../../../platform/theme/common/iconRegistry.js';
-import { IWorkspaceContextService, IWorkspaceFolder, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkspaceContextService, IWorkspaceFolder } from '../../../../platform/workspace/common/workspace.js';
 import { PICK_WORKSPACE_FOLDER_COMMAND_ID } from '../../../browser/actions/workspaceCommands.js';
 import { ActiveEditorContext, RemoteNameContext, ResourceContextKey, WorkbenchStateContext, WorkspaceFolderCountContext } from '../../../common/contextkeys.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
@@ -56,6 +56,7 @@ import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { CHAT_CONFIG_MENU_ID } from '../../chat/browser/actions/chatActions.js';
 import { ChatViewId, IChatWidgetService } from '../../chat/browser/chat.js';
 import { IAgentHostCustomizationService } from '../../chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
+import { IAICustomizationWorkspaceService } from '../../chat/common/aiCustomizationWorkspaceService.js';
 import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
 import { IChatElicitationRequest, IChatToolInvocation } from '../../chat/common/chatService/chatService.js';
 import { ChatAgentLocation, ChatModeKind } from '../../chat/common/constants.js';
@@ -458,7 +459,7 @@ export class McpAgentHostServerOptionsCommand extends Action2 {
 		const outputService = accessor.get(IOutputService);
 		const notificationService = accessor.get(INotificationService);
 		const logService = accessor.get(ILogService);
-		const workspaceContextService = accessor.get(IWorkspaceContextService);
+		const aiCustomizationWorkspaceService = accessor.get(IAICustomizationWorkspaceService);
 		const mcpService = accessor.get(IMcpService);
 
 		const server = agentHostCustomizations.getMcpServers(agentHostSession).find(s => s.id === customizationId);
@@ -492,7 +493,7 @@ export class McpAgentHostServerOptionsCommand extends Action2 {
 			? localServer.enablement.get()
 			: agentHostCustomizations.getMcpServerEnablement(agentHostSession, server.name);
 		const durableDisabled = isContributionDisabled(durableEnablement);
-		const isEmptyWorkbench = workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY;
+		const isEmptyWorkbench = aiCustomizationWorkspaceService.getActiveProjectRoot() === undefined;
 		items.push(
 			{ type: 'separator', label: localize('mcp.actions.enablement', 'Enablement') },
 			...getAgentHostMcpServerEnablementItems(durableDisabled, isEmptyWorkbench),

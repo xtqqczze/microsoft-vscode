@@ -228,11 +228,19 @@ export abstract class AbstractAgentHostCustomizationService extends Disposable i
 	}
 
 	getMcpServerEnablement(sessionResource: URI, serverName: string, reader?: IReader): ContributionEnablementState {
-		return this._mcpEnablementModel.readEnabled(this._mcpServerEnablementKey(sessionResource, serverName), reader);
+		return this._mcpEnablementModel.readEnabledWithWorkspaceKey(
+			this._mcpServerProfileEnablementKey(sessionResource, serverName),
+			this._mcpServerWorkspaceEnablementKey(sessionResource, serverName),
+			reader,
+		);
 	}
 
 	setMcpServerEnablement(sessionResource: URI, serverName: string, state: ContributionEnablementState): void {
-		this._mcpEnablementModel.setEnabled(this._mcpServerEnablementKey(sessionResource, serverName), state);
+		this._mcpEnablementModel.setEnabledWithWorkspaceKey(
+			this._mcpServerProfileEnablementKey(sessionResource, serverName),
+			this._mcpServerWorkspaceEnablementKey(sessionResource, serverName),
+			state,
+		);
 	}
 
 	prepareMcpServersForTurn(sessionResource: URI): void {
@@ -271,8 +279,13 @@ export abstract class AbstractAgentHostCustomizationService extends Disposable i
 		}
 	}
 
-	private _mcpServerEnablementKey(sessionResource: URI, serverName: string): string {
+	private _mcpServerProfileEnablementKey(sessionResource: URI, serverName: string): string {
 		return JSON.stringify([sessionResource.scheme, serverName]);
+	}
+
+	private _mcpServerWorkspaceEnablementKey(sessionResource: URI, serverName: string): string | undefined {
+		const workingDirectory = this.getWorkingDirectory(sessionResource);
+		return workingDirectory ? JSON.stringify([sessionResource.scheme, workingDirectory, serverName]) : undefined;
 	}
 
 	private _mcpTrackingResource(sessionResource: URI): URI {
