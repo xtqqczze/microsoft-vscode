@@ -5,22 +5,22 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
-import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
-import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
-import { ILanguageModelChatMetadata, ILanguageModelsService } from '../common/languageModels.js';
-import { IChatWidgetService } from './chat.js';
-import { ChatInputNotificationSeverity, IChatInputNotificationService } from './widget/input/chatInputNotificationService.js';
+import { localChatSessionType } from '../common/chatSessionsService.js';
+import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../common/languageModels.js';
+import { ChatInputNotificationActionKind, ChatInputNotificationSeverity, IChatInputNotificationService } from './widget/input/chatInputNotificationService.js';
 
 const PROMO_NOTIFICATION_ID = 'copilot.promoNotification';
 const DISMISSED_PROMOS_STORAGE_KEY = 'chat.dismissedPromoIds';
-const USE_PROMO_MODEL_COMMAND_ID = 'workbench.action.chat.usePromoModel';
 
 /**
- * Watches for models with active promotions and shows a one-time
- * chat input notification the first time a promo appears. Dismissals
- * are persisted by promo id so the same promo is never shown again.
+ * Watches for models with active promotions and surfaces a chat input
+ * notification per harness (chat session type) the first time each promo
+ * appears. Each notification is scoped to the session type of the model that
+ * carries the promo, so a chat input only advertises a model it can actually
+ * switch to. Dismissals are persisted by promo id so the same promo is never
+ * shown again.
  */
 export class ChatPromoNotificationContribution extends Disposable implements IWorkbenchContribution {
 
@@ -33,88 +33,96 @@ export class ChatPromoNotificationContribution extends Disposable implements IWo
 	) {
 		super();
 
-		this._register(CommandsRegistry.registerCommand(USE_PROMO_MODEL_COMMAND_ID, (accessor: ServicesAccessor, modelId: string) => {
-			const chatWidgetService = accessor.get(IChatWidgetService);
-			const widget = chatWidgetService.lastFocusedWidget;
-			if (widget) {
-				widget.input.switchModelByIdentifier(modelId);
-			}
-			this._chatInputNotificationService.dismissNotification(PROMO_NOTIFICATION_ID);
-			this._persistDismissedPromo();
-		}));
-
 		this._register(this._languageModelsService.onDidChangeLanguageModels(() => this._update()));
 		this._register(this._chatInputNotificationService.onDidDismiss(id => {
-			if (id === PROMO_NOTIFICATION_ID) {
-				this._persistDismissedPromo();
+			const promoId = this._shownNotifications.get(id)?.promoId;
+			if (promoId) {
+				this._persistDismissedPromo(promoId);
+				this._update();
 			}
 		}));
 		this._update();
 	}
 
-	private _currentPromoId: string | undefined;
+	private readonly _shownNotifications = new Map<string, { promoId: string; modelIdentifier: string }>();
 
 	private _update(): void {
 		const dismissed = this._getDismissedPromoIds();
 		const modelIds = this._languageModelsService.getLanguageModelIds();
 
-		// Find the first model with a promo that hasn't been dismissed
-		let promoMetadata: ILanguageModelChatMetadata | undefined;
-		let promoIdentifier: string | undefined;
+		// A promo can appear in several harnesses at once (e.g. the same model
+		// offered in the Local, Copilot, and Codex sessions). Bucket the first
+		// non-dismissed promo per harness (a model's `targetChatSessionType`,
+		// or the local pool when unset).
+		const promoByHarness = new Map<string, ILanguageModelChatMetadataAndIdentifier>();
 		for (const id of modelIds) {
 			const meta = this._languageModelsService.lookupLanguageModel(id);
-			if (meta?.promo && !dismissed.has(meta.promo.id)) {
-				promoMetadata = meta;
-				promoIdentifier = id;
-				break;
+			if (!meta || !ILanguageModelChatMetadata.hasPromoDiscount(meta) || dismissed.has(meta.promo.id)) {
+				continue;
+			}
+			const harness = meta.targetChatSessionType ?? localChatSessionType;
+			if (!promoByHarness.has(harness)) {
+				promoByHarness.set(harness, { identifier: id, metadata: meta });
 			}
 		}
 
-		if (!promoMetadata?.promo || !promoIdentifier) {
-			if (this._currentPromoId) {
-				this._chatInputNotificationService.deleteNotification(PROMO_NOTIFICATION_ID);
-				this._currentPromoId = undefined;
+		// Refresh the notification for every harness that has an eligible promo,
+		// scoping each one to its harness so it only renders in matching sessions.
+		const desired = new Set<string>();
+		for (const [harness, model] of promoByHarness) {
+			const promo = model.metadata.promo!;
+			const notificationId = `${PROMO_NOTIFICATION_ID}.${harness}`;
+			desired.add(notificationId);
+
+			// Don't re-push an unchanged notification: re-setting it would clear a
+			// pending user dismissal in the notification service.
+			const shownNotification = this._shownNotifications.get(notificationId);
+			if (shownNotification?.modelIdentifier === model.identifier && shownNotification.promoId === promo.id) {
+				continue;
 			}
-			return;
+			this._shownNotifications.set(notificationId, { promoId: promo.id, modelIdentifier: model.identifier });
+
+			const endsAtDate = new Date(promo.endsAt);
+			const formattedDate = endsAtDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
+			this._chatInputNotificationService.setNotification({
+				id: notificationId,
+				telemetryId: promo.id,
+				severity: ChatInputNotificationSeverity.Info,
+				message: promo.message,
+				description: localize('chat.promo.endsAt', "Ends {0}.", formattedDate),
+				actions: [{
+					label: localize('chat.promo.tryModel', "Try {0}", model.metadata.name),
+					kind: ChatInputNotificationActionKind.SwitchToModel,
+					modelIdentifier: model.identifier,
+				}],
+				dismissible: true,
+				autoDismissOnMessage: false,
+				sessionTypes: [harness],
+			});
 		}
 
-		// Don't re-show the same promo notification
-		if (this._currentPromoId === promoMetadata.promo.id) {
-			return;
+		// Remove notifications whose promo has been dismissed or is no longer offered.
+		for (const notificationId of [...this._shownNotifications.keys()]) {
+			if (!desired.has(notificationId)) {
+				this._chatInputNotificationService.deleteNotification(notificationId);
+				this._shownNotifications.delete(notificationId);
+			}
 		}
-
-		this._currentPromoId = promoMetadata.promo.id;
-		const endsAtDate = new Date(promoMetadata.promo.endsAt);
-		const formattedDate = endsAtDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-
-		this._chatInputNotificationService.setNotification({
-			id: PROMO_NOTIFICATION_ID,
-			severity: ChatInputNotificationSeverity.Info,
-			message: promoMetadata.promo.message,
-			description: localize('chat.promo.endsAt', "Ends {0}.", formattedDate),
-			actions: [{
-				label: localize('chat.promo.useModel', "Use {0}", promoMetadata.name),
-				commandId: USE_PROMO_MODEL_COMMAND_ID,
-				commandArgs: [promoIdentifier],
-			}],
-			dismissible: true,
-			autoDismissOnMessage: false,
-		});
 	}
 
-	private _persistDismissedPromo(): void {
-		if (!this._currentPromoId) {
+	private _persistDismissedPromo(promoId: string): void {
+		const dismissed = this._getDismissedPromoIds();
+		if (dismissed.has(promoId)) {
 			return;
 		}
-		const dismissed = this._getDismissedPromoIds();
-		dismissed.add(this._currentPromoId);
+		dismissed.add(promoId);
 		this._storageService.store(
 			DISMISSED_PROMOS_STORAGE_KEY,
 			JSON.stringify([...dismissed]),
 			StorageScope.APPLICATION,
 			StorageTarget.USER,
 		);
-		this._currentPromoId = undefined;
 	}
 
 	private _getDismissedPromoIds(): Set<string> {
