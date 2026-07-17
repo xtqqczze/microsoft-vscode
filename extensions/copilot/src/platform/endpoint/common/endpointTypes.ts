@@ -26,5 +26,5 @@ export const CacheType = 'ephemeral';
 export const CacheBreakpointAwareModelVendors: ReadonlySet<string> = new Set(['anthropic', 'gemini', 'openrouter']);
 
 export function modelVendorHandlesCacheBreakpoints(vendor: string | undefined): boolean {
-	return !!vendor && CacheBreakpointAwareModelVendors.has(vendor.toLowerCase());
+	return vendor !== undefined && CacheBreakpointAwareModelVendors.has(vendor);
 }
