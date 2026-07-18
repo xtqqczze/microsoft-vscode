@@ -1705,7 +1705,7 @@ suite('CopilotAgentSession', () => {
 			});
 
 			assert.ok(session.respondToPermissionRequest('tc-create', false));
-			assert.strictEqual((await resultPromise).kind, 'reject');
+			assert.strictEqual((await resultPromise).kind, 'denied-interactively-by-user');
 		});
 
 		test('auto-approves write permission for session-state plan files', async () => {
@@ -1907,7 +1907,7 @@ suite('CopilotAgentSession', () => {
 			assert.strictEqual(signals.length, 1);
 			session.respondToPermissionRequest('tc-3', false);
 			const result = await resultPromise;
-			assert.strictEqual(result.kind, 'reject');
+			assert.strictEqual(result.kind, 'denied-interactively-by-user');
 		});
 
 		test('auto-approves sandboxed-by-default shell command without prompting', async () => {
@@ -2197,7 +2197,7 @@ suite('CopilotAgentSession', () => {
 			});
 			assert.ok(session.respondToPermissionRequest('tc-assisted-bypass', false));
 
-			assert.strictEqual((await resultPromise).kind, 'reject');
+			assert.strictEqual((await resultPromise).kind, 'denied-interactively-by-user');
 		});
 
 		test('does not send when the SDK rejects the requested permission mode', async () => {
