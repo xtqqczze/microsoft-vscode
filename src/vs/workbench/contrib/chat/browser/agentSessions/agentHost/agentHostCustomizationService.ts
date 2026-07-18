@@ -289,6 +289,7 @@ export abstract class AbstractAgentHostCustomizationService extends Disposable i
 				mcpServerId: scopedServerId,
 				mcpServerName: server.name,
 				mcpServerUrl: server.state.resource.resource,
+				oauthClient: server.state.oauthClient,
 				scopes: server.state.requiredScopes ?? [],
 				agentHost: { scheme: sessionResource.scheme, authority: sessionResource.authority },
 				authenticate: request => target.authenticate(request),
