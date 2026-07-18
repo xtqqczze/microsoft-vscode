@@ -220,6 +220,11 @@ export class AgentsVoiceWindowService extends Disposable implements IAgentsVoice
 		}, {
 			defaultExpanded: false,
 			inputBoxLayout: true,
+			// Make the aux-window container focusable so keyboard Push-to-Talk
+			// (the `agentsVoice.pushToTalk` keybinding) can be received and its
+			// key-release tracking is registered. Without this the keyboard-PTT
+			// handlers are never wired and a held key never stops recording.
+			focusable: true,
 		});
 		this._windowDisposables.add(widget);
 
