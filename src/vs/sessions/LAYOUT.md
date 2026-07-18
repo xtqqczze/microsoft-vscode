@@ -60,6 +60,8 @@ The titlebar spans the full window width at the root level. Below it, a content 
 
 The **Sessions Part is the flexible ("remaining width") view** in the top-right row: it has `LayoutPriority.High` so it absorbs auxiliary bar / editor visibility changes and window resizes. The editor and auxiliary bar keep their user-set widths (`LayoutPriority.Normal` / `Low`). Making the editor the high-priority view caused its width to drift to its 300px minimum when the auxiliary bar was toggled across session switches.
 
+The Sessions Part-to-Editor gap and the gap above the bottom Panel share `AGENTS_FLOATING_PANEL_GAP` in TypeScript layout and its registered CSS token, `--vscode-agents-layout-floatingPanelGap`. Their grid sashes keep the split boundaries unchanged, but expand and shift their hit areas to fill those visual gaps exactly. Each shows the standard persistent three-dot gripper at rest and yields to the full sash highlight while hovered or dragged. The Auxiliary Bar's leading padding and part-internal sashes retain their independent geometry.
+
 ### 2.3 Layout Priority Model
 
 The workbench grid is built with `proportionalLayout: false` (see `createWorkbenchLayout()` in [browser/workbench.ts](src/vs/sessions/browser/workbench.ts)). In this mode the split views do **not** distribute resize deltas proportionally — instead each delta (window resize, or a part being shown/hidden) is absorbed by the highest-`LayoutPriority` view, while the others keep their established sizes. Each part therefore declares an explicit `priority`:
