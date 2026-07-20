@@ -10,13 +10,16 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../ba
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { IDialogService } from '../../../../../../../platform/dialogs/common/dialogs.js';
 import { IInstantiationService } from '../../../../../../../platform/instantiation/common/instantiation.js';
+import { NullLogService } from '../../../../../../../platform/log/common/log.js';
 import { IStorageService } from '../../../../../../../platform/storage/common/storage.js';
 import { ChatEditorInput } from '../../../../browser/widgetHosts/editor/chatEditorInput.js';
+import { IAgentHostEnablementService } from '../../../../../../../platform/agentHost/common/agentHostEnablementService.js';
 import { IChatService, IChatSessionStartOptions } from '../../../../common/chatService/chatService.js';
 import { IChatSessionsService, localChatSessionType } from '../../../../common/chatSessionsService.js';
 import { ChatAgentLocation } from '../../../../common/constants.js';
 import { IChatModel } from '../../../../common/model/chatModel.js';
 import { LocalChatSessionUri } from '../../../../common/model/chatUri.js';
+import { TestContextService } from '../../../../../../test/common/workbenchTestServices.js';
 
 suite('ChatEditorInput', () => {
 
@@ -52,6 +55,9 @@ suite('ChatEditorInput', () => {
 			{} as IChatSessionsService,
 			{} as IInstantiationService,
 			{} as IStorageService,
+			new NullLogService(),
+			new TestContextService(),
+			{ enabled: false } as IAgentHostEnablementService,
 		);
 
 		try {
@@ -104,6 +110,9 @@ suite('ChatEditorInput', () => {
 			{} as IChatSessionsService,
 			{} as IInstantiationService,
 			{} as IStorageService,
+			new NullLogService(),
+			new TestContextService(),
+			{ enabled: false } as IAgentHostEnablementService,
 		);
 
 		try {
