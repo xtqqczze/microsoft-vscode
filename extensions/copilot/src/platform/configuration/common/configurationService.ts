@@ -994,6 +994,8 @@ export namespace ConfigKey {
 	export const ClaudeSonnet5PromptEnabled = defineSetting<boolean>('chat.claudeSonnet5Prompt.enabled', ConfigType.ExperimentBased, false);
 	/** Enable get_changed_files tool for GPT-5.5 models */
 	export const EnableGpt55GetChangedFilesTool = defineSetting<boolean>('chat.gpt55GetChangedFilesTool.enabled', ConfigType.ExperimentBased, true);
+	/** Enable low verbosity for GPT-5.6 models. */
+	export const EnableGpt56Verbosity = defineSetting<boolean>('chat.gpt56Verbosity.enabled', ConfigType.ExperimentBased, true);
 	/** Enable get_changed_files tool for Gemini 3 models */
 	export const EnableGemini3GetChangedFilesTool = defineSetting<boolean>('chat.gemini3GetChangedFilesTool.enabled', ConfigType.ExperimentBased, false);
 	/** When enabled, sends `reasoning_effort: 'low'` to Gemini 3 models. */

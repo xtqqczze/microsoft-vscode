@@ -4187,6 +4187,15 @@
               "onExp"
             ]
           },
+          "github.copilot.chat.gpt56Verbosity.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%github.copilot.config.gpt56Verbosity.enabled%",
+            "tags": [
+              "experimental",
+              "onExp"
+            ]
+          },
           "github.copilot.chat.gemini3GetChangedFilesTool.enabled": {
             "type": "boolean",
             "default": false,

@@ -354,6 +354,7 @@
 	"github.copilot.config.claude48OpusPrompt.enabled": "Enables the updated system prompt tuned for the Claude Opus 4.8 model.",
 	"github.copilot.config.claudeSonnet5Prompt.enabled": "Enables the updated system prompt tuned for the Claude Sonnet 5 model.",
 	"github.copilot.config.gpt55GetChangedFilesTool.enabled": "Enables the Get Changed Files tool for gpt-5.5 models.",
+	"github.copilot.config.gpt56Verbosity.enabled": "Sets the response verbosity to low for gpt-5.6 models.",
 	"github.copilot.config.gemini3GetChangedFilesTool.enabled": "Enables the Get Changed Files tool for gemini-3 models.",
 	"github.copilot.config.gemini3LowReasoningEffort.enabled": "Sets the reasoning effort to low for gemini-3 models.",
 	"github.copilot.config.gpt55ReadFileTool.enabled": "Enables the Read File tool for gpt-5.5 models.",
