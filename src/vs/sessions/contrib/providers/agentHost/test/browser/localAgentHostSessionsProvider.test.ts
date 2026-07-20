@@ -339,7 +339,7 @@ function createSchemaDefaultConfigurationService(): TestConfigurationService {
 
 function createProvider(disposables: DisposableStore, agentHostService: MockAgentHostService, contributions = [
 	{ type: 'agent-host-copilotcli', name: 'copilot', displayName: 'Copilot', description: 'test', icon: undefined },
-], options?: { sendRequest?: (resource: URI, message: string, options?: IChatSendRequestOptions) => Promise<ChatSendResult>; acquireOrLoadSession?: (resource: URI) => Promise<IChatModelReference | undefined>; lookupLanguageModel?: (modelId: string) => ILanguageModelChatMetadata | undefined; openSession?: boolean; configurationService?: IConfigurationService; activeSession?: IObservable<IActiveSession | undefined>; visibleSessions?: IObservable<readonly (IActiveSession | undefined)[]>; storageService?: IStorageService; isSessionsWindow?: boolean; confirmDelete?: boolean; workspaceTrusted?: boolean; gitHubService?: IGitHubService; agentHostEnabled?: boolean }): LocalAgentHostSessionsProvider {
+], options?: { sendRequest?: (resource: URI, message: string, options?: IChatSendRequestOptions) => Promise<ChatSendResult>; acquireOrLoadSession?: (resource: URI) => Promise<IChatModelReference | undefined>; languageModelIds?: string[]; lookupLanguageModel?: (modelId: string) => ILanguageModelChatMetadata | undefined; openSession?: boolean; configurationService?: IConfigurationService; activeSession?: IObservable<IActiveSession | undefined>; visibleSessions?: IObservable<readonly (IActiveSession | undefined)[]>; storageService?: IStorageService; isSessionsWindow?: boolean; confirmDelete?: boolean; workspaceTrusted?: boolean; gitHubService?: IGitHubService; agentHostEnabled?: boolean }): LocalAgentHostSessionsProvider {
 	const instantiationService = disposables.add(new TestInstantiationService());
 
 	instantiationService.stub(IAgentHostService, agentHostService);
@@ -366,7 +366,9 @@ function createProvider(disposables: DisposableStore, agentHostService: MockAgen
 		openSession: async () => options?.openSession ? new class extends mock<IChatWidget>() { }() : undefined,
 	});
 	instantiationService.stub(ILanguageModelsService, {
+		getLanguageModelIds: () => options?.languageModelIds ?? [],
 		lookupLanguageModel: options?.lookupLanguageModel ?? (() => undefined),
+		hasResolvedVendor: () => true,
 	});
 	instantiationService.stub(ILabelService, {
 		getUriLabel: (uri: URI) => uri.path,
@@ -1274,6 +1276,27 @@ suite('LocalAgentHostSessionsProvider', () => {
 		assert.strictEqual(session?.modelId.get(), undefined);
 	});
 
+	test('getModels returns only models targeting the session resource scheme', () => {
+		const matchingModel = { ...createTestLanguageModel('matching'), targetChatSessionType: 'agent-host-copilotcli' };
+		const otherModel = { ...createTestLanguageModel('other'), targetChatSessionType: 'agent-host-other' };
+		const provider = createProvider(disposables, agentHost, undefined, {
+			languageModelIds: ['matching', 'other', 'missing'],
+			lookupLanguageModel: id => id === 'matching' ? matchingModel : id === 'other' ? otherModel : undefined,
+		});
+		fireSessionAdded(agentHost, 'model-catalog', { title: 'Model Catalog Session' });
+		const session = provider.getSessions().find(session => session.title.get() === 'Model Catalog Session');
+		assert.ok(session);
+
+		const snapshot = provider.getModelsSnapshot(session.sessionId);
+		assert.deepStrictEqual({
+			models: snapshot.models.map(model => model.identifier),
+			modelTarget: snapshot.modelTarget,
+		}, {
+			models: ['matching'],
+			modelTarget: 'agent-host-copilotcli',
+		});
+	});
+
 	test('setModel updates existing session model and lets draft debounce persist it', () => {
 		const provider = createProvider(disposables, agentHost);
 		fireSessionAdded(agentHost, 'set-model', { title: 'Set Model Session' });
@@ -1815,11 +1838,13 @@ suite('LocalAgentHostSessionsProvider', () => {
 			status: session.status.get(),
 			workspace: session.workspace.get(),
 			sessionType: session.sessionType,
+			isQuickChat: session.isQuickChat?.get(),
 		}, {
 			providerId: provider.id,
 			status: SessionStatus.Untitled,
 			workspace: undefined,
 			sessionType: provider.sessionTypes[0].id,
+			isQuickChat: true,
 		});
 	});
 
@@ -1967,9 +1992,9 @@ suite('LocalAgentHostSessionsProvider', () => {
 		assert.strictEqual(provider.getSessionConfig(session.sessionId), undefined);
 	});
 
-	test('createNewSession seeds autoApprove from chat.defaultConfiguration and forwards it to resolveSessionConfig', async () => {
+	test('createNewSession maps allowAll from chat.defaultConfiguration to autoApprove', async () => {
 		const config = new TestConfigurationService();
-		await config.setUserConfiguration('chat.defaultConfiguration', { approvals: 'autoApprove' });
+		await config.setUserConfiguration('chat.defaultConfiguration', { approvals: 'allowAll' });
 		agentHost.resolveSessionConfigResult = {
 			schema: { type: 'object', properties: { autoApprove: { type: 'string', enum: ['default', 'autoApprove'], title: 'Auto-approve' } } },
 			values: { autoApprove: 'autoApprove' },
@@ -2005,7 +2030,7 @@ suite('LocalAgentHostSessionsProvider', () => {
 
 	test('createNewSession forwards seeded config to eager createSession', async () => {
 		const config = new TestConfigurationService();
-		await config.setUserConfiguration('chat.defaultConfiguration', { approvals: 'autoApprove' });
+		await config.setUserConfiguration('chat.defaultConfiguration', { approvals: 'allowAll' });
 		const provider = createProvider(disposables, agentHost, undefined, { configurationService: config });
 		provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
 		await timeout(0);
@@ -2028,7 +2053,7 @@ suite('LocalAgentHostSessionsProvider', () => {
 
 	test('createNewSession clamps seeded autoApprove to default when policy disables global auto-approve', async () => {
 		const config = createPolicyRestrictedConfigurationService();
-		await config.setUserConfiguration('chat.defaultConfiguration', { approvals: 'autoApprove' });
+		await config.setUserConfiguration('chat.defaultConfiguration', { approvals: 'allowAll' });
 		const provider = createProvider(disposables, agentHost, undefined, { configurationService: config });
 		const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
 
@@ -2041,10 +2066,14 @@ suite('LocalAgentHostSessionsProvider', () => {
 		});
 	});
 
-	test('setSessionConfigValue remembers string picks and ignores unsafe keys', async () => {
+	test('setSessionConfigValue remembers portable string picks and drops non-remembered keys', async () => {
 		const storageService = disposables.add(new InMemoryStorageService());
+		storageService.store(STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES, JSON.stringify({
+			[SessionConfigKey.Branch]: 'legacy-branch',
+		}), StorageScope.PROFILE, StorageTarget.MACHINE);
 		const provider = createProvider(disposables, agentHost, undefined, { storageService });
 		const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
+		await waitForSessionConfig(provider, session.sessionId, () => !provider.isSessionConfigResolving(session.sessionId).get());
 
 		await provider.setSessionConfigValue(session.sessionId, SessionConfigKey.Isolation, 'folder');
 		await provider.setSessionConfigValue(session.sessionId, '__proto__', 'polluted');
@@ -2158,18 +2187,39 @@ suite('LocalAgentHostSessionsProvider', () => {
 		});
 	});
 
-	test('createNewSession seeds remembered values and skips unsafe remembered keys', () => {
+	test('branch selection stays on the current workspace and the next workspace resolves its own branch', async () => {
 		const storageService = disposables.add(new InMemoryStorageService());
-		storageService.store(STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES, `{"${SessionConfigKey.Isolation}":"folder","${SessionConfigKey.Branch}":"main","__proto__":"polluted"}`, StorageScope.PROFILE, StorageTarget.MACHINE);
+		agentHost.resolveSessionConfigResult = {
+			schema: { type: 'object', properties: {} },
+			values: { isolation: 'worktree', branch: 'main-a' },
+		};
 		const provider = createProvider(disposables, agentHost, undefined, { storageService });
-		const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
+		const sessionA = provider.createNewSession(URI.parse('file:///workspace-a'), provider.sessionTypes[0].id);
+		await waitForSessionConfig(provider, sessionA.sessionId, config => config?.values.branch === 'main-a');
+
+		await provider.setSessionConfigValue(sessionA.sessionId, SessionConfigKey.Branch, 'feature-a');
+		const branchSelectionRequest = agentHost.resolveSessionConfigRequests.at(-1)?.config;
+		await provider.setSessionConfigValue(sessionA.sessionId, SessionConfigKey.Isolation, 'folder');
+		provider.deleteNewSession(sessionA.sessionId);
+
+		agentHost.resolveSessionConfigResult = {
+			schema: { type: 'object', properties: {} },
+			values: { isolation: 'folder', branch: 'current-b' },
+		};
+		const requestCountBeforeWorkspaceB = agentHost.resolveSessionConfigRequests.length;
+		const sessionB = provider.createNewSession(URI.parse('file:///workspace-b'), provider.sessionTypes[0].id);
+		await waitForSessionConfig(provider, sessionB.sessionId, config => config?.values.branch === 'current-b');
 
 		assert.deepStrictEqual({
-			seededImmediately: provider.getSessionConfig(session.sessionId)?.values,
-			forwardedToAgentHost: agentHost.resolveSessionConfigRequests.at(-1)?.config,
+			branchSelectionRequest,
+			rememberedValues: storageService.getObject(STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES, StorageScope.PROFILE, {}),
+			workspaceBRequest: agentHost.resolveSessionConfigRequests[requestCountBeforeWorkspaceB]?.config,
+			workspaceBResolved: provider.getSessionConfig(sessionB.sessionId)?.values,
 		}, {
-			seededImmediately: { isolation: 'folder', branch: 'main' },
-			forwardedToAgentHost: { isolation: 'folder', branch: 'main' },
+			branchSelectionRequest: { isolation: 'worktree', branch: 'feature-a' },
+			rememberedValues: { isolation: 'folder' },
+			workspaceBRequest: { isolation: 'folder' },
+			workspaceBResolved: { isolation: 'folder', branch: 'current-b' },
 		});
 	});
 
@@ -2234,7 +2284,7 @@ suite('LocalAgentHostSessionsProvider', () => {
 
 		// Case 1: policy restricts auto-approve — remembered 'autoApprove' is clamped to 'default'
 		const policyRestrictedConfig = createPolicyRestrictedConfigurationService();
-		await policyRestrictedConfig.setUserConfiguration('chat.defaultConfiguration', { approvals: 'autoApprove' });
+		await policyRestrictedConfig.setUserConfiguration('chat.defaultConfiguration', { approvals: 'allowAll' });
 		const policyRestrictedProvider = createProvider(disposables, agentHost, undefined, { configurationService: policyRestrictedConfig, storageService });
 		policyRestrictedProvider.createNewSession(URI.parse('file:///home/user/project'), policyRestrictedProvider.sessionTypes[0].id);
 
@@ -2320,7 +2370,7 @@ suite('LocalAgentHostSessionsProvider', () => {
 
 	test('createNewSession uses configured chat.defaultConfiguration when there is no remembered pick', async () => {
 		const config = createSchemaDefaultConfigurationService();
-		await config.setUserConfiguration('chat.defaultConfiguration', { mode: 'autopilot', approvals: 'autoApprove' });
+		await config.setUserConfiguration('chat.defaultConfiguration', { mode: 'autopilot', approvals: 'allowAll' });
 		const provider = createProvider(disposables, agentHost, undefined, { configurationService: config });
 		provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
 		await timeout(0);

@@ -71,10 +71,11 @@ import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/c
 import { ChatHistoryNavigator } from '../../../../workbench/contrib/chat/common/widget/chatWidgetHistoryService.js';
 import { IHistoryNavigationWidget } from '../../../../base/browser/history.js';
 import { registerAndCreateHistoryNavigationContext, IHistoryNavigationContext } from '../../../../platform/history/browser/contextScopedHistoryWidget.js';
-import { autorun, IObservable, observableValue } from '../../../../base/common/observable.js';
+import { autorun, derived, IObservable, observableValue } from '../../../../base/common/observable.js';
 import { ChatInputNotificationWidget } from '../../../../workbench/contrib/chat/browser/widget/input/chatInputNotificationWidget.js';
 import { INewChatModelPickerService, NewChatModelPickerService } from './newChatModelPicker.js';
 import { ModelPicker, ModelPickerActionViewItem } from './modelPicker.js';
+import { ISessionModelSelectionModel, SessionModelSelectionModel } from './sessionModelSelectionModel.js';
 import { ISessionContext, SessionContext } from '../../../services/sessions/browser/sessionContext.js';
 import { AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING } from './sessionsChatHistory.js';
 import { IChatStatusItemService } from '../../../../workbench/contrib/chat/browser/chatStatus/chatStatusItemService.js';
@@ -278,6 +279,8 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 	private _agentHostInputCompletionHandler: AgentHostInputCompletionHandler | undefined;
 	private readonly _scopedInstantiationService: IInstantiationService;
 	private readonly _newChatModelPickerService = new NewChatModelPickerService();
+	private readonly _sessionModelSelectionModel: SessionModelSelectionModel;
+	private readonly _canSendRequest: IObservable<boolean>;
 	private readonly _compactModelPicker = observableValue(this, false);
 
 	// Input state
@@ -325,9 +328,15 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		@IChatSpeechToTextService private readonly chatSpeechToTextService: IChatSpeechToTextService,
 	) {
 		super();
+		this._sessionModelSelectionModel = this._register(this.instantiationService.createInstance(SessionModelSelectionModel, this.options.session));
+		this._canSendRequest = derived(this, reader => {
+			const modelSelection = this._sessionModelSelectionModel.state.read(reader);
+			return this.options.canSendRequest.read(reader) && modelSelection.hasSelectableModel && !modelSelection.pendingSelection;
+		});
 		this._scopedInstantiationService = this._register(this.instantiationService.createChild(new ServiceCollection(
 			[INewChatModelPickerService, this._newChatModelPickerService],
 			[ISessionContext, new SessionContext(this.options.session)],
+			[ISessionModelSelectionModel, this._sessionModelSelectionModel],
 		)));
 		this._history = this._register(this.instantiationService.createInstance(ChatHistoryNavigator, ChatAgentLocation.Chat));
 		if (this.options.historyKey) {
@@ -351,7 +360,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			this.focus();
 		}));
 		this._register(autorun(reader => {
-			this.options.canSendRequest.read(reader);
+			this._canSendRequest.read(reader);
 			const isLoading = this.options.loading.read(reader);
 			this._loadingSpinner?.classList.toggle('visible', isLoading);
 			this._updateSendButtonState();
@@ -686,7 +695,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			hiddenItemStrategy: HiddenItemStrategy.NoHide,
 			actionViewItemProvider: (action) => {
 				if (action.id === 'sessions.modelPicker') {
-					const picker = this._scopedInstantiationService.createInstance(ModelPicker, this.options.session, this._compactModelPicker);
+					const picker = this._scopedInstantiationService.createInstance(ModelPicker, this._compactModelPicker);
 					return new ModelPickerActionViewItem(picker);
 				}
 				return undefined;
@@ -815,7 +824,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		if (!domNode) {
 			return;
 		}
-		await startDictation(sttService, this._editor, dom.getWindow(domNode));
+		await startDictation(sttService, this._editor, dom.getWindow(domNode), this.logService);
 	}
 
 	// --- Input History (IHistoryNavigationWidget) ---
@@ -891,7 +900,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		// Respect the same gate as the send button (e.g. a session with no
 		// usable model). The Enter keybinding and slash-command paths reach
 		// here directly, bypassing the button's disabled state.
-		if (!this.options.canSendRequest.get()) {
+		if (!this._canSendRequest.get()) {
 			return;
 		}
 
@@ -937,7 +946,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		}
 		const hasText = !!this._editor?.getModel()?.getValue().trim();
 		const hasSendableAttachment = this._contextAttachments.attachments.some(isExplicitFileOrImageVariableEntry);
-		this._sendButton.enabled = !this._sending && (hasText || hasSendableAttachment) && this.options.canSendRequest.get();
+		this._sendButton.enabled = !this._sending && (hasText || hasSendableAttachment) && this._canSendRequest.get();
 	}
 
 	private _restoreState(): void {
