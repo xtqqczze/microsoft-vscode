@@ -47,8 +47,7 @@ export function buildSettingsSchema(isInternal: boolean, configs: Iterable<Setti
 		properties,
 		patternProperties: {
 			[unknownAdvancedSettingPattern]: {
-				deprecated: true,
-				description: 'Unknown advanced setting.\nIf you believe this is a supported setting, please file an issue so that it gets registered.',
+				deprecationMessage: 'Unknown advanced setting.\nIf you believe this is a supported setting, please file an issue so that it gets registered.',
 			}
 		}
 	};
