@@ -258,6 +258,14 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 	private readonly _pendingToolConfirmations = observableValue<readonly IPendingToolConfirmation[]>(this, []);
 	readonly pendingToolConfirmations: IObservable<readonly IPendingToolConfirmation[]> = this._pendingToolConfirmations;
 
+	/**
+	 * Session resources whose pending confirmations were dropped at a terminal
+	 * teardown (disconnect/fatal). The always-on tracker excludes them so it
+	 * can't repopulate {@link _pendingToolConfirmations} from the still-pending
+	 * old session before the next {@link connect}, which clears this set.
+	 */
+	private readonly _suppressedConfirmationSessions = observableValue<ReadonlySet<string>>(this, new Set());
+
 	private readonly _targetSession = observableValue<URI | undefined>(this, undefined);
 	readonly targetSession: IObservable<URI | undefined> = this._targetSession;
 
@@ -748,6 +756,10 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			const agentSessions = this.agentSessionsService.model.sessions.filter(s => !s.isArchived());
 			const toolConfirmations: IPendingToolConfirmation[] = [];
 			const processedResources = new Set<string>();
+			// Sessions suppressed by a terminal teardown until the next connect()
+			// (see _suppressPendingConfirmationsUntilConnect). Read reactively so
+			// clearing the set on reconnect re-fires this tracker.
+			const suppressedSessions = this._suppressedConfirmationSessions.read(reader);
 
 			// Collect chat models from agent sessions
 			const modelsToCheck: { model: IChatModel; resource: URI; label: string }[] = [];
@@ -773,6 +785,7 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 			}
 
 			for (const { model, resource, label } of modelsToCheck) {
+				if (suppressedSessions.has(resource.toString())) { continue; }
 				const lastReq = model.lastRequestObs.read(reader);
 				if (lastReq?.response) {
 					const pending = lastReq.response.isPendingConfirmation.read(reader);
@@ -879,6 +892,9 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._window = window;
 		this._onFocusedSessionChanged();
 		this._fatalDisconnect = false;
+		// A fresh connection re-enables confirmation tracking for any sessions
+		// suppressed by the previous terminal teardown.
+		this._suppressedConfirmationSessions.set(new Set(), undefined);
 		this._isConnecting.set(true, undefined);
 		this._statusText.set('Connecting...', undefined);
 		this._voiceState.set('idle', undefined);
@@ -1811,6 +1827,19 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		}, VoiceSessionController._CONNECT_TIMEOUT_MS);
 	}
 
+	/**
+	 * Exclude the currently-pending confirmation sessions from the always-on
+	 * tracker until the next {@link connect}, so a terminal teardown's cleared
+	 * snapshot can't be repopulated from the still-pending old session.
+	 */
+	private _suppressPendingConfirmationsUntilConnect(): void {
+		const suppressed = new Set(this._suppressedConfirmationSessions.get());
+		for (const tc of this._pendingToolConfirmations.get()) {
+			suppressed.add(tc.sessionResource.toString());
+		}
+		this._suppressedConfirmationSessions.set(suppressed, undefined);
+	}
+
 	disconnect(source: 'explicit' | 'internal' = 'internal'): void {
 		this._connectAttemptGeneration++;
 		const shouldPlayStoppedSignal = source === 'explicit' && (this._isConnecting.get() || this._isConnected.get() || this._isReconnecting.get());
@@ -1859,6 +1888,12 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._uiResourceByBackendId.clear();
 		this._liveReplyKeys.clear();
 		this._lastShownSessionId = undefined;
+		// Terminal disconnect: drop the routing target and pending-confirmation
+		// snapshot (and suppress the tracker) so a later reconnect can't re-pin
+		// voice to the old session or repopulate its stale confirmation.
+		this._targetSession.set(undefined, undefined);
+		this._suppressPendingConfirmationsUntilConnect();
+		this._pendingToolConfirmations.set([], undefined);
 		// Terminal disconnect: drop embedder-driven active-session state too, so a
 		// later reconnect starts from focus-based detection until the embedder
 		// re-asserts the active session (rather than pinning a stale one and
@@ -1985,6 +2020,12 @@ export class VoiceSessionController extends Disposable implements IVoiceSessionC
 		this._pendingNarrationRetries.clear();
 		this._deferredNarrations.clear();
 		this._narratedConfirmation.clear();
+		// Terminal disconnect (no reconnect): drop the routing target and
+		// pending-confirmation snapshot, and suppress the tracker so connect()
+		// isn't re-pinned to this evicted session (see disconnect()).
+		this._targetSession.set(undefined, undefined);
+		this._suppressPendingConfirmationsUntilConnect();
+		this._pendingToolConfirmations.set([], undefined);
 		transaction(tx => {
 			this._isConnecting.set(false, tx);
 			this._isReconnecting.set(false, tx);
