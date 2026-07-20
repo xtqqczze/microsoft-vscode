@@ -1287,15 +1287,17 @@ export class CopilotAgentSession extends Disposable {
 		if (!githubToken || requestUrl === undefined) {
 			return undefined;
 		}
-		let configuredUrl: string | undefined;
+		const configuredUrls = [gitHubMcpServerUrl(undefined)];
 		try {
 			const resolvedUrl = gitHubMcpServerUrl(await this._copilotApiService.resolveApiEndpoint(githubToken));
-			configuredUrl = resolvedUrl ? normalizeMcpServerUrl(resolvedUrl) : undefined;
+			if (resolvedUrl) {
+				configuredUrls.push(resolvedUrl);
+			}
 		} catch (error) {
 			this._logService.warn(`[Copilot:${this.sessionId}] Failed to resolve the GitHub MCP server URL: ${getErrorMessage(error)}`);
 			return undefined;
 		}
-		return requestUrl === configuredUrl ? githubToken : undefined;
+		return configuredUrls.some(u => u && requestUrl === normalizeMcpServerUrl(u)) ? githubToken : undefined;
 	}
 
 	private _protectedResourceFromMcpAuthRequest(request: McpAuthRequest): ProtectedResourceMetadata {
