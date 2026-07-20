@@ -49,6 +49,7 @@ const SERVER_SHUTDOWN_TIMEOUT_MS = 30_000;
 const TEMP_DIR_CLEANUP_TIMEOUT_MS = 30_000;
 /** A synthetic token used on replay (no real credential needed). */
 export const REPLAY_PLACEHOLDER_TOKEN = 'replay-no-token';
+export type AgentHostE2EModelTraffic = 'recorded' | 'none';
 
 async function stopServer(server: IServerHandle | undefined): Promise<void> {
 	const serverProcess = server?.process;
@@ -97,6 +98,7 @@ export async function removeTempDirs(tempDirs: string[]): Promise<void> {
  * from `out/`/`out-build/` — resolve up to the repo root and into `src/...`.
  */
 const CAPTURES_DIR = fileURLToPath(new URL('../../../../../../../../src/vs/platform/agentHost/test/node/e2e/captures/', import.meta.url));
+const EMPTY_CAPTURE_PATH = join(CAPTURES_DIR, 'empty.yaml');
 
 /** Per-test fixture path derived from the provider + test title. */
 function fixturePathFor(provider: string, testTitle: string): string {
@@ -107,10 +109,13 @@ function fixturePathFor(provider: string, testTitle: string): string {
 /**
  * Build the `capiReplay` option for a test: replays the committed per-test
  * fixture by default (tokenless), or records it against real CAPI when
- * `AGENT_HOST_REPLAY_RECORD=1` or `AGENT_HOST_UPDATE_SNAPSHOTS=1`. Shared by
- * {@link defineAgentHostE2ETests} and provider-specific suites.
+ * `AGENT_HOST_REPLAY_RECORD=1` or `AGENT_HOST_UPDATE_SNAPSHOTS=1`. Tests that
+ * declare no model traffic always use the strict shared empty replay fixture.
  */
-export function capiReplayFor(provider: string, testTitle: string): { fixturePath: string; real: true; mode: CapiReplayMode } {
+export function capiReplayFor(provider: string, testTitle: string, modelTraffic: AgentHostE2EModelTraffic = 'recorded'): { fixturePath: string; real: true; mode: CapiReplayMode } {
+	if (modelTraffic === 'none') {
+		return { fixturePath: EMPTY_CAPTURE_PATH, real: true, mode: 'replay' };
+	}
 	return { fixturePath: fixturePathFor(provider, testTitle), real: true, mode: REPLAY_MODE };
 }
 
@@ -612,8 +617,8 @@ export class AgentHostE2EServerLease {
 	}
 
 	/** Acquire a server + connected client for a test, returning both. */
-	async acquire(testTitle: string): Promise<{ server: IServerHandle; client: TestProtocolClient }> {
-		const capiReplay = capiReplayFor(this._config.provider, testTitle);
+	async acquire(testTitle: string, modelTraffic: AgentHostE2EModelTraffic = 'recorded'): Promise<{ server: IServerHandle; client: TestProtocolClient }> {
+		const capiReplay = capiReplayFor(this._config.provider, testTitle, modelTraffic);
 		if (this._shared && this._server) {
 			const proxy = this._server.capiReplay;
 			if (!proxy) {
