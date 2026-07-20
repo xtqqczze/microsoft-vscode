@@ -31,8 +31,6 @@ const SAMPLE_RATE = 16000;
 
 /** Setting that enables the dictation feature; a kill-switch for rollout. */
 const ENABLED_SETTING = 'chat.speechToText.enabled';
-/** On-device model (Whisper or Nemotron) to use for dictation. */
-const MODEL_SETTING = 'chat.speechToText.model';
 /** Setting that controls the tap-vs-hold behavior of the dictation shortcut. */
 const MODE_SETTING = 'chat.speechToText.mode';
 
@@ -421,8 +419,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			this._onDidUpdateTranscript.fire({ text: this._transcript, finalizedText: result.finalizedText ?? '' });
 		}));
 		const cacheDir = joinPath(this._environmentService.cacheHome, 'chatDictationModels').fsPath;
-		const model = this._getModelId();
-		await local.start({ cacheDir, model });
+		await local.start({ cacheDir });
 
 		// The model loads in the utility process in the background (start()
 		// returns immediately). On first use it may download hundreds of MB, so
@@ -432,11 +429,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		if (status.state !== LocalTranscriptionModelState.Ready && status.state !== LocalTranscriptionModelState.Error) {
 			this._trackModelPreparation();
 		}
-	}
-
-	private _getModelId(): string | undefined {
-		const value = this._configurationService.getValue<string>(MODEL_SETTING);
-		return value ? value.trim() || undefined : undefined;
 	}
 
 	/**

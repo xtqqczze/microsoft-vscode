@@ -66,10 +66,9 @@ export interface ILocalTranscriptionResult {
  * Microsoft's Foundry Local streaming ASR engine (onnxruntime + onnxruntime-genai
  * native runtime), which handles decoding, VAD and endpointing internally; the
  * default model is NVIDIA's `nemotron-speech-streaming-en-0.6b` streaming RNN-T
- * (the model the GitHub Copilot app ships for dictation). The model is chosen by
- * the `chat.speechToText.model` setting. Runs in a utility process. A single
- * transcription session is active at a time (dictation is a singleton in the
- * renderer).
+ * (the model the GitHub Copilot app ships for dictation). Runs in a utility
+ * process. A single transcription session is active at a time (dictation is a
+ * singleton in the renderer).
  *
  * The renderer streams PCM16 mono 16 kHz audio via `pushAudio`; the service
  * emits interim transcripts on `onDidTranscribe` and a final one after `stop`.
@@ -96,9 +95,8 @@ export interface ILocalTranscriptionService {
 
 	/**
 	 * Ensure the model is downloaded/loaded (idempotent) and begin a new
-	 * transcription session. `cacheDir` is where model files are stored. `model`
-	 * selects the on-device Foundry Local model; when omitted the service default
-	 * is used. `language` optionally hints the spoken language.
+	 * transcription session. `cacheDir` is where model files are stored.
+	 * `language` optionally hints the spoken language.
 	 *
 	 * NOTE: Foundry Local performs the first-use model download itself and does
 	 * not currently expose a hook for VS Code's `http.proxy`/`http.proxyStrictSSL`
@@ -106,7 +104,7 @@ export interface ILocalTranscriptionService {
 	 * corporate proxy the first-use download may fail until Foundry Local gains a
 	 * supported proxy mechanism.
 	 */
-	start(options: { readonly cacheDir: string; readonly model?: string; readonly language?: string }): Promise<void>;
+	start(options: { readonly cacheDir: string; readonly language?: string }): Promise<void>;
 
 	/** Append captured audio (raw little-endian PCM16 mono 16 kHz). */
 	pushAudio(chunk: VSBuffer): Promise<void>;

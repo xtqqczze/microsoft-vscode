@@ -73,7 +73,7 @@ export class LocalTranscriptionService {
 	get onDidTranscribe() { return this._getProxy().onDidTranscribe; }
 
 	getModelStatus() { return this._getProxy().getModelStatus(); }
-	start(options: { cacheDir: string; model?: string; language?: string }) { return this._getProxy().start({ cacheDir: options.cacheDir, model: options.model, language: options.language }); }
+	start(options: { readonly cacheDir: string; readonly language?: string }) { return this._getProxy().start({ cacheDir: options.cacheDir, language: options.language }); }
 	pushAudio(chunk: Parameters<ILocalTranscriptionService['pushAudio']>[0]) { return this._getProxy().pushAudio(chunk); }
 	stop() { return this._getProxy().stop(); }
 	cancel() { return this._getProxy().cancel(); }

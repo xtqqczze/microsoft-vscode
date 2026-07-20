@@ -238,7 +238,7 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		this._onDidChangeModelStatus.fire(status);
 	}
 
-	async start(options: { cacheDir: string; model?: string; language?: string }): Promise<void> {
+	async start(options: { cacheDir: string; language?: string }): Promise<void> {
 		// Reset any prior session before starting a new one.
 		await this._disposeSession();
 		this._generation++;
@@ -249,11 +249,10 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		this._pendingChunks = [];
 		this._runtimeError = undefined;
 
-		const model = options.model ?? DEFAULT_MODEL;
 		const language = options.language;
 		// Do not block capture on the (possibly first-use) model download/load and
 		// session open; buffer audio until the session is ready, then flush it.
-		this._openPromise = this._openSession(options.cacheDir, model, language, generation);
+		this._openPromise = this._openSession(options.cacheDir, DEFAULT_MODEL, language, generation);
 		this._openPromise.catch(() => { /* status already reported */ });
 	}
 

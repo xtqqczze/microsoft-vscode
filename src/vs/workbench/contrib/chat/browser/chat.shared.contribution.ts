@@ -259,19 +259,6 @@ configurationRegistry.registerConfiguration({
 			default: product.quality !== 'stable',
 			tags: ['experimental']
 		},
-		'chat.speechToText.model': {
-			type: 'string',
-			enum: [
-				'nemotron-speech-streaming-en-0.6b',
-			],
-			enumItemLabels: ['Nemotron Streaming (English)'],
-			markdownEnumDescriptions: [
-				nls.localize('chat.speechToText.model.nemotronStreaming', "NVIDIA Nemotron streaming RNN-T (English), run through Microsoft Foundry Local. Low-latency, high accuracy, matches the GitHub Copilot app."),
-			],
-			markdownDescription: nls.localize('chat.speechToText.model', "The on-device model used for chat dictation. The model is downloaded on first use and cached on disk. Transcription runs locally through Microsoft Foundry Local."),
-			default: 'nemotron-speech-streaming-en-0.6b',
-			tags: ['experimental']
-		},
 		'chat.speechToText.mode': {
 			type: 'string',
 			enum: ['auto', 'toggle', 'pushToTalk'],
@@ -2278,23 +2265,12 @@ Registry.as<IConfigurationMigrationRegistry>(Extensions.ConfigurationMigration).
 		}
 	},
 	{
-		// The on-device dictation runtime moved to Foundry Local; the old
-		// transformers.js/onnxruntime model IDs no longer resolve and would fail
-		// with an unknown-model error. Map any explicitly-stored legacy value to
-		// the new default so existing users keep working.
+		// The chat dictation model is no longer configurable; the on-device
+		// runtime always uses NVIDIA Nemotron streaming ASR through Foundry Local.
+		// Clear any explicitly-stored value from the removed setting so it does
+		// not linger as an unknown setting in user configuration.
 		key: 'chat.speechToText.model',
-		migrateFn: (value: unknown) => {
-			const legacyModelIds = [
-				'onnx-community/whisper-tiny',
-				'onnx-community/whisper-base',
-				'onnx-community/whisper-small',
-				'onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4',
-			];
-			if (typeof value === 'string' && legacyModelIds.includes(value)) {
-				return { value: 'nemotron-speech-streaming-en-0.6b' };
-			}
-			return [];
-		}
+		migrateFn: () => ({ value: undefined })
 	},
 ]);
 
