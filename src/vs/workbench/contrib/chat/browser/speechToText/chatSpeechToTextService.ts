@@ -368,8 +368,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			throw err;
 		}
 
-		this._finalizedText = '';
-		this._deltaText = '';
 		this._mediaStream = stream;
 
 		try {
@@ -589,8 +587,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		this._logSessionTelemetry('error');
 		this._localTranscription.cancel();
 		this._teardown();
-		this._finalizedText = '';
-		this._deltaText = '';
 		this._setState(ChatSpeechToTextState.Idle);
 		this._notificationService.error(message);
 	}
@@ -638,8 +634,6 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		this._logSessionTelemetry('cancelled');
 		this._localTranscription.cancel();
 		this._teardown();
-		this._finalizedText = '';
-		this._deltaText = '';
 		this._setState(ChatSpeechToTextState.Idle);
 		if (wasRecording) {
 			this._accessibilitySignalService.playSignal(AccessibilitySignal.voiceRecordingStopped);
@@ -690,6 +684,9 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		// model reached a terminal state does not emit a model-prepare event.
 		this._prepareStartMs = 0;
 		this._localSessionDisposables.clear();
+		// Do not retain transcript text beyond the session that produced it.
+		this._finalizedText = '';
+		this._deltaText = '';
 	}
 
 	private async _acquireStream(window: Window & typeof globalThis): Promise<MediaStream> {
