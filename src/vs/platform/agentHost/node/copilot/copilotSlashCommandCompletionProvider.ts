@@ -14,6 +14,8 @@ import { extractLeadingSlashToken, extractWhitespaceDelimitedSlashToken } from '
 import { SYNCED_CUSTOMIZATION_SCHEME } from '../../common/agentHostFileSystemService.js';
 import type { CopilotSession } from '@github/copilot-sdk';
 
+export { parseLeadingSlashCommand } from '../../common/agentHostSlashCommand.js';
+
 const HIDDEN_RUNTIME_COMMANDS = new Set<string>(['agent', 'app', 'changelog', 'context', 'copy', 'exit', 'extensions', 'feedback', 'help', 'ide', 'instructions', 'login', 'logout', 'mcp', 'model', 'new', 'plugin', 'rename', 'restart', 'resume', 'sandbox', 'session', 'settings', 'skills', 'statusline', 'streamer-mode', 'subagents', 'tasks', 'terminal-setup', 'theme', 'undo', 'update', 'user', 'voice', 'worktree', 'autopilot', 'yolo', 'cd', 'cwd', 'after', 'before', 'add-dir', 'allow-all', 'list-dirs', 'reset-allowed-tools']);
 
 export const DEFAULT_RUNTIME_SLASH_COMMAND_COMPLETION_WAIT_MS = 300;
@@ -41,37 +43,6 @@ export interface ICopilotSlashCommandSessionInfo {
 
 export interface ICopilotRuntimeSlashCommandQueryOptions {
 	readonly maxWaitMs?: number;
-}
-
-/**
- * Result of {@link parseLeadingSlashCommand}.
- */
-export interface IParsedLeadingSlashCommand {
-	readonly command: string;
-	/** Trimmed text following the command (empty if none). */
-	readonly rest: string;
-	/** Raw text after the command delimiter (preserves multiline text). */
-	readonly rawRest: string;
-}
-
-/**
- * Parses a Copilot CLI slash command at the very start of `prompt`.
- *
- * Accepts any `/command` token where `command` is a single non-whitespace
- * segment (no leading/trailing spaces, no embedded slash), followed either
- * by end-of-input or by at least one whitespace character.
- */
-export function parseLeadingSlashCommand(prompt: string): IParsedLeadingSlashCommand | undefined {
-	const match = /^\/([^\s/]+)(?:$|\s+([\s\S]*))/.exec(prompt);
-	if (!match) {
-		return undefined;
-	}
-	const rawRest = match[2] ?? '';
-	return {
-		command: match[1],
-		rest: rawRest.trim(),
-		rawRest,
-	};
 }
 
 /**
