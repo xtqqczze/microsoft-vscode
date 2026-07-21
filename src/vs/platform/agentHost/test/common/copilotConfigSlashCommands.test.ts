@@ -36,6 +36,30 @@ suite('copilotConfigSlashCommands', () => {
 			assert.deepStrictEqual([...commands], ['autopilot']);
 			assert.strictEqual(getCopilotConfigSlashCommandItems('nope').length, 0);
 		});
+
+		test('autopilot state hides the no-op toggle but keeps the prompt form', () => {
+			const inAutopilot = new Set(getCopilotConfigSlashCommandItems('autopilot', { mode: 'autopilot' }).map(i => i.label));
+			// Already in autopilot: only offer `off` (plus the always-on prompt form).
+			assert.deepStrictEqual([...inAutopilot].sort(), ['/autopilot', '/autopilot off']);
+
+			const notAutopilot = new Set(getCopilotConfigSlashCommandItems('autopilot', { mode: 'interactive' }).map(i => i.label));
+			// Not in autopilot: only offer `on` (plus the always-on prompt form).
+			assert.deepStrictEqual([...notAutopilot].sort(), ['/autopilot', '/autopilot on']);
+
+			// Plan mode is still "not autopilot", so `on` is offered and `off` is hidden.
+			const inPlan = new Set(getCopilotConfigSlashCommandItems('autopilot', { mode: 'plan' }).map(i => i.label));
+			assert.deepStrictEqual([...inPlan].sort(), ['/autopilot', '/autopilot on']);
+		});
+
+		test('autoApprove state hides the no-op bypass/default toggles across aliases', () => {
+			// Already bypassing: hide the bypass forms (bare + `on`), keep `off`.
+			const bypassing = new Set(getCopilotConfigSlashCommandItems('yolo', { autoApprove: 'autoApprove' }).map(i => i.label));
+			assert.deepStrictEqual([...bypassing].sort(), ['/yolo off']);
+
+			// Not bypassing: hide `off`, keep the bypass forms (bare + `on`).
+			const notBypassing = new Set(getCopilotConfigSlashCommandItems('allow-all', { autoApprove: 'default' }).map(i => i.label));
+			assert.deepStrictEqual([...notBypassing].sort(), ['/allow-all', '/allow-all on']);
+		});
 	});
 
 	suite('resolveCopilotConfigSlashCommandOnSend', () => {
