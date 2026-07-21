@@ -115,6 +115,17 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 	handler: () => activeDictationComposer?.toggleDictation(),
 });
 
+// Preserve the command id so push-to-talk hold mode can track this chord.
+KeybindingsRegistry.registerKeybindingRule({
+	id: 'agentsVoice.startVoiceInChat',
+	weight: KeybindingWeight.WorkbenchContrib + 1,
+	when: ContextKeyExpr.and(
+		SessionsChatInputHasDictationFocus,
+		ContextKeyExpr.equals('config.agents.voice.enabled', true),
+	),
+	primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.Space,
+});
+
 interface IDraftState {
 	inputText: string;
 	attachments: readonly IChatRequestVariableEntry[];
