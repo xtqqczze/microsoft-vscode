@@ -37,29 +37,35 @@ export class ExtensionEnablementContextKeysContribution extends Disposable imple
 	) {
 		super();
 
-		// Seed context keys for extensions that are already registered.
-		for (const extension of this.extensionService.extensions) {
-			this._setEnabled(extension.identifier, true);
-		}
-
-		// Track extensions as they get registered or de-registered.
-		this._register(this.extensionService.onDidChangeExtensions(({ added, removed }) => {
-			for (const extension of removed) {
-				this._setEnabled(extension.identifier, false);
-			}
-			for (const extension of added) {
-				this._setEnabled(extension.identifier, true);
-			}
-		}));
+		// Reconcile against the authoritative set of registered extensions rather
+		// than trusting individual change deltas. `IExtensionService.extensions`
+		// is empty until the initial registration completes (signalled by
+		// `onDidRegisterExtensions`, which is not guaranteed to have fired by the
+		// `Restored` phase), and change deltas can also report `added` extensions
+		// that registry validation then rejects (e.g. dependency loops) without a
+		// matching `removed` entry. Recomputing from the final collection keeps the
+		// keys correct in both cases.
+		this._reconcile();
+		this._register(this.extensionService.onDidRegisterExtensions(() => this._reconcile()));
+		this._register(this.extensionService.onDidChangeExtensions(() => this._reconcile()));
 	}
 
-	private _setEnabled(identifier: ExtensionIdentifier, enabled: boolean): void {
-		const key = EXTENSION_ENABLED_CONTEXT_KEY_PREFIX + ExtensionIdentifier.toKey(identifier);
-		let contextKey = this._contextKeys.get(key);
-		if (!contextKey) {
-			contextKey = this.contextKeyService.createKey<boolean>(key, false);
-			this._contextKeys.set(key, contextKey);
+	private _reconcile(): void {
+		const enabledKeys = new Set<string>();
+		for (const extension of this.extensionService.extensions) {
+			enabledKeys.add(EXTENSION_ENABLED_CONTEXT_KEY_PREFIX + ExtensionIdentifier.toKey(extension.identifier));
 		}
-		contextKey.set(enabled);
+
+		// Update every key we already track to reflect the current registry.
+		for (const [key, contextKey] of this._contextKeys) {
+			contextKey.set(enabledKeys.has(key));
+		}
+
+		// Create keys for extensions that became enabled since the last reconcile.
+		for (const key of enabledKeys) {
+			if (!this._contextKeys.has(key)) {
+				this._contextKeys.set(key, this.contextKeyService.createKey<boolean>(key, true));
+			}
+		}
 	}
 }
