@@ -231,12 +231,24 @@ Review-capable changesets expose `setReviewState(resource, reviewed)`. Agent-hos
 1. User picks a folder in the workspace picker
    → WorkspacePicker fires onDidSelectWorkspace(folderUri)
    → NewChatWidget → ISessionsService.openNewSession({ folderUri, ...options })
+   → view resolves the folder via SessionsManagementService.resolveWorkspace(folderUri,
+     options?.providerId) and, when the resolved workspace requires trust, awaits the
+     workspace-trust prompt **before** creating anything; declining returns
+     `{ session: undefined, trustDeclined: true }` and never calls createNewSession
    → view calls SessionsManagementService.createNewSession(folderUri, options?)
    → Iterates providers, picks the first one whose resolveWorkspace(folderUri)
      succeeds (filtered by options.sessionTypeId when given)
    → Calls provider.createNewSession(folderUri, sessionTypeId)
    → Returns ISession (model draft, `newSession`); the view then activates it so
-     it becomes the activeSession and the draft slot shows reactively
+     it becomes the activeSession and the draft slot shows reactively, and
+     openNewSession resolves `{ session, trustDeclined: false }`
+
+   This trust gate is the **single** checkpoint for creating a session against a
+   folder — every folder-based entry point (composer, quick pick, dropdown) goes
+   through `openNewSession`, so none can bypass it. Callers distinguish "the user
+   declined trust" from other non-creation outcomes (for example the no-provider
+   case) via the returned `trustDeclined` flag rather than treating any falsy
+   `session` the same way.
 
 2. User picks a different session type for the same folder
    → SessionTypePicker queries getSessionTypesForFolder(folderUri),
