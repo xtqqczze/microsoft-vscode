@@ -168,6 +168,10 @@
 	margin-right: var(--vscode-spacing-size40);
 }
 
+.monaco-workbench.floating-panels .activitybar.compact > .content > .composite-bar {
+	margin-top: var(--vscode-spacing-size20);
+}
+
 /* At the default (non-compact) size, separate the activity bar items with a 4px gap
  * so they read as distinct floating targets. Compact keeps the tighter default stack. */
 .monaco-workbench.floating-panels .part.activitybar:not(.compact) > .content .monaco-action-bar .action-item + .action-item {
