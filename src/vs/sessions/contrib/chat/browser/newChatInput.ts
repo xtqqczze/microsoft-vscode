@@ -60,6 +60,7 @@ import { INotificationService } from '../../../../platform/notification/common/n
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { addMicButtonContextMenuListener, getDictationContextMenuActions } from '../../../../workbench/contrib/chat/browser/speechToText/micButtonMenuActions.js';
 import { SlashCommandHandler } from './slashCommands.js';
 import { VariableCompletionHandler } from './variableCompletions.js';
 import { SessionReferenceCompletionHandler } from './sessionReferenceCompletions.js';
@@ -86,6 +87,7 @@ import { ChatSpeechToTextState, IChatSpeechToTextService } from '../../../../wor
 import { runDictationShortcut } from '../../../../workbench/contrib/chat/browser/actions/chatSpeechToTextActions.js';
 import { ChatContextKeys } from '../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { DictationDownloadRing } from '../../../../workbench/contrib/chat/browser/speechToText/dictationDownloadRing.js';
+import { IVoiceSessionController } from '../../../../workbench/contrib/chat/browser/voiceClient/voiceSessionController.js';
 
 
 const OPEN_OTEL_SETTINGS_COMMAND = 'github.copilot.chat.otel.openSettings';
@@ -359,6 +361,9 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 		@IChatSpeechToTextService private readonly chatSpeechToTextService: IChatSpeechToTextService,
 		@IChatSubmitRequestHandlerService private readonly chatSubmitRequestHandlerService: IChatSubmitRequestHandlerService,
+		@IContextMenuService private readonly contextMenuService: IContextMenuService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IVoiceSessionController private readonly voiceSessionController: IVoiceSessionController,
 	) {
 		super();
 		this._sessionModelSelectionModel = this._register(this.instantiationService.createInstance(SessionModelSelectionModel, this.options.session));
@@ -830,9 +835,18 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		this._register(sttService.onDidChangePreparingModel(renderState));
 
 		const updateVisibility = () => {
-			button.classList.toggle('hidden', !sttService.isConfigured);
+			// Mirror the `MenuId.ChatExecute` dictation gate: hide while
+			// unconfigured, and while Voice Mode is connected so the dictation and
+			// voice mic affordances never compete on this composer.
+			const voiceActive = this.voiceSessionController.isConnected.get() || this.voiceSessionController.isConnecting.get();
+			button.classList.toggle('hidden', !sttService.isConfigured || voiceActive);
 		};
 		updateVisibility();
+		this._register(autorun(reader => {
+			this.voiceSessionController.isConnected.read(reader);
+			this.voiceSessionController.isConnecting.read(reader);
+			updateVisibility();
+		}));
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('chat.speechToText.enabled')) {
 				updateVisibility();
@@ -856,6 +870,15 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 				void toggle();
 			}
 		}));
+
+		// Right-click shows dictation-specific entries ("Configure Keybinding",
+		// "Select Microphone", "Disable Dictation") mirroring the chat-input mic
+		// button, since this custom button isn't a `MenuEntryActionViewItem`.
+		this._register(addMicButtonContextMenuListener(
+			button,
+			() => getDictationContextMenuActions(this.commandService, this.configurationService, this.keybindingService, TOGGLE_DICTATION_COMMAND_ID),
+			this.contextMenuService,
+		));
 	}
 
 	/**
