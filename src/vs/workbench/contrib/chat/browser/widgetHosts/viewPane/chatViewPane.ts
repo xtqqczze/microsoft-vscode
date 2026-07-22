@@ -76,6 +76,7 @@ import { IMicCaptureService } from '../../voiceClient/micCaptureService.js';
 import { ITtsPlaybackService } from '../../voiceClient/ttsPlaybackService.js';
 import { IVoiceSessionController } from '../../voiceClient/voiceSessionController.js';
 import { computeVoiceGlowStyle, isGlowingVoiceState, readVoiceGlowIntensity } from '../../voiceClient/voiceGlow.js';
+import { combineVoiceInput } from '../../voiceClient/voiceInputUtils.js';
 import { IAgentTitleBarStatusService } from '../../agentSessions/experiments/agentTitleBarStatusService.js';
 import { IVoicePlaybackService } from '../../../common/voicePlaybackService.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
@@ -404,7 +405,8 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 						// editor so the user can review before submitting.
 						widget.input.setValue(text, false);
 					} else {
-						widget.acceptInput(text, { preserveFocus: true });
+						// Preserve any text the user already typed in the input.
+						widget.acceptInput(combineVoiceInput(widget.getInput(), text), { preserveFocus: true });
 					}
 				}
 			}));
