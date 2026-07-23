@@ -50,6 +50,8 @@ export interface ISpotlightShowOptions {
 	readonly placement?: SpotlightPlacement;
 	readonly allowTargetInteraction?: boolean;
 	readonly padding?: number;
+	readonly hideNext?: boolean;
+	readonly targetOverlayVisible?: boolean;
 	/**
 	 * When set, the step advances (fires `onDidClickNext`) when the user clicks
 	 * the spotlighted target itself. The "Next" button is hidden and the target
@@ -170,6 +172,7 @@ export class SpotlightOverlay extends Disposable {
 		this._target = target;
 		this._options = options;
 		this._renderContent(content);
+		this._root.classList.toggle('target-overlay-visible', !!options.targetOverlayVisible || !!options.allowTargetInteraction || !!options.advanceOnTargetClick);
 
 		this._root.style.display = '';
 
@@ -199,9 +202,12 @@ export class SpotlightOverlay extends Disposable {
 		// and we route Tab/Esc from it through the same handler, so keyboard-only
 		// users can focus the spotlighted control and activate it to advance.
 		const advanceOnTargetClick = !!options.advanceOnTargetClick;
-		this._nextButton.element.style.display = advanceOnTargetClick ? 'none' : '';
+		const hideNext = advanceOnTargetClick || !!options.hideNext;
+		this._nextButton.element.style.display = hideNext ? 'none' : '';
 		if (advanceOnTargetClick) {
 			this._stepListeners.add(addDisposableListener(target, EventType.CLICK, () => this._onDidClickNext.fire('target')));
+		}
+		if (options.allowTargetInteraction || advanceOnTargetClick) {
 			this._stepListeners.add(addDisposableListener(target, EventType.KEY_DOWN, e => this._onKeyDown(e)));
 		}
 
@@ -209,7 +215,7 @@ export class SpotlightOverlay extends Disposable {
 
 		// Move focus to the spotlighted control (so keyboard users can activate it
 		// to advance) or, otherwise, into the callout's primary action.
-		(advanceOnTargetClick ? target : this._nextButton.element).focus();
+		(hideNext ? target : this._nextButton.element).focus();
 	}
 
 	/** Recompute the hole and callout positions for the current target. */
@@ -410,14 +416,17 @@ export class SpotlightOverlay extends Disposable {
 
 	/**
 	 * The focusable elements participating in the focus trap, in DOM order: the
-	 * spotlighted target (when the step advances by pressing it), then any
+	 * spotlighted target (when it is interactive or the Next button is hidden), then any
 	 * interactive content in the (possibly markdown) description, then the visible
 	 * action buttons. Including the target keeps the spotlighted control
 	 * keyboard-reachable, and querying the description keeps markdown links
 	 * reachable despite `aria-modal`.
 	 */
 	private _collectFocusable(): HTMLElement[] {
-		const target = (this._options.advanceOnTargetClick && this._target) ? [this._target] : [];
+		const targetFocusables = (this._options.allowTargetInteraction || this._options.advanceOnTargetClick || this._options.hideNext) && this._target
+			// eslint-disable-next-line no-restricted-syntax -- querying our own callout description subtree for focusable markdown content (e.g. links)
+			? [this._target, ...this._target.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+			: [];
 		const descriptionFocusables = Array.from(
 			// eslint-disable-next-line no-restricted-syntax -- querying our own callout description subtree for focusable markdown content (e.g. links)
 			this._description.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')
@@ -425,7 +434,15 @@ export class SpotlightOverlay extends Disposable {
 		const buttons = [this._skipButton, this._backButton, this._nextButton]
 			.filter(button => button.element.style.display !== 'none')
 			.map(button => button.element);
-		return [...target, ...descriptionFocusables, ...buttons];
+		return [...targetFocusables, ...descriptionFocusables, ...buttons].filter(element => this._isTabbable(element));
+	}
+
+	private _isTabbable(element: HTMLElement): boolean {
+		if (!element.isConnected || element.getAttribute('aria-hidden') === 'true' || element.tabIndex === -1 || element.hasAttribute('disabled')) {
+			return false;
+		}
+		const style = getWindow(this._container).getComputedStyle(element);
+		return style.display !== 'none' && style.visibility !== 'hidden';
 	}
 
 	scheduleLayout(): void {

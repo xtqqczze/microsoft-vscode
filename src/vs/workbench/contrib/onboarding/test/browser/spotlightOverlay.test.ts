@@ -181,13 +181,30 @@ suite('SpotlightOverlay', () => {
 		const container = createContainer();
 		const overlay = disposables.add(new SpotlightOverlay(container, FakeResizeObserver as unknown as typeof ResizeObserver));
 		const target = createTarget(container, 100, 100, 80, 30);
+		const targetButton = $('button');
+		target.appendChild(targetButton);
 		const blockers = () => Array.from(container.getElementsByClassName('spotlight-blocker')) as HTMLElement[];
 
 		overlay.show(target, content(), { allowTargetInteraction: false });
 		assert.deepStrictEqual(blockers().map(blocker => blocker.style.display), ['', 'none', 'none', 'none']);
 
 		overlay.show(target, content(), { allowTargetInteraction: true });
-		assert.deepStrictEqual(blockers().map(blocker => blocker.style.display), ['', '', '', '']);
+		const [, , next] = getButtons(container);
+		const root = container.getElementsByClassName('spotlight-overlay')[0] as HTMLElement;
+		next.focus();
+		const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true });
+		Object.defineProperty(event, 'keyCode', { get: () => 9 /* Tab */ });
+		next.dispatchEvent(event);
+
+		assert.deepStrictEqual({
+			blockers: blockers().map(blocker => blocker.style.display),
+			targetOverlayVisible: root.classList.contains('target-overlay-visible'),
+			activeElement: mainWindow.document.activeElement,
+		}, {
+			blockers: ['', '', '', ''],
+			targetOverlayVisible: true,
+			activeElement: targetButton,
+		});
 	});
 
 	test('observes the target and container for re-layout', () => {
