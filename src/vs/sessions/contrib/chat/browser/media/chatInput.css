@@ -249,6 +249,7 @@
 	align-items: center;
 	justify-content: center;
 	flex-shrink: 0;
+	margin-left: var(--vscode-spacing-size40);
 	position: relative;
 	width: 22px;
 	height: 22px;
