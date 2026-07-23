@@ -212,6 +212,10 @@ class TestAgentHostTerminalManager implements IAgentHostTerminalManager {
 	getTerminalInfos(): [] { return []; }
 	getTerminalState(): undefined { return undefined; }
 	async getDefaultShell(): Promise<string> { return '/bin/bash'; }
+	createOutputTerminal(): void { }
+	appendOutputTerminalData(): void { }
+	resetOutputTerminal(): void { }
+	finalizeOutputTerminal(): void { }
 }
 
 class TestCopilotApiService implements ICopilotApiService {
