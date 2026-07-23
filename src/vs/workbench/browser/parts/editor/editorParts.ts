@@ -189,6 +189,10 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 	private modalEditorSidebarWidth: number | undefined;
 	private modalEditorSidebarHidden: boolean | undefined;
 
+	// Tracks an in-flight creation so concurrent callers await and reuse the
+	// same singleton instance instead of each racing to create their own.
+	private modalEditorPartCreatePromise: Promise<IModalEditorPart> | undefined;
+
 	async createModalEditorPart(options?: IModalEditorPartOptions): Promise<IModalEditorPart> {
 
 		// Reuse existing modal editor part if it exists
@@ -198,6 +202,24 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 			return this.modalEditorPart;
 		}
 
+		// Another creation is already in flight: await it instead of starting
+		// a second one, then apply this call's options to the shared instance
+		if (this.modalEditorPartCreatePromise) {
+			const part = await this.modalEditorPartCreatePromise;
+			part.updateOptions(options);
+
+			return part;
+		}
+
+		const createPromise = this.doCreateModalEditorPart(options).finally(() => {
+			this.modalEditorPartCreatePromise = undefined;
+		});
+		this.modalEditorPartCreatePromise = createPromise;
+
+		return createPromise;
+	}
+
+	private async doCreateModalEditorPart(options: IModalEditorPartOptions | undefined): Promise<IModalEditorPart> {
 		this.modalEditorVisibleContext.set(true);
 		let result;
 		try {
