@@ -4296,6 +4296,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			if (entry.value === undefined) {
 				continue;
 			}
+			if (entry.uri?.scheme === Schemas.vscodeBrowser) {
+				continue;
+			}
 			if (skipUntitled && entry.uri?.scheme === Schemas.untitled) {
 				continue;
 			}
