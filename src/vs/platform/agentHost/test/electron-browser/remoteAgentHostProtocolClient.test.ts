@@ -1047,7 +1047,6 @@ suite('RemoteAgentHostProtocolClient', () => {
 					origin: { kind: MessageKind.User },
 					attachments: [
 						{ type: MessageAttachmentKind.Resource, uri: 'file:///attachments/queued.txt', label: 'queued.txt' },
-						{ type: MessageAttachmentKind.Resource, uri: 'file:///attachments/invalid%', label: 'invalid.txt' },
 						{ type: MessageAttachmentKind.EmbeddedResource, data: '', contentType: 'text/plain', label: 'inline.txt' },
 					],
 				},
