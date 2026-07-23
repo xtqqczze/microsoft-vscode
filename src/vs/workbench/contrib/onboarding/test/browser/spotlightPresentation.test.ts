@@ -7,7 +7,7 @@ import assert from 'assert';
 import { $ } from '../../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { disposableTimeout } from '../../../../../base/common/async.js';
-import { Event } from '../../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -172,6 +172,78 @@ suite('SpotlightPresentation', () => {
 				lastStepIndex: 2,
 				stepCount: 3,
 			},
+		});
+	});
+
+	test('hides the previous step while waiting for the next target', async () => {
+		const container = createContainer();
+		const contextKeyService = disposables.add(new ContextKeyService(new TestConfigurationService()));
+		const presentation = disposables.add(new SpotlightPresentation(new SpotlightTestLayoutService(container), new TestHostService(), contextKeyService));
+		const firstTarget = createTarget(container, 'test.spotlight.firstVisible', { open: () => firstTarget.click() });
+		let hiddenWhileWaiting = false;
+
+		const result = await presentation.run(createScenario('test.spotlight.hiddenWhileWaiting',
+			{
+				id: 'first',
+				targetId: 'test.spotlight.firstVisible',
+				title: 'First',
+				description: 'First step',
+				openTarget: true,
+				advanceOnTargetClick: true,
+			},
+			{
+				id: 'second',
+				targetId: 'test.spotlight.secondLate',
+				title: 'Second',
+				description: 'Late second step',
+				missingTarget: { kind: 'wait', timeoutMs: 500 },
+				openTarget: true,
+				advanceOnTargetClick: true,
+				onBeforeShow: () => {
+					const overlay = container.getElementsByClassName('spotlight-overlay')[0] as HTMLElement;
+					hiddenWhileWaiting = overlay.style.display === 'none';
+					disposables.add(disposableTimeout(() => {
+						const target = createTarget(container, 'test.spotlight.secondLate', { open: () => target.click() });
+					}, 100));
+				},
+			},
+		), { targetWindow: mainWindow, onAbort: Event.None });
+
+		assert.deepStrictEqual({ hiddenWhileWaiting, result }, {
+			hiddenWhileWaiting: true,
+			result: {
+				outcome: OnboardingOutcome.Completed,
+				shown: true,
+				dismissReason: OnboardingDismissReason.TargetClick,
+				lastStepIndex: 1,
+				stepCount: 2,
+			},
+		});
+	});
+
+	test('aborts immediately while waiting for a target', async () => {
+		const container = createContainer();
+		const contextKeyService = disposables.add(new ContextKeyService(new TestConfigurationService()));
+		const presentation = disposables.add(new SpotlightPresentation(new SpotlightTestLayoutService(container), new TestHostService(), contextKeyService));
+		const abort = disposables.add(new Emitter<void>());
+
+		const result = await presentation.run(createScenario('test.spotlight.abortWait', {
+			id: 'missing',
+			targetId: 'test.spotlight.abortMissing',
+			title: 'Missing',
+			description: 'Missing target',
+			missingTarget: { kind: 'wait', timeoutMs: 60_000 },
+			onBeforeShow: () => {
+				disposables.add(disposableTimeout(() => abort.fire(), 0));
+			},
+		}), { targetWindow: mainWindow, onAbort: abort.event });
+
+		assert.deepStrictEqual(result, {
+			outcome: OnboardingOutcome.Aborted,
+			shown: false,
+			dismissReason: OnboardingDismissReason.Aborted,
+			lastStepIndex: 0,
+			stepCount: 1,
 		});
 	});
 

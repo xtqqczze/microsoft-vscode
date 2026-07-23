@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { timeout } from '../../../../../base/common/async.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -71,7 +72,11 @@ export class SpotlightPresentation extends Disposable implements IOnboardingPres
 			store.add(toDisposable(() => this.hostService.setWindowDimmed(context.targetWindow, false)));
 
 			let aborted = false;
-			store.add(context.onAbort(() => { aborted = true; }));
+			const targetResolutionCancellation = store.add(new CancellationTokenSource());
+			store.add(context.onAbort(() => {
+				aborted = true;
+				targetResolutionCancellation.cancel();
+			}));
 
 			// Keep the callout glued to the target as the workbench re-layouts.
 			// Schedule the measurement so it runs after the layout event's DOM work
@@ -99,7 +104,7 @@ export class SpotlightPresentation extends Disposable implements IOnboardingPres
 					break;
 				}
 
-				const target = await this._resolveTarget(context.targetWindow, step.targetId, step.missingTarget);
+				const target = await this._resolveTarget(context.targetWindow, step.targetId, targetResolutionCancellation.token, step.missingTarget);
 				if (aborted) {
 					break;
 				}
@@ -122,6 +127,7 @@ export class SpotlightPresentation extends Disposable implements IOnboardingPres
 				const displayStepIndex = index - skippedBefore;
 				const displayStepCount = stepCount - skippedStepIndexes.size;
 				const end = await this._runStep(overlay, context, step, target, displayStepIndex, displayStepCount);
+				overlay.hide();
 				switch (end.action) {
 					case 'next':
 						if (index === stepCount - 1) {
@@ -151,15 +157,25 @@ export class SpotlightPresentation extends Disposable implements IOnboardingPres
 		}
 	}
 
-	private async _resolveTarget(targetWindow: Window, targetId: string, behavior?: SpotlightMissingTargetBehavior): Promise<HTMLElement | undefined> {
+	private async _resolveTarget(targetWindow: Window, targetId: string, cancellationToken: CancellationToken, behavior?: SpotlightMissingTargetBehavior): Promise<HTMLElement | undefined> {
+		if (cancellationToken.isCancellationRequested) {
+			return undefined;
+		}
 		let element = findOnboardingTarget(targetWindow, targetId);
 		if (element || behavior?.kind === 'skip') {
 			return element;
 		}
 		const timeoutMs = behavior?.kind === 'wait' ? Math.max(0, behavior.timeoutMs) : TARGET_RESOLVE_TIMEOUT;
 		const deadline = Date.now() + timeoutMs;
-		while (!element && Date.now() < deadline) {
-			await timeout(TARGET_POLL_INTERVAL);
+		while (!element && Date.now() < deadline && !cancellationToken.isCancellationRequested) {
+			try {
+				await timeout(TARGET_POLL_INTERVAL, cancellationToken);
+			} catch (error) {
+				if (cancellationToken.isCancellationRequested) {
+					return undefined;
+				}
+				throw error;
+			}
 			element = findOnboardingTarget(targetWindow, targetId);
 		}
 		return element;

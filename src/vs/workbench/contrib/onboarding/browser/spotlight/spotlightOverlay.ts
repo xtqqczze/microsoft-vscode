@@ -97,6 +97,7 @@ export class SpotlightOverlay extends Disposable {
 
 	private _target: HTMLElement | undefined;
 	private _options: ISpotlightShowOptions = {};
+	private _hasShown = false;
 	private _previousFocus: HTMLElement | undefined;
 	private _scheduledLayout: IDisposable | undefined;
 
@@ -164,15 +165,17 @@ export class SpotlightOverlay extends Disposable {
 
 	/** Show `content` spotlighting `target`. */
 	show(target: HTMLElement, content: ISpotlightContent, options: ISpotlightShowOptions = {}): void {
-		const isFirstShow = this._root.style.display === 'none';
-		if (isFirstShow) {
+		if (!this._hasShown) {
+			this._hasShown = true;
 			this._previousFocus = isHTMLElement(getActiveElement()) ? getActiveElement() as HTMLElement : undefined;
 		}
 
 		this._target = target;
 		this._options = options;
 		this._renderContent(content);
-		this._root.classList.toggle('target-overlay-visible', !!options.targetOverlayVisible || !!options.allowTargetInteraction || !!options.advanceOnTargetClick);
+		const externalUiParticipates = !!options.targetOverlayVisible || !!options.allowTargetInteraction || !!options.advanceOnTargetClick || !!options.hideNext;
+		this._root.classList.toggle('target-overlay-visible', externalUiParticipates);
+		this._callout.setAttribute('aria-modal', externalUiParticipates ? 'false' : 'true');
 
 		this._root.style.display = '';
 
@@ -207,7 +210,7 @@ export class SpotlightOverlay extends Disposable {
 		if (advanceOnTargetClick) {
 			this._stepListeners.add(addDisposableListener(target, EventType.CLICK, () => this._onDidClickNext.fire('target')));
 		}
-		if (options.allowTargetInteraction || advanceOnTargetClick) {
+		if (options.allowTargetInteraction || advanceOnTargetClick || options.hideNext) {
 			this._stepListeners.add(addDisposableListener(target, EventType.KEY_DOWN, e => this._onKeyDown(e)));
 		}
 
@@ -216,6 +219,15 @@ export class SpotlightOverlay extends Disposable {
 		// Move focus to the spotlighted control (so keyboard users can activate it
 		// to advance) or, otherwise, into the callout's primary action.
 		(hideNext ? target : this._nextButton.element).focus();
+	}
+
+	/** Hide the current step while another target is being resolved. */
+	hide(): void {
+		this._stepListeners.clear();
+		this._root.style.display = 'none';
+		this._root.classList.remove('target-overlay-visible');
+		this._target = undefined;
+		this._options = {};
 	}
 
 	/** Recompute the hole and callout positions for the current target. */
@@ -424,7 +436,7 @@ export class SpotlightOverlay extends Disposable {
 	 */
 	private _collectFocusable(): HTMLElement[] {
 		const targetFocusables = (this._options.allowTargetInteraction || this._options.advanceOnTargetClick || this._options.hideNext) && this._target
-			// eslint-disable-next-line no-restricted-syntax -- querying our own callout description subtree for focusable markdown content (e.g. links)
+			// eslint-disable-next-line no-restricted-syntax -- querying the spotlight target subtree for focusable controls
 			? [this._target, ...this._target.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
 			: [];
 		const descriptionFocusables = Array.from(
