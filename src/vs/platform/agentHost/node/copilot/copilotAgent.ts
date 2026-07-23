@@ -44,6 +44,7 @@ import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { IAgentHostOTelService } from '../../common/otel/agentHostOTelService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { ICopilotConfigSlashCommandState } from '../../common/copilotConfigSlashCommands.js';
+import { getCopilotHomePath } from '../../common/copilotHome.js';
 import { ISessionDataService, SESSION_DB_FILENAME } from '../../common/sessionDataService.js';
 import { IAgentHostProxyResolver } from '../agentHostProxyResolver.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
@@ -1646,17 +1647,6 @@ export class CopilotAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * Root directory the Copilot CLI uses for per-session state. The CLI stores
-	 * each session's files under `<root>/session-state/<sessionId>/` and resolves
-	 * `<root>` to `$COPILOT_HOME` or `~/.copilot`. The CLI subprocess inherits
-	 * `COPILOT_HOME` from this process's environment (see {@link _ensureClient},
-	 * which never overrides it), so reading it here matches what the CLI sees.
-	 */
-	private _copilotConfigRoot(): string {
-		return process.env['COPILOT_HOME'] || join(os.homedir(), '.copilot');
-	}
-
-	/**
 	 * Materializes an imported conversation into a real, editable Copilot
 	 * session. Translates the supplied turns into a Copilot event log, seeds it
 	 * at the CLI's native per-session store, then resumes the session so the
@@ -1677,7 +1667,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 			// Detect the project concurrently with the (independent) event-log write
 			// so the git probe and file I/O overlap on the session-creation path.
 			const projectPromise = projectFromCopilotContext({ cwd: workingDirectory.fsPath }, this._gitService);
-			const eventsPath = join(this._copilotConfigRoot(), 'session-state', sessionId, 'events.jsonl');
+			const eventsPath = join(getCopilotHomePath(this._environmentService.userHome.fsPath, process.env), 'session-state', sessionId, 'events.jsonl');
 			const jsonl = buildSessionEventLogFromTurns(importConfig.turns, {
 				sessionId,
 				workingDirectory: workingDirectory.fsPath,
