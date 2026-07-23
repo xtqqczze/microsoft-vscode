@@ -262,9 +262,8 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 	private readonly _loadEstimator: ILoadEstimator;
 
 	/**
-	 * Comparison keys of URIs we have already granted implicit
-	 * read access for on this connection. Dedupes repeat sends so we don't
-	 * pile up grants per dispatch. Cleared with the connection.
+	 * URIs we have already granted implicit read access for on this connection.
+	 * Uses URI-aware comparison to dedupe repeat sends and is cleared with the connection.
 	 */
 	private readonly _grantedImplicitReadUris = new ResourceSet();
 
@@ -994,8 +993,13 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 
 	private _grantImplicitReadsForMessage(message: Message): void {
 		for (const attachment of message.attachments ?? []) {
-			if (attachment.type === MessageAttachmentKind.Resource) {
+			if (attachment.type !== MessageAttachmentKind.Resource) {
+				continue;
+			}
+			try {
 				this._grantImplicitRead(URI.parse(attachment.uri));
+			} catch {
+				continue;
 			}
 		}
 	}

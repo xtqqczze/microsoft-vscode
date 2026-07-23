@@ -212,6 +212,13 @@ suite('RemoteAgentHostProtocolClient', () => {
 		await connectPromise;
 	}
 
+	async function flushMicrotasks(): Promise<void> {
+		// `await Promise.resolve()` only advances one microtask; loop to drain chained handlers.
+		for (let i = 0; i < 10; i++) {
+			await Promise.resolve();
+		}
+	}
+
 	function fireConfigurationChange(configurationService: TestConfigurationService, settingId: string): void {
 		configurationService.onDidChangeConfigurationEmitter.fire({
 			source: ConfigurationTarget.USER,
@@ -1018,7 +1025,7 @@ suite('RemoteAgentHostProtocolClient', () => {
 				method: 'resourceRead',
 				params: { channel: ROOT_STATE_URI, uri: attachmentUri.toString() },
 			});
-			await timeout(0);
+			await flushMicrotasks();
 
 			assert.deepStrictEqual(transport.sentMessages.at(-1), {
 				jsonrpc: '2.0',
@@ -1040,6 +1047,7 @@ suite('RemoteAgentHostProtocolClient', () => {
 					origin: { kind: MessageKind.User },
 					attachments: [
 						{ type: MessageAttachmentKind.Resource, uri: 'file:///attachments/queued.txt', label: 'queued.txt' },
+						{ type: MessageAttachmentKind.Resource, uri: 'file:///attachments/invalid%', label: 'invalid.txt' },
 						{ type: MessageAttachmentKind.EmbeddedResource, data: '', contentType: 'text/plain', label: 'inline.txt' },
 					],
 				},
@@ -1155,14 +1163,6 @@ suite('RemoteAgentHostProtocolClient', () => {
 					&& !('id' in m)
 					&& ((m as JsonRpcNotification).params as { action?: { type?: unknown } } | undefined)?.action?.type === actionType,
 			);
-		}
-
-		async function flushMicrotasks(): Promise<void> {
-			// `await Promise.resolve()` only advances one microtask; loop a few times to
-			// drain chained .then handlers without resorting to fake timers.
-			for (let i = 0; i < 10; i++) {
-				await Promise.resolve();
-			}
 		}
 
 		/** Wait until the client transitions into the {@link AgentHostClientState.Reconnecting} state. */
