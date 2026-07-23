@@ -580,6 +580,6 @@ export class OnboardingScenarioService extends Disposable implements IOnboarding
 }
 
 function getAssignmentContextVariant(assignment: string): string {
-	const separatorIndex = assignment.indexOf(':');
+	const separatorIndex = assignment.lastIndexOf(':');
 	return separatorIndex === -1 ? assignment : assignment.slice(0, separatorIndex);
 }
