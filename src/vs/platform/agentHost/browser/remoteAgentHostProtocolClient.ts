@@ -25,7 +25,7 @@ import { agentHostAuthority, fromAgentHostUri, toAgentHostUri } from '../common/
 import { AgentHostResourcePermissionError, IAgentHostResourceService } from '../common/agentHostResourceService.js';
 import type { ClientNotificationMap, CommandMap, JsonRpcErrorResponse, JsonRpcRequest } from '../common/state/protocol/messages.js';
 import { ActionType, type ActionEnvelope, type INotification, type IRootConfigChangedAction, type SessionAction, type ChatAction, type TerminalAction, type ClientAnnotationsAction } from '../common/state/sessionActions.js';
-import { SessionSummary, SessionStatus, ROOT_STATE_URI, StateComponents, isAhpRootChannel, type ClientPluginCustomization, type RootState } from '../common/state/sessionState.js';
+import { MessageAttachmentKind, SessionSummary, SessionStatus, ROOT_STATE_URI, StateComponents, isAhpRootChannel, type ClientPluginCustomization, type Message, type RootState } from '../common/state/sessionState.js';
 import { PROTOCOL_VERSION } from '../common/state/protocol/version/registry.js';
 import { isJsonRpcNotification, isJsonRpcRequest, isJsonRpcResponse, ProtocolError, ReconnectResultType, type ProtocolMessage, type IStateSnapshot } from '../common/state/sessionProtocol.js';
 import { type IVscodeUpgradeResult } from '../common/state/protocolUpgrade.js';
@@ -44,6 +44,7 @@ import type { InitializeResult } from '../common/state/protocol/common/commands.
 import { dirname } from '../../../base/common/resources.js';
 import { observableValue, type IObservable } from '../../../base/common/observable.js';
 import { isFileResourceRead } from '../common/resourceReadLogging.js';
+import { ResourceSet } from '../../../base/common/map.js';
 
 const AHP_CLIENT_CONNECTION_CLOSED = -32000;
 
@@ -261,11 +262,11 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 	private readonly _loadEstimator: ILoadEstimator;
 
 	/**
-	 * Comparison keys of customization URIs we have already granted implicit
+	 * Comparison keys of URIs we have already granted implicit
 	 * read access for on this connection. Dedupes repeat sends so we don't
 	 * pile up grants per dispatch. Cleared with the connection.
 	 */
-	private readonly _grantedCustomizationUris = new Set<string>();
+	private readonly _grantedImplicitReadUris = new ResourceSet();
 
 	get clientId(): string {
 		return this._clientId;
@@ -974,14 +975,28 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 	}
 
 	/**
-	 * Inspect an outgoing client-dispatched action and grant implicit reads
-	 * for any customization URIs it carries. Today this covers
-	 * `SessionActiveClientSet`, which is the only client-dispatched
-	 * action that ships customization URIs to the host.
+	 * Inspect an outgoing client-dispatched action and grant implicit reads for
+	 * resources that the host will need to read after receiving the action.
 	 */
 	private _grantImplicitReadsForOutgoingAction(action: SessionAction | ChatAction | TerminalAction | ClientAnnotationsAction | IRootConfigChangedAction): void {
-		if (action.type === ActionType.SessionActiveClientSet && action.activeClient.customizations) {
-			this._grantImplicitReadsForCustomizations(action.activeClient.customizations);
+		switch (action.type) {
+			case ActionType.SessionActiveClientSet:
+				if (action.activeClient.customizations) {
+					this._grantImplicitReadsForCustomizations(action.activeClient.customizations);
+				}
+				break;
+			case ActionType.ChatTurnStarted:
+			case ActionType.ChatPendingMessageSet:
+				this._grantImplicitReadsForMessage(action.message);
+				break;
+		}
+	}
+
+	private _grantImplicitReadsForMessage(message: Message): void {
+		for (const attachment of message.attachments ?? []) {
+			if (attachment.type === MessageAttachmentKind.Resource) {
+				this._grantImplicitRead(URI.parse(attachment.uri));
+			}
 		}
 	}
 
@@ -999,16 +1014,17 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 			} catch {
 				continue;
 			}
-			const grantUri = dirname(uri);
-			const key = grantUri.toString();
-			if (this._grantedCustomizationUris.has(key)) {
-				continue;
-			}
-			this._grantedCustomizationUris.add(key);
-			// Disposable is owned by the resource service; cleared on
-			// connectionClosed.
-			this._resourceService.grantImplicitRead(this._address, grantUri);
+			this._grantImplicitRead(dirname(uri));
 		}
+	}
+
+	private _grantImplicitRead(uri: URI): void {
+		if (this._grantedImplicitReadUris.has(uri)) {
+			return;
+		}
+		this._grantedImplicitReadUris.add(uri);
+		// The resource service also revokes these grants in connectionClosed.
+		this._resourceService.grantImplicitRead(this._address, uri);
 	}
 
 	/**
@@ -1185,7 +1201,7 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 		}
 		this._rejectPendingRequests(error);
 		this._resourceService.connectionClosed(this._address);
-		this._grantedCustomizationUris.clear();
+		this._grantedImplicitReadUris.clear();
 		this._transitionTo({ kind: AgentHostClientState.Closed, error });
 		this._onDidClose.fire();
 	}
